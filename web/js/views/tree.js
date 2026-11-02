@@ -1,6 +1,8 @@
 import {
   childrenOf,
+  createAncestor,
   createLanguage,
+  createSibling,
   deleteLanguage,
   descendantIds,
   descendantsCount,
@@ -9,6 +11,7 @@ import {
   rootLanguages,
 } from "../model.js";
 import { confirmDialog, esc, icon, openMenu, promptDialog, toast } from "../ui.js";
+import { openReportMenu } from "../report.js";
 
 const NODE_WIDTH = 196;
 const NODE_HEIGHT = 86;
@@ -117,15 +120,52 @@ async function addChild(ctx, language) {
     value: `${language.name} daughter`,
     placeholder: "e.g. Old Coastal",
     confirmLabel: "Create language",
-    help: "Its phonology starts as a copy of the ancestor’s chart. Sound changes and words start empty.",
+    help: "Its chart and syllable template start as a copy of the ancestor’s. Sound changes and words start empty.",
   });
   if (!name) return;
-  const child = createLanguage(name, language.id, language.inventory);
+  const child = createLanguage(name, language.id, language.inventory, language.phonotactics);
   ctx.project.languages.push(child);
   ctx.touch();
   ctx.refresh();
   ctx.navigate(`#/language/${child.id}/overview`);
   toast(`Created ${child.name}. Its chart was copied from ${language.name}.`, { type: "success" });
+}
+
+async function addAncestor(ctx, language) {
+  const name = await promptDialog({
+    title: "Add an ancestor",
+    label: `Name of the language ancestral to ${language.name}`,
+    value: `Proto-${language.name}`,
+    placeholder: "e.g. Proto-Coastal",
+    confirmLabel: "Create ancestor",
+    help: `${language.name} becomes its daughter. Its chart starts as a copy of ${language.name}, so you can work backwards from a descendant.`,
+  });
+  if (!name) return;
+  const ancestor = createAncestor(ctx.project, language.id, name);
+  if (!ancestor) return;
+  ctx.touch();
+  ctx.refresh();
+  ctx.navigate(`#/language/${ancestor.id}/overview`);
+  toast(`Created ${ancestor.name} above ${language.name}.`, { type: "success" });
+}
+
+async function addSibling(ctx, language) {
+  const siblingOf = language.parentId ? "sister" : "sibling root";
+  const name = await promptDialog({
+    title: `Add a ${siblingOf}`,
+    label: `Name of the new language beside ${language.name}`,
+    value: `${language.name} sister`,
+    placeholder: "e.g. Old Inland",
+    confirmLabel: "Create language",
+    help: `It shares ${language.name}'s parent and starts with a copy of its chart.`,
+  });
+  if (!name) return;
+  const sibling = createSibling(ctx.project, language.id, name);
+  if (!sibling) return;
+  ctx.touch();
+  ctx.refresh();
+  ctx.navigate(`#/language/${sibling.id}/overview`);
+  toast(`Created ${sibling.name} beside ${language.name}.`, { type: "success" });
 }
 
 async function renameLanguage(ctx, language) {
@@ -179,6 +219,8 @@ function openNodeMenu(ctx, anchor, language) {
   openMenu(anchor, [
     { label: "Open language", icon: "edit", onClick: () => ctx.navigate(`#/language/${language.id}/overview`) },
     { label: "Add daughter", icon: "plus", onClick: () => addChild(ctx, language) },
+    { label: "Add sibling", icon: "plus", onClick: () => addSibling(ctx, language) },
+    { label: "Add ancestor", icon: "arrowUp", onClick: () => addAncestor(ctx, language) },
     { separator: true },
     { label: "Rename", icon: "edit", onClick: () => renameLanguage(ctx, language) },
     { label: "Delete branch…", icon: "trash", danger: true, onClick: () => removeLanguage(ctx, language) },
@@ -209,6 +251,7 @@ export function renderTree(container, ctx) {
           <p class="page-subtitle">${stats.languages} language${stats.languages === 1 ? "" : "s"} · ${stats.rules} sound change${stats.rules === 1 ? "" : "s"} · ${stats.words} word${stats.words === 1 ? "" : "s"}</p>
         </div>
         <div class="page-actions">
+          <button class="button button-quiet" type="button" id="report-menu" title="Download a Markdown or HTML report of the family, or a JSON backup" aria-label="Download report or backup">${icon("download")}<span>Report / backup</span></button>
           <button class="button button-quiet" type="button" id="fit-tree">${icon("fit")}<span>Fit</span></button>
           <button class="button button-primary" type="button" id="add-root">${icon("plus")}<span>New root language</span></button>
         </div>
@@ -264,6 +307,11 @@ export function renderTree(container, ctx) {
 
   container.querySelector("#add-root")?.addEventListener("click", addRoot);
   container.querySelector("#empty-add-root")?.addEventListener("click", addRoot);
+
+  const reportButton = container.querySelector("#report-menu");
+  if (reportButton) {
+    reportButton.addEventListener("click", () => openReportMenu(reportButton, ctx.project));
+  }
 
   const viewport = container.querySelector("#tree-viewport");
   if (!viewport) return;

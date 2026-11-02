@@ -2,7 +2,9 @@ import {
   ancestorsOf,
   canSetParent,
   childrenOf,
+  createAncestor,
   createLanguage,
+  createSibling,
   deleteLanguage,
   descendantIds,
   descendantsCount,
@@ -20,12 +22,14 @@ import {
   toast,
 } from "../ui.js";
 import { renderInventory } from "./inventory.js";
+import { renderPhonotactics } from "./phonotactics.js";
 import { renderChanges } from "./soundchanges.js";
 import { renderVocabulary } from "./vocabulary.js";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "phonology", label: "Phonology" },
+  { id: "phonotactics", label: "Phonotactics" },
   { id: "changes", label: "Sound changes" },
   { id: "vocabulary", label: "Vocabulary" },
 ];
@@ -42,6 +46,8 @@ function headerActions(ctx) {
   openMenu(ctx.anchor, [
     { label: "Open in family tree", icon: "tree", onClick: () => ctx.navigate("#/tree") },
     { label: "Add daughter language", icon: "plus", onClick: () => addDaughter(ctx) },
+    { label: "Add sibling language", icon: "plus", onClick: () => addSibling(ctx) },
+    { label: "Add ancestor language", icon: "arrowUp", onClick: () => addAncestor(ctx) },
     { separator: true },
     { label: "Delete language…", icon: "trash", danger: true, onClick: () => deleteCurrent(ctx) },
   ]);
@@ -57,12 +63,49 @@ async function addDaughter(ctx) {
     help: "Its chart is copied from this language. Sound changes and vocabulary start empty.",
   });
   if (!name) return;
-  const child = createLanguage(name, ctx.language.id, ctx.language.inventory);
+  const child = createLanguage(name, ctx.language.id, ctx.language.inventory, ctx.language.phonotactics);
   ctx.project.languages.push(child);
   ctx.touch();
   ctx.refresh();
   ctx.navigate(languageTabHref(child, "overview"));
   toast(`Created ${child.name}.`, { type: "success" });
+}
+
+async function addAncestor(ctx) {
+  const name = await promptDialog({
+    title: "Add an ancestor language",
+    label: `Name of the language ancestral to ${ctx.language.name}`,
+    value: `Proto-${ctx.language.name}`,
+    placeholder: "e.g. Proto-Coastal",
+    confirmLabel: "Create ancestor",
+    help: `${ctx.language.name} becomes its daughter. Its chart starts as a copy of ${ctx.language.name}, so you can work backwards from a descendant.`,
+  });
+  if (!name) return;
+  const ancestor = createAncestor(ctx.project, ctx.language.id, name);
+  if (!ancestor) return;
+  ctx.touch();
+  ctx.refresh();
+  ctx.navigate(languageTabHref(ancestor, "overview"));
+  toast(`Created ${ancestor.name} above ${ctx.language.name}.`, { type: "success" });
+}
+
+async function addSibling(ctx) {
+  const siblingOf = ctx.language.parentId ? "sister language" : "sibling root language";
+  const name = await promptDialog({
+    title: `Add a ${siblingOf}`,
+    label: `Name of the new language beside ${ctx.language.name}`,
+    value: `${ctx.language.name} sister`,
+    placeholder: "e.g. Old Inland",
+    confirmLabel: "Create language",
+    help: `It shares ${ctx.language.name}'s parent and starts with a copy of its chart.`,
+  });
+  if (!name) return;
+  const sibling = createSibling(ctx.project, ctx.language.id, name);
+  if (!sibling) return;
+  ctx.touch();
+  ctx.refresh();
+  ctx.navigate(languageTabHref(sibling, "overview"));
+  toast(`Created ${sibling.name} beside ${ctx.language.name}.`, { type: "success" });
 }
 
 async function renameLanguage(ctx) {
@@ -273,6 +316,10 @@ function renderOverview(content, ctx) {
                   .join("")}
               </div>
             </div>
+            <div class="lineage-actions">
+              <button class="button button-quiet button-small" type="button" data-add-ancestor>${icon("arrowUp")}<span>Add ancestor</span></button>
+              <button class="button button-quiet button-small" type="button" data-add-sibling>${icon("plus")}<span>Add sibling</span></button>
+            </div>
           </div>
         </section>
 
@@ -284,6 +331,7 @@ function renderOverview(content, ctx) {
           </header>
           <div class="quick-links">
             <button type="button" data-goto-tab="phonology"><span class="quick-icon">${icon("grid")}</span><span><strong>Open the charts</strong><small>Add consonants and vowels</small></span>${icon("chevronRight")}</button>
+            <button type="button" data-goto-tab="phonotactics"><span class="quick-icon">${icon("sliders")}</span><span><strong>Set phonotactics</strong><small>Syllable template and word checks</small></span>${icon("chevronRight")}</button>
             <button type="button" data-goto-tab="changes"><span class="quick-icon">${icon("sound")}</span><span><strong>Write sound changes</strong><small>Ordered rules from the ancestor</small></span>${icon("chevronRight")}</button>
             <button type="button" data-goto-tab="vocabulary"><span class="quick-icon">${icon("book")}</span><span><strong>Add vocabulary</strong><small>Test the rules on real forms</small></span>${icon("chevronRight")}</button>
           </div>
@@ -304,6 +352,14 @@ function renderOverview(content, ctx) {
 
   content.querySelectorAll("[data-add-daughter]").forEach((button) => {
     button.addEventListener("click", () => addDaughter(ctx));
+  });
+
+  content.querySelectorAll("[data-add-ancestor]").forEach((button) => {
+    button.addEventListener("click", () => addAncestor(ctx));
+  });
+
+  content.querySelectorAll("[data-add-sibling]").forEach((button) => {
+    button.addEventListener("click", () => addSibling(ctx));
   });
 
   const parentSelect = content.querySelector("[data-parent-select]");
@@ -345,6 +401,7 @@ export function renderLanguage(container, ctx, tabValue) {
   });
 
   if (activeTab === "phonology") renderInventory(content, ctx);
+  else if (activeTab === "phonotactics") renderPhonotactics(content, ctx);
   else if (activeTab === "changes") renderChanges(content, ctx);
   else if (activeTab === "vocabulary") renderVocabulary(content, ctx);
   else renderOverview(content, ctx);

@@ -86,6 +86,29 @@ export class SegmentContext {
   }
 }
 
+export function contextForInventory(inventory) {
+  const known = new Set();
+  const vowels = new Set();
+  const consonants = new Set();
+  for (const phoneme of chartPhonemeList(inventory.vowels)) {
+    vowels.add(phoneme);
+    known.add(phoneme);
+    const base = firstBase(phoneme);
+    if (base) known.add(base);
+  }
+  for (const phoneme of chartPhonemeList(inventory.consonants)) {
+    consonants.add(phoneme);
+    known.add(phoneme);
+    const base = firstBase(phoneme);
+    if (base) known.add(base);
+  }
+  return new SegmentContext({ known: [...known], vowels: [...vowels], consonants: [...consonants] });
+}
+
+// Rule application reads the whole lineage because an ancestral sound may
+// still be a valid environment in a later language. Phonotactic checks are
+// about the language's own synchronic inventory, so they use this narrower
+// context instead.
 export function contextForLanguage(project, languageId) {
   const lineage = getLineage(project, languageId);
   const known = new Set();
@@ -336,6 +359,30 @@ export function compileRuleChain(project, languageId) {
     }
   }
   return { context, compiled, lineage };
+}
+
+// The cognate explorer derives one ancestor word in every language it reaches.
+// The chain is the ordered set of rules on the path strictly below the source:
+// the source's own rules are already baked into its recorded forms, and each
+// later language applies its own rules to what it receives — the same
+// convention the inherited check uses for a single step, extended down the
+// tree. Languages outside the source's line of descent have no chain.
+export function compileChainFrom(project, sourceId, targetId) {
+  const lineage = getLineage(project, targetId);
+  const sourceIndex = lineage.findIndex((language) => language.id === sourceId);
+  if (sourceIndex === -1) {
+    return { ok: false, reason: "not-descended", lineage, compiled: [], context: null };
+  }
+  const context = contextForLanguage(project, targetId);
+  const compiled = [];
+  for (const sourceLanguage of lineage.slice(sourceIndex + 1)) {
+    for (const rule of sourceLanguage.soundChanges) {
+      if (rule.enabled === false) continue;
+      const result = compileRule(rule.notation, context);
+      compiled.push({ ...result, sourceRule: rule, sourceLanguage });
+    }
+  }
+  return { ok: true, reason: "", lineage, sourceIndex, compiled, context };
 }
 
 export function deriveTokens(inputTokens, compiledRules, context) {

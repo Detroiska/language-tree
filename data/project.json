@@ -2,11 +2,11 @@
   "version": 1,
   "title": "Untitled language family",
   "createdAt": "2026-11-02T06:15:57Z",
-  "updatedAt": "2026-11-02T06:16:09Z",
+  "updatedAt": "2026-11-02T16:24:06Z",
   "languages": [
     {
       "id": "lang_ae5c0ecc-f672-47a8-90f3-7b7bef5302e7",
-      "name": "Proto-Language",
+      "name": "Proto-Macro-Meric",
       "parentId": null,
       "notes": "",
       "inventory": {
@@ -15,7 +15,18 @@
             {
               "id": "row_4cacaaad-6022-49b7-a717-6f1632525b30",
               "label": "Plosive",
-              "children": []
+              "children": [
+                {
+                  "id": "row_8df4fe2e-1c83-401f-a3ea-857d649d2060",
+                  "label": "Plain",
+                  "children": []
+                },
+                {
+                  "id": "row_b1720754-e143-442f-b39f-42d9c063bf82",
+                  "label": "Prenasal",
+                  "children": []
+                }
+              ]
             },
             {
               "id": "row_d6e40dcf-d90b-4aca-8d8a-a1d86ac41e6c",
@@ -33,18 +44,8 @@
               "children": []
             },
             {
-              "id": "row_923915ca-a2ca-4de3-8836-ce3ad372302b",
-              "label": "Tap / flap",
-              "children": []
-            },
-            {
               "id": "row_68ee25af-534d-437c-966b-00693680e4b5",
               "label": "Fricative",
-              "children": []
-            },
-            {
-              "id": "row_7dae723c-7b3d-45f8-bc50-a5e680774279",
-              "label": "Lateral fricative",
               "children": []
             },
             {
@@ -62,31 +63,38 @@
             {
               "id": "col_7047260d-d437-4180-8821-56db2cbf79ee",
               "label": "Bilabial",
-              "children": []
-            },
-            {
-              "id": "col_523a3d82-ed8c-476e-84f1-b57b99a1f873",
-              "label": "Labiodental",
-              "children": []
+              "children": [
+                {
+                  "id": "col_d1da4434-c444-47b6-a76f-810d1748b0b0",
+                  "label": "Plain",
+                  "children": []
+                },
+                {
+                  "id": "col_ec4c946e-4b69-44fc-ad03-bff82098f272",
+                  "label": "aspirated",
+                  "children": []
+                }
+              ]
             },
             {
               "id": "col_0f0b9dbe-1c39-4c10-8052-1dc0d632470f",
-              "label": "Dental",
-              "children": []
+              "label": "Dental/Alveolar",
+              "children": [
+                {
+                  "id": "col_4b5f8678-9384-462b-b012-e4d9d9a23979",
+                  "label": "Plain",
+                  "children": []
+                },
+                {
+                  "id": "col_3b58e0e2-8e71-49b1-86c3-bcbcc97b8320",
+                  "label": "Aspirated",
+                  "children": []
+                }
+              ]
             },
             {
-              "id": "col_06f7a7c3-f247-4235-b616-d8960a1b7787",
-              "label": "Alveolar",
-              "children": []
-            },
-            {
-              "id": "col_1a79a72d-6616-4686-a0a4-91f4464c0d63",
+              "id": "col_e41e3adb-69e8-4548-aeb0-5954b2e9c3c5",
               "label": "Postalveolar",
-              "children": []
-            },
-            {
-              "id": "col_42da1aff-c593-45ed-ba71-dba8fe34ce1a",
-              "label": "Retroflex",
               "children": []
             },
             {
@@ -97,17 +105,18 @@
             {
               "id": "col_37eb885c-4eae-4ddd-be1e-120d53ab99f6",
               "label": "Velar",
-              "children": []
-            },
-            {
-              "id": "col_2f4ec4d9-f97e-43df-9084-d8d973c73371",
-              "label": "Uvular",
-              "children": []
-            },
-            {
-              "id": "col_e88c625b-711a-4e02-b5f9-dd845dd216d9",
-              "label": "Pharyngeal",
-              "children": []
+              "children": [
+                {
+                  "id": "col_1a328d0e-52cc-4ba7-960a-32f518c726cf",
+                  "label": "Plain",
+                  "children": []
+                },
+                {
+                  "id": "col_d5feb057-fa52-4afb-8d1b-fcea6e226c01",
+                  "label": "aspirated",
+                  "children": []
+                }
+              ]
             },
             {
               "id": "col_b302168b-a6b7-4721-a09c-69d4005660df",
@@ -115,7 +124,62 @@
               "children": []
             }
           ],
-          "cells": {},
+          "cells": {
+            "row_65b56e9f-3d71-4d81-9c26-4b97aa170289|col_75ba5530-7de3-43eb-9903-1d67e5ada8a0": [
+              "j"
+            ],
+            "row_65b56e9f-3d71-4d81-9c26-4b97aa170289|col_1a328d0e-52cc-4ba7-960a-32f518c726cf": [
+              "w"
+            ],
+            "row_8df4fe2e-1c83-401f-a3ea-857d649d2060|col_d1da4434-c444-47b6-a76f-810d1748b0b0": [
+              "p"
+            ],
+            "row_8df4fe2e-1c83-401f-a3ea-857d649d2060|col_ec4c946e-4b69-44fc-ad03-bff82098f272": [
+              "pʰ"
+            ],
+            "row_8df4fe2e-1c83-401f-a3ea-857d649d2060|col_1a328d0e-52cc-4ba7-960a-32f518c726cf": [
+              "k"
+            ],
+            "row_8df4fe2e-1c83-401f-a3ea-857d649d2060|col_d5feb057-fa52-4afb-8d1b-fcea6e226c01": [
+              "kʰ"
+            ],
+            "row_b1720754-e143-442f-b39f-42d9c063bf82|col_d1da4434-c444-47b6-a76f-810d1748b0b0": [
+              "m͜b"
+            ],
+            "row_af542271-3d49-494e-8456-9519cc989b48|col_d1da4434-c444-47b6-a76f-810d1748b0b0": [
+              "m"
+            ],
+            "row_2ec91b28-a06f-4e2d-bc09-e0fe4c241634|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "r"
+            ],
+            "row_68ee25af-534d-437c-966b-00693680e4b5|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "s"
+            ],
+            "row_d6e40dcf-d90b-4aca-8d8a-a1d86ac41e6c|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "t͡s"
+            ],
+            "row_8df4fe2e-1c83-401f-a3ea-857d649d2060|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "t"
+            ],
+            "row_8df4fe2e-1c83-401f-a3ea-857d649d2060|col_3b58e0e2-8e71-49b1-86c3-bcbcc97b8320": [
+              "tʰ"
+            ],
+            "row_b1720754-e143-442f-b39f-42d9c063bf82|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "n͜d"
+            ],
+            "row_af542271-3d49-494e-8456-9519cc989b48|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "n"
+            ],
+            "row_c1085234-7b16-402f-9b61-5ff7557f53fe|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "l"
+            ],
+            "row_d6e40dcf-d90b-4aca-8d8a-a1d86ac41e6c|col_e41e3adb-69e8-4548-aeb0-5954b2e9c3c5": [
+              "t͡ʃ"
+            ],
+            "row_68ee25af-534d-437c-966b-00693680e4b5|col_b302168b-a6b7-4721-a09c-69d4005660df": [
+              "h"
+            ]
+          },
           "notes": ""
         },
         "vowels": {
@@ -126,28 +190,8 @@
               "children": []
             },
             {
-              "id": "row_584dd1fb-ae5c-43ef-9006-cde121a933ec",
-              "label": "Near-close",
-              "children": []
-            },
-            {
               "id": "row_35a462cd-dac3-43f0-ac6e-2c726dc8770b",
-              "label": "Close-mid",
-              "children": []
-            },
-            {
-              "id": "row_4bdefb88-968e-49fc-888e-f07296d97114",
               "label": "Mid",
-              "children": []
-            },
-            {
-              "id": "row_4bab40d0-39f1-4042-b9be-ee31fdd6af85",
-              "label": "Open-mid",
-              "children": []
-            },
-            {
-              "id": "row_482118d7-03b9-4f23-88c2-93bdfe1980c9",
-              "label": "Near-open",
               "children": []
             },
             {
@@ -162,13 +206,13 @@
               "label": "Front",
               "children": [
                 {
-                  "id": "col_492dcd64-0391-4aff-94d5-01150dfaeeaf",
-                  "label": "Unrounded",
+                  "id": "col_18c42b70-23f5-46a5-9d5a-532429c06360",
+                  "label": "Short",
                   "children": []
                 },
                 {
-                  "id": "col_9de00a19-b3ee-4199-9400-df46bada40ae",
-                  "label": "Rounded",
+                  "id": "col_1df0105c-66eb-44d8-8783-da69c400f05f",
+                  "label": "Long",
                   "children": []
                 }
               ]
@@ -178,13 +222,13 @@
               "label": "Central",
               "children": [
                 {
-                  "id": "col_812a2b61-7bb4-44d3-a4e9-4c02f1b75ff3",
-                  "label": "Unrounded",
+                  "id": "col_01cfb8eb-979c-4e71-9fa8-1c40a8d8a06d",
+                  "label": "Short",
                   "children": []
                 },
                 {
-                  "id": "col_f6977c28-8131-4c36-952f-45e5e82ec5b8",
-                  "label": "Rounded",
+                  "id": "col_f31e6559-865f-44ac-ae36-b1077ee4f6ad",
+                  "label": "Long",
                   "children": []
                 }
               ]
@@ -194,25 +238,119 @@
               "label": "Back",
               "children": [
                 {
-                  "id": "col_ae1075bd-7c14-4c96-8139-f159fb6288b9",
-                  "label": "Unrounded",
+                  "id": "col_e46d1e97-f77d-4375-b0ea-34d918f2f1c3",
+                  "label": "Short",
                   "children": []
                 },
                 {
-                  "id": "col_eab36159-ef86-4872-9cbb-41cd88389560",
-                  "label": "Rounded",
+                  "id": "col_2a6b695d-16a0-48d1-abed-263034dd8981",
+                  "label": "Long",
                   "children": []
                 }
               ]
             }
           ],
-          "cells": {},
+          "cells": {
+            "row_ec206498-a7da-47a1-935d-7f4780691d9c|col_18c42b70-23f5-46a5-9d5a-532429c06360": [
+              "i"
+            ],
+            "row_35a462cd-dac3-43f0-ac6e-2c726dc8770b|col_18c42b70-23f5-46a5-9d5a-532429c06360": [
+              "e"
+            ],
+            "row_3bca4f62-d687-4399-b867-e8e737b2993e|col_01cfb8eb-979c-4e71-9fa8-1c40a8d8a06d": [
+              "a"
+            ],
+            "row_ec206498-a7da-47a1-935d-7f4780691d9c|col_e46d1e97-f77d-4375-b0ea-34d918f2f1c3": [
+              "u"
+            ],
+            "row_35a462cd-dac3-43f0-ac6e-2c726dc8770b|col_e46d1e97-f77d-4375-b0ea-34d918f2f1c3": [
+              "o"
+            ],
+            "row_ec206498-a7da-47a1-935d-7f4780691d9c|col_1df0105c-66eb-44d8-8783-da69c400f05f": [
+              "iː"
+            ],
+            "row_35a462cd-dac3-43f0-ac6e-2c726dc8770b|col_1df0105c-66eb-44d8-8783-da69c400f05f": [
+              "eː"
+            ],
+            "row_3bca4f62-d687-4399-b867-e8e737b2993e|col_f31e6559-865f-44ac-ae36-b1077ee4f6ad": [
+              "aː"
+            ],
+            "row_ec206498-a7da-47a1-935d-7f4780691d9c|col_2a6b695d-16a0-48d1-abed-263034dd8981": [
+              "uː"
+            ],
+            "row_35a462cd-dac3-43f0-ac6e-2c726dc8770b|col_2a6b695d-16a0-48d1-abed-263034dd8981": [
+              "oː"
+            ]
+          },
           "notes": ""
         }
       },
-      "soundChanges": [],
-      "vocabulary": [],
-      "createdAt": "2026-11-02T06:16:09.190Z"
+      "soundChanges": [
+        {
+          "id": "rule_4edddc0c-a8a4-43c3-ac15-0c33ede3c06d",
+          "notation": "ŋ > n / _ [^u, o]",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "rule_05a88b97-1379-4f4e-ac9b-2a9dd5c57356",
+          "notation": "ŋ > m / _ [u, o]",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "rule_34120477-ce3e-4736-a7e0-7cf5aabaea7f",
+          "notation": "ŋ͡g > n͜d / _ [^u, o]",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "rule_2f17bb60-366e-4131-859d-9292db24caea",
+          "notation": "ŋ͡g > m͜b / _ [u, o]",
+          "note": "",
+          "enabled": true
+        }
+      ],
+      "vocabulary": [
+        {
+          "id": "word_825c4256-9880-4723-ad75-03f7942ce35e",
+          "gloss": "I",
+          "form": "lia",
+          "note": ""
+        },
+        {
+          "id": "word_da3e5f26-10cf-482a-b15b-6dc482a91df9",
+          "gloss": "We",
+          "form": "t͡ʃuːa",
+          "note": ""
+        },
+        {
+          "id": "word_8ffacf41-74d3-443f-a2af-d2767c6275e5",
+          "gloss": "You (sg)",
+          "form": "n͜da",
+          "note": ""
+        },
+        {
+          "id": "word_9e0a0674-643d-43af-b4ff-9fd88ef682d8",
+          "gloss": "You (pl)",
+          "form": "raː",
+          "note": ""
+        },
+        {
+          "id": "word_1a1b99fd-0f22-4794-91f1-f21700ae32ec",
+          "gloss": "He/she",
+          "form": "hetʰo",
+          "note": ""
+        }
+      ],
+      "createdAt": "2026-11-02T06:16:09.190Z",
+      "phonotactics": {
+        "template": "(C)V(C)",
+        "onsets": "",
+        "codas": "",
+        "forbidden": "",
+        "notes": ""
+      }
     }
   ]
 }

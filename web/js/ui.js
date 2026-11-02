@@ -27,7 +27,10 @@ const paths = {
   sparkles: '<path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 3ZM19 14l.7 2.3L22 17l-2.3.7L19 20l-.7-2.3L16 17l2.3-.7L19 14Z"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
+  download: '<path d="M12 4v11M7 10.5l5 5 5-5"/><path d="M4.5 19.5h15"/>',
   undo: '<path d="M9 7 4 12l5 5"/><path d="M4 12h9a6 6 0 0 1 6 6v1"/>',
+  redo: '<path d="m15 7 5 5-5 5"/><path d="M20 12h-9a6 6 0 0 0-6 6v1"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5H5V5h5"/>',
   refresh: '<path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M18.4 9A7.5 7.5 0 0 0 5.8 6.2L4 8M5.6 15A7.5 7.5 0 0 0 18.2 17.8L20 16"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
@@ -198,7 +201,7 @@ export function promptDialog({ title, label, value = "", placeholder = "", confi
           <label class="field">
             <span class="field-label">${esc(label)}</span>
             <input class="input" name="value" value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false">
-            ${help ? `<span class="field-help">${help}</span>` : ""}
+            ${help ? `<span class="field-help">${esc(help)}</span>` : ""}
           </label>
         </form>
       `,

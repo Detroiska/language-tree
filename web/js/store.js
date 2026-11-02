@@ -1,7 +1,12 @@
 import { api } from "./api.js";
-import { ensureProject } from "./model.js";
+import { deepClone, ensureProject } from "./model.js";
 
 const SAVE_DELAY = 280;
+// Rapid edits (keystrokes in one field, quick consecutive actions) merge into
+// a single undo step; a pause longer than this starts a new step.
+const HISTORY_COALESCE_MS = 500;
+// Snapshots are deep-cloned full documents; keep the stack bounded.
+const HISTORY_LIMIT = 100;
 
 class ProjectStore {
   project = null;
@@ -11,10 +16,20 @@ class ProjectStore {
   saving = false;
   saveState = "loading";
   saveError = "";
+  // #undoStack holds per-burst pre-edit states to undo into; #redoStack holds
+  // states to redo into after an undo. #lastState is the pre-edit state of
+  // the burst currently in progress; it becomes the next undo step on the
+  // next burst boundary.
+  #undoStack = [];
+  #redoStack = [];
+  #lastState = null;
+  #lastTouchAt = 0;
+  #recording = false;
   #timer = null;
   #inFlight = false;
   #pending = false;
   #statusListeners = new Set();
+  #historyListeners = new Set();
 
   async load() {
     const raw = await api.loadProject();
@@ -23,10 +38,19 @@ class ProjectStore {
     const after = JSON.stringify(this.project);
     this.revision = 0;
     this.savedRevision = 0;
+    this.#undoStack = [];
+    this.#redoStack = [];
+    this.#lastState = deepClone(this.project);
     this.setSaveState("saved");
     if (before !== after || !raw.languages?.length) {
       this.touch({ immediate: true });
     }
+    // History starts only after loading: the loader's normalizing save is not
+    // an edit the user made, so nothing should be undoable past this point.
+    this.#lastState = deepClone(this.project);
+    this.#lastTouchAt = 0;
+    this.#recording = true;
+    this.#notifyHistory();
     return this.project;
   }
 
@@ -34,6 +58,7 @@ class ProjectStore {
     if (!this.project) return;
     this.revision += 1;
     this.project.updatedAt = new Date().toISOString();
+    if (this.#recording) this.#recordHistory();
     this.setSaveState(this.#inFlight ? "saving" : "pending");
     if (options.immediate) {
       this.flush();
@@ -41,6 +66,61 @@ class ProjectStore {
     }
     window.clearTimeout(this.#timer);
     this.#timer = window.setTimeout(() => this.flush(), SAVE_DELAY);
+  }
+
+  // Called after a mutation (views edit first, then call touch()): pushes the
+  // pre-edit state as an undo step unless this edit continues an active burst.
+  #recordHistory() {
+    const now = Date.now();
+    const coalesce = this.#undoStack.length > 0 && now - this.#lastTouchAt <= HISTORY_COALESCE_MS;
+    if (!coalesce) {
+      this.#undoStack.push({ document: this.#lastState, time: now });
+      if (this.#undoStack.length > HISTORY_LIMIT) this.#undoStack.shift();
+      this.#redoStack = [];
+    }
+    this.#lastTouchAt = now;
+    this.#lastState = deepClone(this.project);
+    this.#notifyHistory();
+  }
+
+  canUndo() {
+    return this.#undoStack.length > 0;
+  }
+
+  canRedo() {
+    return this.#redoStack.length > 0;
+  }
+
+  undo() {
+    if (!this.project || !this.#undoStack.length) return false;
+    const entry = this.#undoStack.pop();
+    this.#redoStack.push({ document: deepClone(this.project), time: Date.now() });
+    this.#applyHistory(entry.document);
+    return true;
+  }
+
+  redo() {
+    if (!this.project || !this.#redoStack.length) return false;
+    const entry = this.#redoStack.pop();
+    this.#undoStack.push({ document: deepClone(this.project), time: Date.now() });
+    if (this.#undoStack.length > HISTORY_LIMIT) this.#undoStack.shift();
+    this.#applyHistory(entry.document);
+    return true;
+  }
+
+  // Restoring a snapshot is a document change like any other: it marks the
+  // store dirty so the reverted state is written back to the project file,
+  // but it never adds another history step of its own.
+  #applyHistory(document) {
+    this.project = deepClone(document);
+    this.#lastState = deepClone(this.project);
+    this.#lastTouchAt = 0;
+    this.revision += 1;
+    this.project.updatedAt = new Date().toISOString();
+    this.setSaveState(this.#inFlight ? "saving" : "pending");
+    window.clearTimeout(this.#timer);
+    this.#timer = window.setTimeout(() => this.flush(), SAVE_DELAY);
+    this.#notifyHistory();
   }
 
   async flush() {
@@ -59,8 +139,10 @@ class ProjectStore {
     this.setSaveState("saving");
     const revisionAtStart = this.revision;
     const snapshot = JSON.parse(JSON.stringify(this.project));
+    let saved = false;
     try {
       const result = await api.saveProject(snapshot);
+      saved = true;
       this.savedRevision = revisionAtStart;
       if (result?.savedAt) this.project.updatedAt = snapshot.updatedAt;
       this.saveError = "";
@@ -72,11 +154,15 @@ class ProjectStore {
     } finally {
       this.#inFlight = false;
       this.saving = false;
-      if (this.#pending || this.revision !== this.savedRevision) {
-        this.#pending = false;
+      // A successful save with newer edits should roll forward. A failed save
+      // must wait for a real retry (the save indicator, the next edit, or a
+      // visibility/unload flush); retrying on a timer would hammer the server
+      // and keep the error state from ever being visible.
+      if (saved && (this.#pending || this.revision !== this.savedRevision)) {
         window.clearTimeout(this.#timer);
         this.#timer = window.setTimeout(() => this.flush(), SAVE_DELAY);
       }
+      this.#pending = false;
     }
   }
 
@@ -93,6 +179,16 @@ class ProjectStore {
     this.#statusListeners.add(listener);
     listener(this.saveState, this.saveError);
     return () => this.#statusListeners.delete(listener);
+  }
+
+  onHistory(listener) {
+    this.#historyListeners.add(listener);
+    listener();
+    return () => this.#historyListeners.delete(listener);
+  }
+
+  #notifyHistory() {
+    for (const listener of this.#historyListeners) listener();
   }
 
   navigate(hash) {

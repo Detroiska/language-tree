@@ -1,6 +1,8 @@
 import { ancestorsOf, uid } from "../model.js";
+import { applyWordList, copyWords, downloadWords, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
 import { deriveForm } from "../phonology.js";
-import { esc, icon, toast } from "../ui.js";
+import { createPhonotacticsChecker } from "../phonotactics.js";
+import { esc, icon, openModal, toast } from "../ui.js";
 
 function parentFor(ctx) {
   return ancestorsOf(ctx.project, ctx.language.id).at(-1) || null;
@@ -42,11 +44,241 @@ function updateRowCheck(row, ctx, word, parent) {
   cell.innerHTML = checkCellMarkup(word, expectedFor(ctx, word, parent));
 }
 
+function phonotacticStatus(result) {
+  if (result.empty) return "empty";
+  if (result.templateError) return "template-error";
+  if (result.issues.length) return "invalid";
+  if (!result.checked) return "off";
+  return "valid";
+}
+
+function phonotacticCellMarkup(result) {
+  const status = phonotacticStatus(result);
+  if (status === "empty") return `<span class="muted">—</span>`;
+  if (status === "template-error") {
+    return `<span class="status-chip status-differs" title="${esc(result.templateError)}">${icon("warning")}Template error</span>`;
+  }
+  if (status === "invalid") {
+    const title = result.issues.map((issue) => issue.message).join("\n");
+    return `<span class="status-chip status-invalid" title="${esc(title)}">${icon("warning")}Invalid</span>`;
+  }
+  if (status === "off") {
+    return `<span class="status-chip status-missing" title="No syllable template is set">${icon("info")}Checks off</span>`;
+  }
+  return `<span class="status-chip status-match" title="Fits the inventory and syllable template">${icon("check")}Valid</span>`;
+}
+
+function phonotacticIssueMarkup(result) {
+  if (!result.issues.length || result.empty) return "";
+  const first = result.issues[0].message;
+  const extra = result.issues.length > 1 ? ` · +${result.issues.length - 1} more` : "";
+  return `<span class="word-issue" title="${esc(result.issues.map((issue) => issue.message).join("\n"))}">${esc(first + extra)}</span>`;
+}
+
+function validitySummary(words, checker) {
+  if (checker.compiled.empty) return "syllable template off";
+  if (!checker.compiled.ok) return "template error";
+  let recorded = 0;
+  let valid = 0;
+  let invalid = 0;
+  for (const word of words) {
+    const result = checker.validate(word.form);
+    if (result.empty) continue;
+    recorded += 1;
+    const status = phonotacticStatus(result);
+    if (status === "valid") valid += 1;
+    if (status === "invalid") invalid += 1;
+  }
+  return `${valid}/${recorded} forms valid${invalid ? ` · ${invalid} invalid` : ""}`;
+}
+
+function updateRowPhonotactics(row, result) {
+  const cell = row.querySelector("[data-word-phonotactics]");
+  if (cell) cell.innerHTML = phonotacticCellMarkup(result);
+  const issue = row.querySelector("[data-word-issue]");
+  if (issue) issue.innerHTML = phonotacticIssueMarkup(result);
+}
+
+/* ---- Bulk import / export -------------------------------------------- */
+
+const BULK_STATUS_META = {
+  add: { label: "Add", cls: "status-match" },
+  update: { label: "Update", cls: "status-differs" },
+  skip: { label: "Keep", cls: "status-missing" },
+  invalid: { label: "Invalid", cls: "status-differs" },
+};
+
+function bulkPreviewMarkup(rows, language, mode) {
+  const verdicts = rows.map((row) => ({ row, verdict: rowStatus(row, language, mode) }));
+  const counts = { add: 0, update: 0, skip: 0, invalid: 0 };
+  for (const { verdict } of verdicts) counts[verdict.status] += 1;
+  const items = verdicts
+    .slice(0, 50)
+    .map(({ row, verdict }) => {
+      const meta = BULK_STATUS_META[verdict.status];
+      return `
+        <div class="bulk-row">
+          <span class="status-chip ${meta.cls}">${meta.label}</span>
+          <span class="bulk-row-gloss">${esc(row.gloss || "(no gloss)")}</span>
+          <code class="ipa bulk-row-form">${esc(row.form) || "∅"}</code>
+          ${row.note ? `<span class="bulk-row-note">${esc(row.note)}</span>` : ""}
+          <span class="bulk-row-reason" title="${esc(verdict.reason)}">${esc(verdict.reason)}</span>
+        </div>`;
+    })
+    .join("");
+  const overflow = verdicts.length > 50 ? `<p class="bulk-more">…and ${verdicts.length - 50} more rows.</p>` : "";
+  const summary = [
+    counts.add ? `${counts.add} to add` : "",
+    counts.update ? `${counts.update} to update` : "",
+    counts.skip ? `${counts.skip} kept` : "",
+    counts.invalid ? `${counts.invalid} invalid` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return `<div class="bulk-preview-summary">${summary || "Nothing ready to import yet."}</div><div class="bulk-preview-list">${items}</div>${overflow}`;
+}
+
+function openBulkDialog(ctx, language, words) {
+  let mode = "skip";
+  let format = "tsv";
+  let parsed = parseWordList("");
+  const modal = openModal({
+    title: `Import / export — ${language.name}`,
+    width: "large",
+    body: `
+      <div class="bulk-tabs" role="tablist">
+        <button type="button" class="bulk-tab is-active" data-bulk-tab="import">Import</button>
+        <button type="button" class="bulk-tab" data-bulk-tab="export">Export</button>
+      </div>
+      <div data-bulk-pane="import">
+        <textarea class="bulk-input" data-bulk-input rows="7" spellcheck="false" placeholder="gloss → IPA form → note&#10;house&#9;kasa&#9;dwelling" aria-label="Word list to import"></textarea>
+        <p class="bulk-hint">One word per line: gloss, IPA form, optional note. Tabs, semicolons, or commas separate columns; 2+ spaces make an aligned table (multi-word glosses keep their spaces). A JSON array — or a single <code>{gloss, form, note}</code> object — works too. A header row is skipped when the first cell is “gloss”.</p>
+        <div class="bulk-mode-row">
+          <label class="bulk-mode"><input type="radio" name="bulk-mode" value="skip" checked> Keep existing glosses (add new only)</label>
+          <label class="bulk-mode"><input type="radio" name="bulk-mode" value="update"> Update existing glosses with the pasted forms</label>
+        </div>
+        <div class="bulk-preview" data-bulk-preview></div>
+      </div>
+      <div data-bulk-pane="export" hidden>
+        <div class="bulk-export-row">
+          <label class="bulk-format-label">Format
+            <select class="select" data-bulk-format>
+              <option value="tsv">TSV (spreadsheets)</option>
+              <option value="json">JSON</option>
+            </select>
+          </label>
+          <button type="button" class="button button-quiet button-small" data-bulk-copy>${icon("copy")}Copy</button>
+          <button type="button" class="button button-quiet button-small" data-bulk-download>${icon("download")}Download file</button>
+        </div>
+        <textarea class="bulk-output" data-bulk-output rows="10" readonly spellcheck="false" aria-label="Exported word list"></textarea>
+        <p class="bulk-hint">${words.length} word${words.length === 1 ? "" : "s"} export${words.length === 1 ? "s" : ""} cleanly — drafts without a form are included, marked empty in the form column.</p>
+      </div>`,
+    footer: `
+      <span class="bulk-foot-summary" data-bulk-summary></span>
+      <span class="bulk-foot-actions">
+        <button type="button" class="button button-quiet" data-bulk-cancel>Cancel</button>
+        <button type="button" class="button button-primary" data-bulk-import disabled>${icon("save")}Import words</button>
+      </span>`,
+    onMount({ root, close }) {
+      const input = root.querySelector("[data-bulk-input]");
+      const preview = root.querySelector("[data-bulk-preview]");
+      const output = root.querySelector("[data-bulk-output]");
+      const summary = root.querySelector("[data-bulk-summary]");
+      const importButton = root.querySelector("[data-bulk-import]");
+      const panes = { import: root.querySelector('[data-bulk-pane="import"]'), export: root.querySelector('[data-bulk-pane="export"]') };
+
+      const readyRows = () => parsed.rows.filter((row) => ["add", "update"].includes(rowStatus(row, language, mode).status));
+      let readyCount = 0;
+      let exportOpen = false;
+
+      root.querySelector("[data-bulk-cancel]").addEventListener("click", () => close());
+
+      const refreshSummary = () => {
+        if (exportOpen) {
+          summary.textContent = `Exporting ${words.length} word${words.length === 1 ? "" : "s"}.`;
+        } else {
+          summary.textContent = readyCount
+            ? `Ready: ${readyCount} word${readyCount === 1 ? "" : "s"} into ${language.name}.`
+            : "Nothing to import yet.";
+        }
+      };
+
+      const refreshExport = () => {
+        if (exportOpen) output.value = format === "json" ? toJson(words) : toTsv(words);
+      };
+
+      root.querySelectorAll("[data-bulk-tab]").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          exportOpen = tab.dataset.bulkTab === "export";
+          panes.import.hidden = exportOpen;
+          panes.export.hidden = !exportOpen;
+          root.querySelectorAll("[data-bulk-tab]").forEach((other) => other.classList.toggle("is-active", other === tab));
+          importButton.parentElement.hidden = exportOpen;
+          if (exportOpen) refreshExport();
+          refreshSummary();
+        });
+      });
+
+      root.querySelector("[data-bulk-format]").addEventListener("change", (event) => {
+        format = event.target.value;
+        refreshExport();
+      });
+
+      root.querySelector("[data-bulk-copy]").addEventListener("click", () => {
+        copyWords(words, format);
+      });
+
+      root.querySelector("[data-bulk-download]").addEventListener("click", () => {
+        downloadWords(words, language.name, format);
+      });
+
+      const refreshImport = () => {
+        parsed = parseWordList(input.value);
+        const ready = readyRows();
+        readyCount = ready.length;
+        const warnings = parsed.warnings
+          .map((line) => `<p class="bulk-warning">${icon("warning")}${esc(line)}</p>`)
+          .join("");
+        preview.innerHTML = warnings + bulkPreviewMarkup(parsed.rows, language, mode);
+        importButton.disabled = !ready.length;
+        refreshSummary();
+      };
+
+      input.addEventListener("input", refreshImport);
+      root.querySelectorAll("[name='bulk-mode']").forEach((radio) => {
+        radio.addEventListener("change", (event) => {
+          mode = event.target.value;
+          refreshImport();
+        });
+      });
+      refreshImport();
+
+      importButton.addEventListener("click", () => {
+        const ready = readyRows();
+        if (!ready.length) return;
+        const result = applyWordList(language, ready, mode);
+        close();
+        ctx.touch();
+        ctx.refresh();
+        const parts = [
+          `${result.added} added`,
+          result.updated ? `${result.updated} updated` : "",
+          result.skipped ? `${result.skipped} kept` : "",
+          result.drafts ? `${result.drafts} without a form yet` : "",
+        ].filter(Boolean);
+        toast(`Imported into ${language.name}: ${parts.join(", ")}.`, { type: "success" });
+      });
+    },
+  });
+  return modal;
+}
+
 export function renderVocabulary(container, ctx) {
   const { language } = ctx;
   const parent = parentFor(ctx);
   const hasParent = Boolean(parent);
   const words = language.vocabulary;
+  const checker = createPhonotacticsChecker(language);
   let checks = 0;
   let matches = 0;
   if (parent) {
@@ -59,16 +291,24 @@ export function renderVocabulary(container, ctx) {
   }
 
   const rows = words
-    .map(
-      (word) => `
+    .map((word) => {
+      const result = checker.validate(word.form);
+      return `
         <tr data-word-id="${esc(word.id)}">
           <td class="word-gloss"><input class="table-input gloss-input" data-word-field="gloss" value="${esc(word.gloss)}" placeholder="meaning" autocomplete="off" aria-label="Gloss"></td>
-          <td class="word-form"><input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form"></td>
+          <td class="word-form">
+            <input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form">
+            <div class="word-issue-wrap" data-word-issue>${phonotacticIssueMarkup(result)}</div>
+          </td>
+          <td class="word-phonotactics" data-word-phonotactics>${phonotacticCellMarkup(result)}</td>
           ${hasParent ? `<td class="word-check" data-word-check>${checkCellMarkup(word, expectedFor(ctx, word, parent))}</td>` : ""}
           <td class="word-note"><input class="table-input" data-word-field="note" value="${esc(word.note)}" placeholder="optional note" autocomplete="off" aria-label="Word note"></td>
-          <td class="row-actions"><button class="icon-button icon-button-small danger-hover" type="button" data-delete-word title="Delete word" aria-label="Delete word">${icon("trash")}</button></td>
-        </tr>`
-    )
+          <td class="row-actions">
+            <button class="icon-button icon-button-small" type="button" data-trace-word title="Trace in the cognate explorer" aria-label="Trace in the cognate explorer">${icon("language")}</button>
+            <button class="icon-button icon-button-small danger-hover" type="button" data-delete-word title="Delete word" aria-label="Delete word">${icon("trash")}</button>
+          </td>
+        </tr>`;
+    })
     .join("");
 
   container.innerHTML = `
@@ -77,11 +317,12 @@ export function renderVocabulary(container, ctx) {
         <div>
           <p class="eyebrow">Lexicon</p>
           <h2>Vocabulary</h2>
-          <p class="section-copy">A small working list in IPA. ${hasParent ? `Forms are compared with the output of this language’s rules applied to ${esc(parent.name)} words with the same gloss.` : "Add words here; daughter languages can use them to test inherited forms."}</p>
+          <p class="section-copy">A small working list in IPA. ${hasParent ? `Forms are compared with the output of this language’s rules applied to ${esc(parent.name)} words with the same gloss.` : "Add words here; daughter languages can use them to test inherited forms."} Each form is also checked against the inventory and <a href="#/language/${language.id}/phonotactics">phonotactics</a>.</p>
         </div>
         <div class="inventory-summary">
           <span><strong>${words.length}</strong> ${words.length === 1 ? "word" : "words"}</span>
           ${hasParent ? `<span><strong>${matches}/${checks}</strong> checks match</span>` : ""}
+          <span data-phonotactics-summary>${validitySummary(words, checker)}</span>
         </div>
       </section>
 
@@ -91,6 +332,9 @@ export function renderVocabulary(container, ctx) {
             <h2>${esc(language.name)} lexicon</h2>
             <p>${hasParent ? `Expected forms come from ${esc(parent.name)} via the ordered rules.` : "Root vocabulary is the starting point for descendant checks."}</p>
           </div>
+          <span class="bulk-actions">
+            <button class="button button-quiet button-small" type="button" data-bulk-words title="Import or export the word list" aria-label="Import or export the word list">${icon("external")}Import / export</button>
+          </span>
           <button class="button button-primary button-small" type="button" data-add-word>${icon("plus")}Add word</button>
         </header>
         ${
@@ -102,6 +346,7 @@ export function renderVocabulary(container, ctx) {
                     <tr>
                       <th class="gloss-col">Gloss</th>
                       <th class="form-col">Form <span class="th-note">IPA</span></th>
+                      <th class="phonotactics-col">Phonotactics</th>
                       ${hasParent ? `<th class="check-col">Inherited check</th>` : ""}
                       <th>Note</th>
                       <th class="row-actions-head"></th>
@@ -110,13 +355,13 @@ export function renderVocabulary(container, ctx) {
                   <tbody>${rows}</tbody>
                 </table>
               </div>
-              <p class="table-foot">${hasParent ? "A dash means no word with that gloss exists in the ancestor. The check uses only this language’s direct sound changes." : "Add descendant languages to compare their forms against these roots."}</p>
+              <p class="table-foot">${hasParent ? "A dash means no word with that gloss exists in the ancestor. The inherited check uses only this language’s direct sound changes." : "Add descendant languages to compare their forms against these roots."} The phonotactics column checks this language’s own inventory and syllable template.</p>
             `
             : `
               <div class="lexicon-empty">
                 <div class="empty-icon small">${icon("book")}</div>
                 <h3>No words yet</h3>
-                <p>Start with a handful of basic vocabulary items. They will become the test bed for sound changes.</p>
+                <p>Start with a handful of basic vocabulary items. They will become the test bed for sound changes and phonotactics.</p>
                 <button class="button button-primary button-small" type="button" data-add-word>${icon("plus")}Add the first word</button>
               </div>`
         }
@@ -136,6 +381,10 @@ export function renderVocabulary(container, ctx) {
   };
   container.querySelectorAll("[data-add-word]").forEach((button) => button.addEventListener("click", addWord));
 
+  container.querySelector("[data-bulk-words]")?.addEventListener("click", () => {
+    openBulkDialog(ctx, language, words);
+  });
+
   container.querySelectorAll("[data-word-id]").forEach((row) => {
     const word = language.vocabulary.find((entry) => entry.id === row.dataset.wordId);
     if (!word) return;
@@ -145,6 +394,12 @@ export function renderVocabulary(container, ctx) {
         word[field] = input.value;
         ctx.touch();
         if (field === "gloss" || field === "form") updateRowCheck(row, ctx, word, parent);
+        if (field === "form") {
+          const result = checker.validate(word.form);
+          updateRowPhonotactics(row, result);
+          const summary = container.querySelector("[data-phonotactics-summary]");
+          if (summary) summary.textContent = validitySummary(words, checker);
+        }
       });
       if (input.dataset.wordField === "gloss") {
         input.addEventListener("keydown", (event) => {
@@ -163,6 +418,13 @@ export function renderVocabulary(container, ctx) {
         });
       }
     });
+    row.querySelector("[data-trace-word]")?.addEventListener("click", () => {
+      if (!word.gloss.trim() || !word.form.trim()) {
+        toast("Give the word a gloss and an IPA form before tracing it.", { type: "info" });
+        return;
+      }
+      ctx.navigate(`#/cognates/${encodeURIComponent(language.id)}/${encodeURIComponent(word.id)}`);
+    });
     row.querySelector("[data-delete-word]")?.addEventListener("click", () => {
       const index = language.vocabulary.indexOf(word);
       if (index < 0) return;
@@ -175,7 +437,11 @@ export function renderVocabulary(container, ctx) {
         action: {
           label: "Undo",
           onClick: () => {
-            language.vocabulary.splice(index, 0, removed);
+            // Resolve the language at click time: after a global undo/redo the
+            // vocabulary object captured at delete time is a detached clone.
+            const target = ctx.language;
+            if (!target || target.vocabulary.some((entry) => entry.id === removed.id)) return;
+            target.vocabulary.splice(Math.min(index, target.vocabulary.length), 0, removed);
             ctx.touch();
             ctx.refresh();
           },

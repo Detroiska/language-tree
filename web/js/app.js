@@ -13,6 +13,8 @@ import {
   promptDialog,
   toast,
 } from "./ui.js";
+import { createQuickSearch } from "./search.js";
+import { renderCognates } from "./views/cognates.js";
 import { renderLanguage } from "./views/language.js";
 import { renderTree } from "./views/tree.js";
 
@@ -22,13 +24,18 @@ const sidebarTree = document.getElementById("sidebar-tree");
 const sidebarCount = document.getElementById("sidebar-count");
 const sidebarAddRoot = document.getElementById("sidebar-add-root");
 const sidebarTreeLink = document.getElementById("sidebar-tree-link");
+const sidebarCognatesLink = document.getElementById("sidebar-cognates-link");
 const projectName = document.getElementById("project-name");
 const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
-const TAB_IDS = new Set(["overview", "phonology", "changes", "vocabulary"]);
+const undoButton = document.getElementById("undo-button");
+const redoButton = document.getElementById("redo-button");
+const TAB_IDS = new Set(["overview", "phonology", "phonotactics", "changes", "vocabulary"]);
 
 let currentRoute = null;
 let booted = false;
+let quickSearch = null;
+let pendingSearchFocus = null;
 
 function parseRoute() {
   const raw = window.location.hash.replace(/^#\/?/, "");
@@ -41,11 +48,24 @@ function parseRoute() {
       tab: TAB_IDS.has(parts[2]) ? parts[2] : "overview",
     };
   }
+  if (parts[0] === "cognates") {
+    return {
+      view: "cognates",
+      id: parts[1] ? decodeURIComponent(parts[1]) : null,
+      wordId: parts[2] ? decodeURIComponent(parts[2]) : null,
+    };
+  }
   return { view: "tree" };
 }
 
 function routeHash(route) {
   if (route.view === "language") return `#/language/${encodeURIComponent(route.id)}/${route.tab || "overview"}`;
+  if (route.view === "cognates") {
+    if (route.id) {
+      return `#/cognates/${encodeURIComponent(route.id)}${route.wordId ? `/${encodeURIComponent(route.wordId)}` : ""}`;
+    }
+    return "#/cognates";
+  }
   return "#/tree";
 }
 
@@ -82,7 +102,9 @@ function renderSidebar(route) {
   projectName.title = `${store.project.title} — click to rename`;
   document.title = route?.view === "language" && findLanguage(store.project, route.id)
     ? `${findLanguage(store.project, route.id).name} · ${store.project.title}`
-    : `${store.project.title} · Language Tree`;
+    : route?.view === "cognates"
+      ? `Cognate explorer · ${store.project.title}`
+      : `${store.project.title} · Language Tree`;
 
   if (!store.project.languages.length) {
     sidebarTree.innerHTML = `<p class="sidebar-empty">No languages yet.</p>`;
@@ -101,6 +123,10 @@ function renderSidebar(route) {
   }
   sidebarTreeLink.classList.toggle("is-active", route?.view === "tree");
   sidebarTreeLink.setAttribute("aria-current", route?.view === "tree" ? "page" : "false");
+  if (sidebarCognatesLink) {
+    sidebarCognatesLink.classList.toggle("is-active", route?.view === "cognates");
+    sidebarCognatesLink.setAttribute("aria-current", route?.view === "cognates" ? "page" : "false");
+  }
 }
 
 async function addRootLanguage() {
@@ -123,15 +149,119 @@ async function addRootLanguage() {
 }
 
 function makeContext(route) {
-  const language = route.view === "language" ? findLanguage(store.project, route.id) : null;
+  // project and language resolve through getters so a context stays valid
+  // after undo/redo replaces store.project: toast callbacks that capture ctx
+  // then mutate ctx.project would otherwise edit a detached clone and the
+  // change would be lost silently.
   return {
-    project: store.project,
-    language,
+    get project() {
+      return store.project;
+    },
+    get language() {
+      return route.view === "language" ? findLanguage(store.project, route.id) : null;
+    },
     route,
     touch: (options) => store.touch(options),
     navigate: (hash) => store.navigate(hash),
     refresh: () => render({ preserveScroll: true }),
   };
+}
+
+function updateHistoryControls() {
+  if (undoButton) undoButton.disabled = !store.canUndo();
+  if (redoButton) redoButton.disabled = !store.canRedo();
+}
+
+// Undo/redo re-render the whole view. Describing the focused element and its
+// caret beforehand lets typing continue seamlessly where it left off.
+function focusDescriptor() {
+  const element = document.activeElement;
+  if (!element || element === document.body || !element.parentElement) return null;
+  const parts = [];
+  let node = element;
+  while (node && node !== document.body && node.parentElement) {
+    const parent = node.parentElement;
+    parts.push(`*:nth-child(${Array.prototype.indexOf.call(parent.children, node) + 1})`);
+    node = parent;
+  }
+  if (node !== document.body) return null;
+  parts.reverse();
+  const caret =
+    typeof element.selectionStart === "number"
+      ? { start: element.selectionStart, end: element.selectionEnd ?? element.selectionStart }
+      : null;
+  return { selector: `:scope > ${parts.join(" > ")}`, caret };
+}
+
+function restoreFocus(descriptor) {
+  if (!descriptor) return;
+  let element = null;
+  try {
+    element = document.body.querySelector(descriptor.selector);
+  } catch {
+    return;
+  }
+  if (!element) return;
+  element.focus();
+  if (descriptor.caret && typeof element.setSelectionRange === "function") {
+    try {
+      element.setSelectionRange(descriptor.caret.start, descriptor.caret.end ?? descriptor.caret.start);
+    } catch {
+      // Some inputs reject caret restoration; restoring focus is enough.
+    }
+  }
+}
+
+function runHistoryStep(action) {
+  // A dialog is showing: its input state lives outside the document, so a
+  // document-level undo would desync it.
+  if (document.body.classList.contains("has-modal")) return false;
+  const descriptor = focusDescriptor();
+  if (!action()) return false;
+  render({ preserveScroll: true });
+  restoreFocus(descriptor);
+  return true;
+}
+
+// Quick search results ask the app to reveal a specific element after the
+// jump: the word row, the rule card, or the language header. render() calls
+// applySearchFocus() once the route's view is on screen.
+function applySearchFocus() {
+  if (!pendingSearchFocus) return;
+  const { kind, id } = pendingSearchFocus;
+  pendingSearchFocus = null;
+  let element = null;
+  let highlight = null;
+  if (kind === "word") {
+    highlight = viewRoot.querySelector(`[data-word-id="${CSS.escape(id)}"]`);
+    element = highlight?.querySelector("[data-word-field='gloss']") || highlight;
+  } else if (kind === "rule") {
+    highlight = viewRoot.querySelector(`[data-rule-id="${CSS.escape(id)}"]`);
+    element = highlight?.querySelector(".rule-input") || highlight;
+  } else if (kind === "language") {
+    highlight = viewRoot.querySelector(".language-title-row h1") || viewRoot.querySelector("h1");
+    element = highlight;
+  }
+  if (!element) return;
+  element.scrollIntoView({ block: "center", behavior: "auto" });
+  if (element !== document.body) element.focus({ preventScroll: true });
+  if (highlight !== element) {
+    highlight?.classList.add("is-search-hit");
+    window.setTimeout(() => highlight.classList.remove("is-search-hit"), 1800);
+  }
+}
+
+function openSearchResult(result) {
+  pendingSearchFocus = result.focus || null;
+  const hash = result.hash;
+  if (window.location.hash === hash) {
+    // Already on the exact route: re-render fresh, then reveal the hit.
+    render({ preserveScroll: true });
+    applySearchFocus();
+  } else {
+    // The hashchange listener renders, and render() consumes the pending focus.
+    store.navigate(hash);
+  }
 }
 
 function render(options = {}) {
@@ -146,6 +276,20 @@ function render(options = {}) {
     render();
     return;
   }
+  if (route.view === "cognates" && route.id && !findLanguage(store.project, route.id)) {
+    window.history.replaceState(null, "", "#/cognates");
+    render();
+    return;
+  }
+  if (route.view === "cognates" && route.id && route.wordId) {
+    const language = findLanguage(store.project, route.id);
+    const word = language?.vocabulary.find((entry) => entry.id === route.wordId);
+    if (!word || !word.gloss.trim() || !word.form.trim()) {
+      window.history.replaceState(null, "", `#/cognates/${encodeURIComponent(route.id)}`);
+      render();
+      return;
+    }
+  }
   const normalizedHash = routeHash(route);
   if (window.location.hash !== normalizedHash) {
     window.history.replaceState(null, "", normalizedHash);
@@ -155,10 +299,13 @@ function render(options = {}) {
   const ctx = makeContext(route);
   if (route.view === "tree") {
     renderTree(viewRoot, ctx);
+  } else if (route.view === "cognates") {
+    renderCognates(viewRoot, ctx);
   } else {
     renderLanguage(viewRoot, ctx, route.tab);
   }
   if (!options.preserveScroll) window.scrollTo({ top: 0, behavior: "auto" });
+  applySearchFocus();
 }
 
 function bootError(error) {
@@ -197,6 +344,7 @@ function setSaveState(state, error) {
 async function init() {
   hydrateIcons();
   store.onStatus(setSaveState);
+  store.onHistory(updateHistoryControls);
   projectName.addEventListener("click", async () => {
     const title = await promptDialog({
       title: "Rename project",
@@ -223,6 +371,15 @@ async function init() {
     }
   });
 
+  undoButton?.addEventListener("click", () => runHistoryStep(() => store.undo()));
+  redoButton?.addEventListener("click", () => runHistoryStep(() => store.redo()));
+
+  quickSearch = createQuickSearch({
+    getProject: () => store.project,
+    openResult: openSearchResult,
+  });
+  document.getElementById("sidebar-search")?.addEventListener("click", () => quickSearch.open());
+
   const sidebarToggle = document.createElement("button");
   sidebarToggle.className = "sidebar-toggle";
   sidebarToggle.type = "button";
@@ -248,6 +405,29 @@ async function init() {
   });
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") document.body.classList.remove("sidebar-open");
+  });
+  window.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === "k") {
+      // The palette ignores a screen already owned by a dialog; when it is
+      // open, Ctrl+K closes it. Chrome's address-bar search is suppressed.
+      event.preventDefault();
+      quickSearch.toggle();
+      return;
+    }
+    if (quickSearch.isOpen()) return; // while searching, undo stays paused
+    if (key === "z" && event.shiftKey) {
+      if (runHistoryStep(() => store.redo())) event.preventDefault();
+      return;
+    }
+    if (key === "z") {
+      if (runHistoryStep(() => store.undo())) event.preventDefault();
+      return;
+    }
+    if (key === "y") {
+      if (runHistoryStep(() => store.redo())) event.preventDefault();
+    }
   });
 }
 

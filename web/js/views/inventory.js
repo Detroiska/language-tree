@@ -52,7 +52,7 @@ function columnHeaderRows(columns, rowHeaderColumns, corner = { left: "Manner", 
   return rows.join("");
 }
 
-function rowHeaderCells(rowLeaves, seenGroups) {
+function rowHeaderCells(rowLeaves, seenGroups, headerColumns) {
   return rowLeaves
     .map((leaf) => {
       let html = "";
@@ -68,8 +68,12 @@ function rowHeaderCells(rowLeaves, seenGroups) {
               <button class="axis-menu" type="button" data-axis="rows" data-node-id="${esc(node.id)}" aria-label="Actions for ${esc(node.label)}" title="Actions for ${esc(node.label)}">${icon("more")}</button>
             </th>`;
         } else {
+          // A leaf shallower than the deepest row tree must span the remaining
+          // header columns. Otherwise its data cells start one column too far
+          // left and clicks map to the wrong column IDs.
+          const colspan = Math.max(1, headerColumns - depth);
           html += `
-            <th class="axis-head row-head axis-leaf" rowspan="1" data-axis="rows" data-node-id="${esc(node.id)}">
+            <th class="axis-head row-head axis-leaf" colspan="${colspan}" rowspan="1" data-axis="rows" data-node-id="${esc(node.id)}">
               <span class="axis-label" style="--axis-depth:${depth}">${esc(node.label)}</span>
               <button class="axis-menu" type="button" data-axis="rows" data-node-id="${esc(node.id)}" aria-label="Actions for ${esc(node.label)}" title="Actions for ${esc(node.label)}">${icon("more")}</button>
             </th>`;
@@ -125,7 +129,7 @@ function tableMarkup(chart, kind) {
     .map(
       (row) => `
         <tr>
-          ${rowHeaderCells([row], seenGroups)}
+          ${rowHeaderCells([row], seenGroups, rowHeaderColumns)}
           ${columnLeaves.map((column) => dataCellMarkup(chart, row, column)).join("")}
         </tr>`
     )
@@ -267,6 +271,26 @@ function bindNotes(container, ctx, chart, kind) {
     chart.notes = notes.value;
     ctx.touch();
   });
+}
+
+function alignStickyRowHeaders(panel) {
+  const table = panel.querySelector(".phonology-table");
+  if (!table) return;
+  const tableLeft = table.getBoundingClientRect().left;
+  const offsets = new Map();
+  const cells = [...table.querySelectorAll("tbody th.row-head")];
+  for (const cell of cells) {
+    const depth = Number(cell.querySelector(".axis-label")?.style.getPropertyValue("--axis-depth") || 0);
+    if (offsets.has(depth)) continue;
+    // The first cell at each depth establishes that header column's natural
+    // offset. Measuring with getBoundingClientRect avoids relying on magic
+    // pixel widths, which differ with the label text.
+    offsets.set(depth, Math.max(0, Math.round(cell.getBoundingClientRect().left - tableLeft)));
+  }
+  for (const cell of cells) {
+    const depth = Number(cell.querySelector(".axis-label")?.style.getPropertyValue("--axis-depth") || 0);
+    cell.style.left = `${offsets.get(depth) || 0}px`;
+  }
 }
 
 function copyCellsToPlain(chart, axis, nodeId, plainId) {
@@ -464,7 +488,7 @@ export function renderInventory(container, ctx) {
         <div>
           <p class="eyebrow">Phonology</p>
           <h2>Phonemic inventory</h2>
-          <p class="section-copy">Lay out contrastive sounds on a chart. Charts are independent per language; when you create a daughter, it starts with a copy of its ancestor’s chart.</p>
+          <p class="section-copy">Lay out contrastive sounds on a chart. Charts are independent per language; when you create a daughter, it starts with a copy of its ancestor’s chart. How those sounds combine into syllables is set in <a href="#/language/${language.id}/phonotactics">Phonotactics</a>.</p>
         </div>
         <div class="inventory-summary">
           <span><strong>${new Set(chartPhonemeList(consonants)).size}</strong> consonants</span>
@@ -479,6 +503,7 @@ export function renderInventory(container, ctx) {
   container.querySelectorAll("[data-chart]").forEach((panel) => {
     const kind = panel.dataset.chart;
     const chart = kind === "consonants" ? consonants : vowels;
+    alignStickyRowHeaders(panel);
     panel.querySelectorAll("[data-add-axis]").forEach((button) => {
       button.addEventListener("click", () => addTopLevel(ctx, chart, button.dataset.addAxis));
     });

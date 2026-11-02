@@ -77,13 +77,27 @@ export function defaultInventory() {
   };
 }
 
-export function createLanguage(name, parentId = null, template = null) {
+// The phonotactics template is deliberately data, not code: every language
+// carries its own copy so a daughter can inherit and then diverge. Empty
+// constraint lists mean "no extra restriction beyond the template".
+export function defaultPhonotactics() {
+  return {
+    template: "(C)V(C)",
+    onsets: "",
+    codas: "",
+    forbidden: "",
+    notes: "",
+  };
+}
+
+export function createLanguage(name, parentId = null, template = null, phonotactics = null) {
   return {
     id: uid("lang"),
     name: name.trim() || "Untitled language",
     parentId,
     notes: "",
     inventory: template ? deepClone(template) : defaultInventory(),
+    phonotactics: phonotactics ? ensurePhonotactics(deepClone(phonotactics)) : defaultPhonotactics(),
     soundChanges: [],
     vocabulary: [],
     createdAt: new Date().toISOString(),
@@ -102,8 +116,11 @@ export function createProject(title = "Untitled language family") {
 }
 
 function ensureAxisNode(node, kind, seen) {
-  if (!node || typeof node !== "object") return null;
-  if (!node.id || seen.has(node.id)) node.id = uid(kind === "row" ? "row" : "col");
+  if (!node || typeof node !== "object" || Array.isArray(node)) return null;
+  if (typeof node.id === "number") node.id = String(node.id);
+  if (typeof node.id !== "string" || !node.id || seen.has(node.id)) {
+    node.id = uid(kind === "row" ? "row" : "col");
+  }
   seen.add(node.id);
   if (typeof node.label !== "string" || !node.label.trim()) node.label = "Unnamed";
   if (!Array.isArray(node.children)) node.children = [];
@@ -112,7 +129,7 @@ function ensureAxisNode(node, kind, seen) {
 }
 
 function ensureChart(chart, fallbackFactory, kind) {
-  const base = chart && typeof chart === "object" ? chart : fallbackFactory();
+  const base = chart && typeof chart === "object" && !Array.isArray(chart) ? chart : fallbackFactory();
   if (!Array.isArray(base.rows)) base.rows = fallbackFactory().rows;
   if (!Array.isArray(base.columns)) base.columns = fallbackFactory().columns;
   if (!base.cells || typeof base.cells !== "object" || Array.isArray(base.cells)) base.cells = {};
@@ -121,20 +138,65 @@ function ensureChart(chart, fallbackFactory, kind) {
   base.rows = base.rows.map((node) => ensureAxisNode(node, "row", seen)).filter(Boolean);
   const colSeen = new Set();
   base.columns = base.columns.map((node) => ensureAxisNode(node, "col", colSeen)).filter(Boolean);
+  // Cells belong to leaf intersections. Entries that point at a missing
+  // row/column are dropped; entries that point at an interior group are
+  // migrated to that group's leftmost leaf so hand-edited or legacy files do
+  // not silently lose sounds.
+  const anchorMap = (nodes) => {
+    const map = new Map();
+    const walk = (node) => {
+      if (!node) return;
+      map.set(node.id, nodeLeafIds(node)[0]);
+      node.children?.forEach(walk);
+    };
+    nodes.forEach(walk);
+    return map;
+  };
+  const rowAnchors = anchorMap(base.rows);
+  const columnAnchors = anchorMap(base.columns);
   // Drop malformed cell values but keep valid phoneme arrays.
   for (const [key, value] of Object.entries(base.cells)) {
-    if (!Array.isArray(value)) {
+    const { rowId, columnId } = splitCellKey(key);
+    const rowTarget = rowAnchors.get(rowId);
+    const columnTarget = columnAnchors.get(columnId);
+    if (!rowTarget || !columnTarget || !Array.isArray(value)) {
       delete base.cells[key];
       continue;
     }
-    base.cells[key] = [...new Set(value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))];
-    if (!base.cells[key].length) delete base.cells[key];
+    const values = [...new Set(value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))];
+    if (!values.length) {
+      delete base.cells[key];
+      continue;
+    }
+    const targetKey = cellKey(rowTarget, columnTarget);
+    if (targetKey === key) {
+      base.cells[key] = values;
+      continue;
+    }
+    // Migrate: merge into the leaf cell, deduping sounds already there.
+    const merged = [...new Set([...(base.cells[targetKey] || []), ...values])];
+    delete base.cells[key];
+    if (merged.length) base.cells[targetKey] = merged;
   }
   return base;
 }
 
+function ensurePhonotactics(value) {
+  const defaults = defaultPhonotactics();
+  const base = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    // An explicitly empty template is meaningful: it turns phonotactic
+    // checking off. Only a missing field gets the default template.
+    template: typeof base.template === "string" ? base.template : defaults.template,
+    onsets: typeof base.onsets === "string" ? base.onsets : defaults.onsets,
+    codas: typeof base.codas === "string" ? base.codas : defaults.codas,
+    forbidden: typeof base.forbidden === "string" ? base.forbidden : defaults.forbidden,
+    notes: typeof base.notes === "string" ? base.notes : defaults.notes,
+  };
+}
+
 export function ensureProject(raw) {
-  const project = raw && typeof raw === "object" ? raw : createProject();
+  const project = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : createProject();
   if (typeof project.title !== "string" || !project.title.trim()) project.title = "Untitled language family";
   if (!Array.isArray(project.languages)) project.languages = [];
   if (!project.createdAt) project.createdAt = new Date().toISOString();
@@ -143,8 +205,9 @@ export function ensureProject(raw) {
 
   const ids = new Set();
   project.languages = project.languages.filter((language) => {
-    if (!language || typeof language !== "object" || !language.name) return false;
-    if (!language.id || ids.has(language.id)) language.id = uid("lang");
+    if (!language || typeof language !== "object" || Array.isArray(language) || !language.name) return false;
+    if (typeof language.id === "number") language.id = String(language.id);
+    if (typeof language.id !== "string" || !language.id || ids.has(language.id)) language.id = uid("lang");
     ids.add(language.id);
     return true;
   });
@@ -152,11 +215,13 @@ export function ensureProject(raw) {
   for (const language of project.languages) {
     language.name = String(language.name).trim() || "Untitled language";
     language.notes = typeof language.notes === "string" ? language.notes : "";
+    if (typeof language.parentId === "number") language.parentId = String(language.parentId);
     language.parentId = typeof language.parentId === "string" ? language.parentId : null;
     if (language.parentId && !ids.has(language.parentId)) language.parentId = null;
-    language.inventory = language.inventory && typeof language.inventory === "object" ? language.inventory : {};
+    language.inventory = language.inventory && typeof language.inventory === "object" && !Array.isArray(language.inventory) ? language.inventory : {};
     language.inventory.consonants = ensureChart(language.inventory.consonants, defaultConsonantChart, "row");
     language.inventory.vowels = ensureChart(language.inventory.vowels, defaultVowelChart, "col");
+    language.phonotactics = ensurePhonotactics(language.phonotactics);
     language.soundChanges = Array.isArray(language.soundChanges)
       ? language.soundChanges
           .filter((rule) => rule && typeof rule === "object")
@@ -269,6 +334,30 @@ export function setParent(project, languageId, parentId) {
   if (!language) return false;
   language.parentId = parentId || null;
   return true;
+}
+
+// Insert a new language above an existing one, so a root can gain an ancestor
+// and a daughter can gain an intermediate stage. The descendant's inventory is
+// used as the starting point, which makes working backwards in time practical.
+export function createAncestor(project, languageId, name) {
+  const language = findLanguage(project, languageId);
+  if (!language) return null;
+  const ancestor = createLanguage(name, language.parentId, language.inventory, language.phonotactics);
+  const index = project.languages.indexOf(language);
+  project.languages.splice(index, 0, ancestor);
+  language.parentId = ancestor.id;
+  return ancestor;
+}
+
+// Create a language at the same level as an existing one. For a root this
+// produces another root, for a daughter another daughter of the same parent.
+export function createSibling(project, languageId, name) {
+  const language = findLanguage(project, languageId);
+  if (!language) return null;
+  const sibling = createLanguage(name, language.parentId, language.inventory, language.phonotactics);
+  const index = project.languages.indexOf(language);
+  project.languages.splice(index + 1, 0, sibling);
+  return sibling;
 }
 
 export function deleteLanguage(project, id) {

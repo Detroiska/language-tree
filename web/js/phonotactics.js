@@ -1,0 +1,626 @@
+import { contextForInventory, normalizeForm } from "./phonology.js";
+
+// A syllable template is a small regular expression over sounds:
+//   C, V        any charted consonant or vowel
+//   p, t͡ʃ, ...  a literal sound
+//   [ptk]       a set of literal sounds
+//   (...)       an optional group (the conventional syllable-template syntax)
+//   a|b         alternatives inside a group
+//   ?           optional, as in C?V
+// Parentheses are optional by default so "(C)V(C)" reads naturally. The
+// expansion is finite, which keeps matching deterministic and cheap.
+const MAX_SHAPES = 256;
+const MAX_SYLLABLE_LENGTH = 16;
+
+const TEMPLATE_SYNTAX = new Set(["(", ")", "|", "?", "[", "]", "#", "*", "+"]);
+const REPEAT_QUANTIFIERS = new Set(["*", "+"]);
+
+class TemplateError extends Error {}
+
+function isSpace(char) {
+  return /\s/.test(char) || char === "," || char === ";" || char === "." || char === "-" || char === "·";
+}
+
+function atomSignature(atom) {
+  if (atom.type === "class") return atom.value;
+  if (atom.type === "literal") return `L:${atom.value}`;
+  if (atom.type === "set") return `S:${atom.values.join("\u0001")}`;
+  return atom.type;
+}
+
+function displayAtom(atom) {
+  if (atom.type === "class") return atom.value;
+  if (atom.type === "literal") return atom.value;
+  if (atom.type === "set") return `[${atom.values.join("")}]`;
+  return "";
+}
+
+function displayShape(atoms) {
+  return atoms.map(displayAtom).join("");
+}
+
+function isNucleusAtom(atom, context) {
+  if (atom.type === "class") return atom.value === "V";
+  if (atom.type === "literal") return context.isVowel(atom.value);
+  if (atom.type === "set") return atom.values.every((value) => context.isVowel(value));
+  return false;
+}
+
+function tokenMatchesAtom(atom, token, context) {
+  if (atom.type === "class") return atom.value === "V" ? context.isVowel(token) : context.isConsonant(token);
+  if (atom.type === "literal") return token === atom.value;
+  if (atom.type === "set") {
+    const included = atom.values.includes(token);
+    return atom.negated ? !included : included;
+  }
+  return false;
+}
+
+// Split a run of literal text into class atoms (C/V) and literal phonemes.
+// Splitting CVC without spaces is convenient for compact templates.
+function literalAtoms(chunk, context) {
+  const atoms = [];
+  let literal = "";
+  const flush = () => {
+    if (!literal) return;
+    for (const token of context.tokenize(literal)) atoms.push({ type: "literal", value: token });
+    literal = "";
+  };
+  for (const char of Array.from(chunk)) {
+    if (char === "C" || char === "V") {
+      flush();
+      atoms.push({ type: "class", value: char });
+    } else {
+      literal += char;
+    }
+  }
+  flush();
+  return atoms;
+}
+
+class TemplateParser {
+  constructor(source, context) {
+    this.source = String(source || "").normalize("NFC");
+    this.context = context;
+    this.index = 0;
+  }
+
+  fail(message) {
+    throw new TemplateError(message);
+  }
+
+  atEnd() {
+    return this.index >= this.source.length;
+  }
+
+  peek() {
+    return this.source[this.index] || "";
+  }
+
+  skip() {
+    while (!this.atEnd() && isSpace(this.source[this.index])) this.index += 1;
+  }
+
+  parse() {
+    const node = this.parseAlternation(false);
+    this.skip();
+    if (!this.atEnd()) this.fail(`Unexpected “${this.peek()}” in the template.`);
+    return node;
+  }
+
+  parseAlternation(insideGroup) {
+    const options = [this.parseSequence(insideGroup)];
+    this.skip();
+    while (this.peek() === "|") {
+      this.index += 1;
+      options.push(this.parseSequence(insideGroup));
+      this.skip();
+    }
+    return options.length === 1 ? options[0] : { type: "alt", options };
+  }
+
+  parseSequence(insideGroup) {
+    const items = [];
+    while (true) {
+      this.skip();
+      if (this.atEnd()) break;
+      const char = this.peek();
+      if (char === ")") {
+        if (insideGroup) break;
+        this.fail("Unexpected “)” in the template.");
+      }
+      if (char === "|") break;
+      items.push(this.parseItem());
+    }
+    if (!items.length) this.fail(insideGroup ? "A group cannot be empty." : "The template is empty.");
+    return items.length === 1 ? items[0] : { type: "seq", items };
+  }
+
+  parseItem() {
+    this.skip();
+    const char = this.peek();
+    let node;
+
+    if (char === "(") {
+      this.index += 1;
+      const inner = this.parseAlternation(true);
+      this.skip();
+      if (this.peek() !== ")") this.fail("A “(” in the template is not closed.");
+      this.index += 1;
+      node = { type: "optional", item: inner };
+    } else if (char === "[") {
+      const close = this.source.indexOf("]", this.index + 1);
+      if (close === -1) this.fail("A “[” in the template is not closed.");
+      let inner = this.source.slice(this.index + 1, close).trim();
+      if (!inner) this.fail("A bracketed set cannot be empty.");
+      if (inner.startsWith("^")) this.fail("Negated sets are not supported in syllable templates.");
+      const values = this.context.tokenize(inner);
+      if (!values.length) this.fail(`Could not read the set “[${inner}]”.`);
+      node = { type: "set", values };
+      this.index = close + 1;
+    } else if (char === "C" || char === "V") {
+      node = { type: "class", value: char };
+      this.index += 1;
+    } else if (char === "#") {
+      this.fail("Word boundaries (#) belong in forbidden sequences, not in a syllable template.");
+    } else if (REPEAT_QUANTIFIERS.has(char)) {
+      this.fail("Repeat quantifiers (* and +) are not supported in syllable templates. Write the element out.");
+    } else if (char === ")" || char === "]" || char === "|" || char === "?") {
+      this.fail(`Unexpected “${char}” in the template.`);
+    } else {
+      const start = this.index;
+      while (!this.atEnd() && !isSpace(this.source[this.index]) && !TEMPLATE_SYNTAX.has(this.source[this.index])) {
+        this.index += 1;
+      }
+      const chunk = this.source.slice(start, this.index);
+      const atoms = literalAtoms(chunk, this.context);
+      if (!atoms.length) this.fail(`Could not read “${chunk}” in the template.`);
+      node = atoms.length === 1 ? atoms[0] : { type: "seq", items: atoms };
+    }
+
+    this.skip();
+    if (this.peek() === "?") {
+      this.index += 1;
+      node = { type: "optional", item: node };
+    }
+    return node;
+  }
+}
+
+function capShapes(shapes) {
+  if (shapes.length > MAX_SHAPES) {
+    throw new TemplateError(`This template expands to more than ${MAX_SHAPES} syllable shapes. Simplify its optional parts.`);
+  }
+  return shapes;
+}
+
+function expandNode(node) {
+  if (node.type === "class" || node.type === "literal" || node.type === "set") return [[node]];
+  if (node.type === "optional") return capShapes([[], ...expandNode(node.item)]);
+  if (node.type === "alt") return capShapes(node.options.flatMap((option) => expandNode(option)));
+  if (node.type !== "seq") return [];
+
+  let results = [[]];
+  for (const item of node.items) {
+    const child = expandNode(item);
+    const next = [];
+    for (const left of results) {
+      for (const right of child) {
+        next.push([...left, ...right]);
+        if (next.length > MAX_SHAPES) {
+          throw new TemplateError(`This template expands to more than ${MAX_SHAPES} syllable shapes. Simplify its optional parts.`);
+        }
+      }
+    }
+    results = next;
+  }
+  return results;
+}
+
+function compileTemplate(source, context) {
+  const parser = new TemplateParser(source, context);
+  const ast = parser.parse();
+  const rawShapes = expandNode(ast);
+  const seen = new Set();
+  const shapes = [];
+  const unknownSounds = new Set();
+  let withoutNucleus = 0;
+
+  for (const atoms of rawShapes) {
+    if (!atoms.length) continue;
+    if (atoms.length > MAX_SYLLABLE_LENGTH) {
+      return { ok: false, error: `A syllable can contain at most ${MAX_SYLLABLE_LENGTH} sounds.` };
+    }
+    const signature = atoms.map(atomSignature).join(" ");
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    for (const atom of atoms) {
+      if (atom.type === "literal" && !context.vowels.has(atom.value) && !context.consonants.has(atom.value)) {
+        unknownSounds.add(atom.value);
+      }
+      if (atom.type === "set") {
+        for (const value of atom.values) {
+          if (!context.vowels.has(value) && !context.consonants.has(value)) unknownSounds.add(value);
+        }
+      }
+    }
+    if (!atoms.some((atom) => isNucleusAtom(atom, context))) {
+      withoutNucleus += 1;
+      continue;
+    }
+    shapes.push({ atoms, signature, display: displayShape(atoms) });
+  }
+
+  if (!shapes.length) {
+    return {
+      ok: false,
+      error: withoutNucleus
+        ? "Every syllable shape needs a vowel. Use V or a vowel sound."
+        : "The template does not define a syllable.",
+    };
+  }
+
+  shapes.sort((a, b) => a.atoms.length - b.atoms.length || a.display.localeCompare(b.display));
+  const warnings = [];
+  if (withoutNucleus) {
+    warnings.push(
+      `${withoutNucleus} optional ${withoutNucleus === 1 ? "shape has" : "shapes have"} no vowel and ${withoutNucleus === 1 ? "was" : "were"} ignored.`
+    );
+  }
+  if (unknownSounds.size) {
+    warnings.push(`The template uses ${[...unknownSounds].map((sound) => `“${sound}”`).join(", ")}, which ${unknownSounds.size === 1 ? "is" : "are"} not in the chart.`);
+  }
+  return { ok: true, shapes, warnings };
+}
+
+function splitList(value) {
+  return String(value || "")
+    .split(/[\n,;]+/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseClusterList(value, context) {
+  const allowed = new Map();
+  for (const item of String(value || "").split(/[\s,;]+/u)) {
+    const trimmed = item.trim();
+    if (!trimmed || trimmed === "∅" || trimmed === "-") continue;
+    const tokens = context.tokenize(trimmed);
+    if (!tokens.length) continue;
+    const key = tokens.join("");
+    if (!allowed.has(key)) allowed.set(key, trimmed);
+  }
+  return allowed;
+}
+
+function parseConstraintPattern(source, context) {
+  const text = String(source || "").normalize("NFC");
+  const atoms = [];
+  let index = 0;
+
+  while (index < text.length) {
+    const char = text[index];
+    if (isSpace(char)) {
+      index += 1;
+      continue;
+    }
+    if (char === "#") {
+      atoms.push({ type: "boundary" });
+      index += 1;
+      continue;
+    }
+    if (char === "[") {
+      const close = text.indexOf("]", index + 1);
+      if (close === -1) return { ok: false, error: "A “[” is not closed." };
+      let inner = text.slice(index + 1, close).trim();
+      if (!inner) return { ok: false, error: "A bracketed set cannot be empty." };
+      let negated = false;
+      if (inner.startsWith("^")) {
+        negated = true;
+        inner = inner.slice(1).trim();
+        if (!inner) return { ok: false, error: "A negated set cannot be empty." };
+      }
+      const values = context.tokenize(inner);
+      if (!values.length) return { ok: false, error: `Could not read the set “[${inner}]”.` };
+      atoms.push({ type: "set", values, negated });
+      index = close + 1;
+      continue;
+    }
+    if (TEMPLATE_SYNTAX.has(char)) {
+      if (char === "#") continue;
+      return {
+        ok: false,
+        error:
+          REPEAT_QUANTIFIERS.has(char) || char === "?" || char === "(" || char === ")"
+            ? "Use a fixed sequence in a forbidden pattern; optional groups and quantifiers are not supported."
+            : `Unexpected “${char}” in a forbidden pattern.`,
+      };
+    }
+
+    let end = index;
+    while (end < text.length && !isSpace(text[end]) && !TEMPLATE_SYNTAX.has(text[end]) && text[end] !== "[") end += 1;
+    const chunk = text.slice(index, end);
+    const parsed = literalAtoms(chunk, context);
+    if (!parsed.length) return { ok: false, error: `Could not read “${chunk}”.` };
+    atoms.push(...parsed);
+    index = end;
+  }
+
+  let leading = false;
+  let trailing = false;
+  if (atoms[0]?.type === "boundary") {
+    leading = true;
+    atoms.shift();
+  }
+  if (atoms[atoms.length - 1]?.type === "boundary") {
+    trailing = true;
+    atoms.pop();
+  }
+  if (atoms.some((atom) => atom.type === "boundary")) {
+    return { ok: false, error: "A boundary (#) can only appear at the start or end of a forbidden pattern." };
+  }
+  if (!atoms.length) return { ok: false, error: "A forbidden pattern needs at least one sound." };
+  return { ok: true, source: text.trim(), body: atoms, leading, trailing };
+}
+
+function matchSyllableAt(tokens, start, shapes, context) {
+  const matches = [];
+  for (const shape of shapes) {
+    const end = start + shape.atoms.length;
+    if (end > tokens.length) continue;
+    let ok = true;
+    for (let offset = 0; offset < shape.atoms.length; offset += 1) {
+      if (!tokenMatchesAtom(shape.atoms[offset], tokens[start + offset], context)) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+
+    const atoms = shape.atoms.map((atom, offset) => ({
+      atom,
+      token: tokens[start + offset],
+      nucleus: isNucleusAtom(atom, context),
+    }));
+    const nuclei = atoms.map((item, offset) => (item.nucleus ? offset : -1)).filter((offset) => offset >= 0);
+    if (!nuclei.length) continue;
+    const firstNucleus = nuclei[0];
+    const lastNucleus = nuclei[nuclei.length - 1];
+    matches.push({
+      start,
+      end,
+      shape,
+      tokens: tokens.slice(start, end),
+      onset: atoms.slice(0, firstNucleus).map((item) => item.token),
+      nucleus: atoms.slice(firstNucleus, lastNucleus + 1).map((item) => item.token),
+      coda: atoms.slice(lastNucleus + 1).map((item) => item.token),
+      onsetLength: firstNucleus,
+      codaLength: atoms.length - lastNucleus - 1,
+    });
+  }
+  return matches;
+}
+
+function preferMatch(a, b) {
+  // Maximal onset: a consonant between vowels belongs to the following
+  // syllable, so prefer the analysis with the shortest coda.
+  if (a.codaLength !== b.codaLength) return a.codaLength - b.codaLength;
+  return a.end - b.end;
+}
+
+function syllabify(tokens, shapes, context) {
+  const length = tokens.length;
+  const matchesAt = new Array(length);
+  const canFinish = new Array(length + 1).fill(false);
+  canFinish[length] = true;
+
+  for (let index = length - 1; index >= 0; index -= 1) {
+    matchesAt[index] = matchSyllableAt(tokens, index, shapes, context);
+    canFinish[index] = matchesAt[index].some((match) => canFinish[match.end]);
+  }
+
+  if (!canFinish[0]) {
+    const reachable = new Set([0]);
+    const queue = [0];
+    let furthest = 0;
+    while (queue.length) {
+      const position = queue.shift();
+      furthest = Math.max(furthest, position);
+      for (const match of matchesAt[position] || []) {
+        if (!reachable.has(match.end)) {
+          reachable.add(match.end);
+          queue.push(match.end);
+        }
+      }
+    }
+
+    const partial = [];
+    let position = 0;
+    while (position < furthest) {
+      const options = (matchesAt[position] || [])
+        .filter((match) => reachable.has(match.end))
+        .sort((a, b) => b.end - a.end || preferMatch(a, b));
+      if (!options.length) break;
+      partial.push(options[0]);
+      position = options[0].end;
+    }
+    const partialText = partial.map((syllable) => syllable.tokens.join("")).join(".");
+    const rest = tokens.slice(furthest).join("");
+    const error =
+      furthest === 0
+        ? "The form does not begin with a valid syllable."
+        : rest
+          ? `Syllabification stops before “${rest}”. ${partialText ? `It parses as far as ${partialText}.` : ""}`.trim()
+          : "The form cannot be divided into valid syllables.";
+    return { ok: false, error, partial, partialText, furthest };
+  }
+
+  const syllables = [];
+  let position = 0;
+  while (position < length) {
+    const options = matchesAt[position].filter((match) => canFinish[match.end]).sort(preferMatch);
+    const chosen = options[0];
+    syllables.push(chosen);
+    position = chosen.end;
+  }
+  return {
+    ok: true,
+    syllables,
+    text: syllables.map((syllable) => syllable.tokens.join("")).join("."),
+  };
+}
+
+function findForbidden(pattern, tokens, context) {
+  const starts = pattern.leading ? [0] : Array.from({ length: tokens.length + 1 }, (_, index) => index);
+  for (const start of starts) {
+    let position = start;
+    let ok = true;
+    for (const atom of pattern.body) {
+      if (position >= tokens.length || !tokenMatchesAtom(atom, tokens[position], context)) {
+        ok = false;
+        break;
+      }
+      position += 1;
+    }
+    if (!ok) continue;
+    if (pattern.trailing && position !== tokens.length) continue;
+    return { start, end: position, text: tokens.slice(start, position).join("") };
+  }
+  return null;
+}
+
+export function compilePhonotactics(phonotactics, context) {
+  const source = typeof phonotactics?.template === "string" ? phonotactics.template.trim() : "";
+  const result = {
+    ok: false,
+    empty: false,
+    error: "",
+    warnings: [],
+    shapes: [],
+    onsets: parseClusterList(phonotactics?.onsets, context),
+    codas: parseClusterList(phonotactics?.codas, context),
+    forbidden: [],
+    constraintErrors: [],
+  };
+
+  for (const raw of splitList(phonotactics?.forbidden)) {
+    const pattern = parseConstraintPattern(raw, context);
+    if (pattern.ok) result.forbidden.push(pattern);
+    else result.constraintErrors.push(`“${raw}”: ${pattern.error}`);
+  }
+
+  if (!source) {
+    result.empty = true;
+    return result;
+  }
+
+  try {
+    const compiled = compileTemplate(source, context);
+    if (!compiled.ok) {
+      result.error = compiled.error;
+      return result;
+    }
+    result.ok = true;
+    result.shapes = compiled.shapes;
+    result.warnings = compiled.warnings;
+  } catch (error) {
+    result.error = error instanceof TemplateError ? error.message : "Could not read the syllable template.";
+  }
+  return result;
+}
+
+export function validateWord(form, compiled, context) {
+  const normalized = normalizeForm(form);
+  const text = normalized.trim();
+  const result = {
+    form: normalized,
+    text,
+    tokens: [],
+    unknown: [],
+    issues: [],
+    syllables: [],
+    syllableText: "",
+    checked: false,
+    ok: false,
+    empty: !text,
+    templateEmpty: Boolean(compiled?.empty),
+    templateError: compiled?.error || "",
+    partialText: "",
+  };
+  if (!text) {
+    result.ok = true;
+    return result;
+  }
+
+  const tokens = context.tokenize(text);
+  result.tokens = tokens;
+
+  const unknown = new Set();
+  for (const token of tokens) {
+    if (!context.vowels.has(token) && !context.consonants.has(token)) unknown.add(token);
+  }
+  result.unknown = [...unknown];
+  for (const token of unknown) {
+    result.issues.push({ type: "unknown", message: `Unknown sound “${token}” is not in the charted inventory.` });
+  }
+
+  if (!compiled || !compiled.ok) {
+    result.checked = false;
+    result.ok = false;
+    return result;
+  }
+
+  result.checked = true;
+  const parse = syllabify(tokens, compiled.shapes, context);
+  result.parse = parse;
+  if (parse.ok) {
+    result.syllables = parse.syllables;
+    result.syllableText = parse.text;
+  } else {
+    result.partialText = parse.partialText || "";
+    result.issues.push({ type: "syllable", message: parse.error });
+  }
+
+  if (parse.ok) {
+    for (const syllable of parse.syllables) {
+      if (syllable.onset.length && compiled.onsets.size) {
+        const onset = syllable.onset.join("");
+        if (!compiled.onsets.has(onset)) {
+          result.issues.push({ type: "onset", message: `Onset “${onset}” is not in the allowed onsets.` });
+        }
+      }
+      if (syllable.coda.length && compiled.codas.size) {
+        const coda = syllable.coda.join("");
+        if (!compiled.codas.has(coda)) {
+          result.issues.push({ type: "coda", message: `Coda “${coda}” is not in the allowed codas.` });
+        }
+      }
+    }
+    for (const pattern of compiled.forbidden) {
+      const match = findForbidden(pattern, tokens, context);
+      if (match) {
+        result.issues.push({
+          type: "forbidden",
+          message: `Forbidden sequence ${pattern.source} appears as “${match.text || "∅"}”.`,
+        });
+      }
+    }
+  }
+
+  result.ok = result.issues.length === 0;
+  return result;
+}
+
+// One compiled checker can validate many forms: the inventory and
+// phonotactics are fixed until the next render.
+export function createPhonotacticsChecker(language) {
+  const context = contextForInventory(language.inventory);
+  const compiled = compilePhonotactics(language.phonotactics || {}, context);
+  return {
+    context,
+    compiled,
+    validate(form) {
+      return validateWord(form, compiled, context);
+    },
+  };
+}

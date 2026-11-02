@@ -34,6 +34,11 @@
       </div>
 
       <div class="sidebar-footer">
+        <button class="sidebar-add" id="sidebar-search" type="button">
+          <span class="icon-sm" data-icon="search"></span>
+          <span>Quick search</span>
+          <kbd class="sidebar-kbd">Ctrl K</kbd>
+        </button>
         <button class="sidebar-add" id="sidebar-add-root">
           <span class="icon-sm" data-icon="plus"></span>
           <span>New root language</span>
@@ -42,6 +47,18 @@
           <span class="icon-sm" data-icon="tree"></span>
           <span>Open family tree</span>
         </a>
+        <a href="#/cognates" class="sidebar-tree-link" id="sidebar-cognates-link">
+          <span class="icon-sm" data-icon="language"></span>
+          <span>Cognate explorer</span>
+        </a>
+        <div class="history-controls">
+          <button class="history-button" id="undo-button" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+            <span class="icon-sm" data-icon="undo"></span>
+          </button>
+          <button class="history-button" id="redo-button" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>
+            <span class="icon-sm" data-icon="redo"></span>
+          </button>
+        </div>
         <div class="save-state" id="save-state" title="Project file: data/project.json">
           <span class="save-dot"></span>
           <span class="save-label">Saved</span>
