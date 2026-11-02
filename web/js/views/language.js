@@ -81,8 +81,8 @@ async function renameLanguage(ctx) {
 async function deleteCurrent(ctx) {
   const count = descendantsCount(ctx.project, ctx.language.id);
   const message = count
-    ? `<strong>${esc(ctx.language.name)}</strong> and its <strong>${count}</strong> descendant${count === 1 ? "" : "s"} will be removed. This cannot be undone here; committed project changes remain in git history.`
-    : `<strong>${esc(ctx.language.name)}</strong> will be removed. This cannot be undone here; committed project changes remain in git history.`;
+    ? `<strong>${esc(ctx.language.name)}</strong> and its <strong>${count}</strong> descendant${count === 1 ? "" : "s"} will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`
+    : `<strong>${esc(ctx.language.name)}</strong> will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`;
   const confirmed = await confirmDialog("Delete this language?", message, {
     confirmLabel: count ? `Delete ${count + 1} languages` : "Delete language",
     danger: true,

@@ -2,6 +2,7 @@ import {
   childrenOf,
   createLanguage,
   deleteLanguage,
+  descendantIds,
   descendantsCount,
   formatDate,
   languageStats,
@@ -142,12 +143,13 @@ async function renameLanguage(ctx, language) {
 
 async function removeLanguage(ctx, language) {
   const descendants = descendantsCount(ctx.project, language.id);
+  const branchIds = new Set([language.id, ...descendantIds(ctx.project, language.id)]);
   const wordCount = ctx.project.languages
-    .filter((item) => item.id === language.id || item.parentId === language.id)
+    .filter((item) => branchIds.has(item.id))
     .reduce((total, item) => total + item.vocabulary.length, 0);
   const message = descendants
-    ? `<strong>${esc(language.name)}</strong> and its <strong>${descendants}</strong> descendant${descendants === 1 ? "" : "s"} will be removed. This cannot be undone here; the project JSON remains in git history once committed.`
-    : `<strong>${esc(language.name)}</strong> will be removed. This cannot be undone here; the project JSON remains in git history once committed.`;
+    ? `<strong>${esc(language.name)}</strong> and its <strong>${descendants}</strong> descendant${descendants === 1 ? "" : "s"} will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`
+    : `<strong>${esc(language.name)}</strong> will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`;
   const confirmed = await confirmDialog("Delete this language?", message, {
     confirmLabel: descendants ? `Delete ${descendants + 1} languages` : "Delete language",
     danger: true,
