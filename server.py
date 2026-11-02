@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Local web server for Language Tree.
+
+Serves the static frontend and a tiny JSON-file API. No third-party
+dependencies are required. Project data lives in data/project.json so it can
+be versioned with git.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import threading
+import webbrowser
+from datetime import datetime, timezone
+from http import HTTPStatus
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parent
+WEB_DIR = ROOT / "web"
+DATA_DIR = ROOT / "data"
+DATA_FILE = DATA_DIR / "project.json"
+
+MAX_BODY_BYTES = 12 * 1024 * 1024
+SAVE_LOCK = threading.Lock()
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def read_project() -> dict:
+    with DATA_FILE.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def write_project(project: dict) -> None:
+    """Write pretty JSON atomically, preserving a single-file git workflow."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = DATA_FILE.with_suffix(".json.tmp")
+    text = json.dumps(project, ensure_ascii=False, indent=2) + "\n"
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, DATA_FILE)
+
+
+def validate_project(project: object) -> None:
+    if not isinstance(project, dict):
+        raise ValueError("The project must be a JSON object.")
+    if not isinstance(project.get("languages"), list):
+        raise ValueError("The project must contain a languages array.")
+    if not isinstance(project.get("title"), str):
+        raise ValueError("The project must contain a title string.")
+    if len(project["languages"]) > 5000:
+        raise ValueError("The project contains too many languages.")
+    for item in project["languages"]:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            raise ValueError("Every language needs a string id.")
+        if not isinstance(item.get("name"), str):
+            raise ValueError("Every language needs a name.")
+
+
+class LanguageTreeHandler(SimpleHTTPRequestHandler):
+    server_version = "LanguageTree/0.1"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(WEB_DIR), **kwargs)
+
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
+
+    def log_message(self, fmt: str, *args) -> None:
+        if self.path.startswith("/api/"):
+            super().log_message(fmt, *args)
+
+    def send_json(self, payload: object, status: int = HTTPStatus.OK) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
+        path = urlparse(self.path).path
+        if path == "/api/health":
+            self.send_json({"ok": True, "time": utc_now()})
+            return
+        if path == "/api/project":
+            try:
+                self.send_json(read_project())
+            except FileNotFoundError:
+                self.send_json({"error": "Project file not found."}, HTTPStatus.NOT_FOUND)
+            except (OSError, json.JSONDecodeError) as exc:
+                self.send_json({"error": f"Could not read project: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        if path.startswith("/api/"):
+            self.send_json({"error": "Unknown API endpoint."}, HTTPStatus.NOT_FOUND)
+            return
+        super().do_GET()
+
+    def do_PUT(self) -> None:  # noqa: N802 (stdlib naming)
+        path = urlparse(self.path).path
+        if path != "/api/project":
+            self.send_json({"error": "Unknown API endpoint."}, HTTPStatus.NOT_FOUND)
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json({"error": "Invalid Content-Length."}, HTTPStatus.BAD_REQUEST)
+            return
+        if length <= 0 or length > MAX_BODY_BYTES:
+            self.send_json({"error": "Request body is empty or too large."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
+
+        try:
+            raw = self.rfile.read(length)
+            project = json.loads(raw.decode("utf-8"))
+            validate_project(project)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self.send_json({"error": f"Invalid JSON: {exc}"}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        project["updatedAt"] = utc_now()
+        try:
+            with SAVE_LOCK:
+                write_project(project)
+        except OSError as exc:
+            self.send_json({"error": f"Could not save project: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        self.send_json({"ok": True, "savedAt": project["updatedAt"]})
+
+
+def ensure_data_file() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if DATA_FILE.exists():
+        return
+    now = utc_now()
+    write_project(
+        {
+            "version": 1,
+            "title": "Untitled language family",
+            "createdAt": now,
+            "updatedAt": now,
+            "languages": [],
+        }
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the Language Tree web UI.")
+    parser.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8765, help="Port to use (default: 8765)")
+    parser.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically")
+    args = parser.parse_args()
+
+    ensure_data_file()
+    server = ThreadingHTTPServer((args.host, args.port), LanguageTreeHandler)
+    url = f"http://{args.host}:{args.port}/"
+    print()
+    print("  Language Tree")
+    print(f"  {url}")
+    print(f"  Data: {DATA_FILE}")
+    print("  Press Ctrl+C to stop.")
+    print()
+    if not args.no_browser:
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping.")
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

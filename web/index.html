@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1c2b26">
+  <title>Language Tree</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <path d="M16 6v8M16 14 8 22M16 14l8 8"/>
+            <circle cx="16" cy="5" r="2.4" fill="currentColor" stroke="none"/>
+            <circle cx="7" cy="23" r="2.4" fill="currentColor" stroke="none"/>
+            <circle cx="25" cy="23" r="2.4" fill="currentColor" stroke="none"/>
+          </svg>
+        </div>
+        <div class="brand-copy">
+          <a href="#/tree" class="brand-name">Language Tree</a>
+          <button class="project-name" id="project-name" title="Rename project">Untitled language family</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">
+          <span>Languages</span>
+          <span class="sidebar-count" id="sidebar-count">0</span>
+        </div>
+        <nav class="language-nav" id="sidebar-tree" aria-label="Language tree"></nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="sidebar-add" id="sidebar-add-root">
+          <span class="icon-sm" data-icon="plus"></span>
+          <span>New root language</span>
+        </button>
+        <a href="#/tree" class="sidebar-tree-link" id="sidebar-tree-link">
+          <span class="icon-sm" data-icon="tree"></span>
+          <span>Open family tree</span>
+        </a>
+        <div class="save-state" id="save-state" title="Project file: data/project.json">
+          <span class="save-dot"></span>
+          <span class="save-label">Saved</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="main-view" id="view">
+        <div class="boot-screen">
+          <div class="boot-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <path d="M16 6v8M16 14 8 22M16 14l8 8"/>
+              <circle cx="16" cy="5" r="2.4" fill="currentColor" stroke="none"/>
+              <circle cx="7" cy="23" r="2.4" fill="currentColor" stroke="none"/>
+              <circle cx="25" cy="23" r="2.4" fill="currentColor" stroke="none"/>
+            </svg>
+          </div>
+          <p>Opening the family tree…</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="menu-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

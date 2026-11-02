@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "title": "Untitled language family",
+  "createdAt": "2026-11-02T06:15:57Z",
+  "updatedAt": "2026-11-02T06:16:09Z",
+  "languages": [
+    {
+      "id": "lang_ae5c0ecc-f672-47a8-90f3-7b7bef5302e7",
+      "name": "Proto-Language",
+      "parentId": null,
+      "notes": "",
+      "inventory": {
+        "consonants": {
+          "rows": [
+            {
+              "id": "row_4cacaaad-6022-49b7-a717-6f1632525b30",
+              "label": "Plosive",
+              "children": []
+            },
+            {
+              "id": "row_d6e40dcf-d90b-4aca-8d8a-a1d86ac41e6c",
+              "label": "Affricate",
+              "children": []
+            },
+            {
+              "id": "row_af542271-3d49-494e-8456-9519cc989b48",
+              "label": "Nasal",
+              "children": []
+            },
+            {
+              "id": "row_2ec91b28-a06f-4e2d-bc09-e0fe4c241634",
+              "label": "Trill",
+              "children": []
+            },
+            {
+              "id": "row_923915ca-a2ca-4de3-8836-ce3ad372302b",
+              "label": "Tap / flap",
+              "children": []
+            },
+            {
+              "id": "row_68ee25af-534d-437c-966b-00693680e4b5",
+              "label": "Fricative",
+              "children": []
+            },
+            {
+              "id": "row_7dae723c-7b3d-45f8-bc50-a5e680774279",
+              "label": "Lateral fricative",
+              "children": []
+            },
+            {
+              "id": "row_65b56e9f-3d71-4d81-9c26-4b97aa170289",
+              "label": "Approximant",
+              "children": []
+            },
+            {
+              "id": "row_c1085234-7b16-402f-9b61-5ff7557f53fe",
+              "label": "Lateral approximant",
+              "children": []
+            }
+          ],
+          "columns": [
+            {
+              "id": "col_7047260d-d437-4180-8821-56db2cbf79ee",
+              "label": "Bilabial",
+              "children": []
+            },
+            {
+              "id": "col_523a3d82-ed8c-476e-84f1-b57b99a1f873",
+              "label": "Labiodental",
+              "children": []
+            },
+            {
+              "id": "col_0f0b9dbe-1c39-4c10-8052-1dc0d632470f",
+              "label": "Dental",
+              "children": []
+            },
+            {
+              "id": "col_06f7a7c3-f247-4235-b616-d8960a1b7787",
+              "label": "Alveolar",
+              "children": []
+            },
+            {
+              "id": "col_1a79a72d-6616-4686-a0a4-91f4464c0d63",
+              "label": "Postalveolar",
+              "children": []
+            },
+            {
+              "id": "col_42da1aff-c593-45ed-ba71-dba8fe34ce1a",
+              "label": "Retroflex",
+              "children": []
+            },
+            {
+              "id": "col_75ba5530-7de3-43eb-9903-1d67e5ada8a0",
+              "label": "Palatal",
+              "children": []
+            },
+            {
+              "id": "col_37eb885c-4eae-4ddd-be1e-120d53ab99f6",
+              "label": "Velar",
+              "children": []
+            },
+            {
+              "id": "col_2f4ec4d9-f97e-43df-9084-d8d973c73371",
+              "label": "Uvular",
+              "children": []
+            },
+            {
+              "id": "col_e88c625b-711a-4e02-b5f9-dd845dd216d9",
+              "label": "Pharyngeal",
+              "children": []
+            },
+            {
+              "id": "col_b302168b-a6b7-4721-a09c-69d4005660df",
+              "label": "Glottal",
+              "children": []
+            }
+          ],
+          "cells": {},
+          "notes": ""
+        },
+        "vowels": {
+          "rows": [
+            {
+              "id": "row_ec206498-a7da-47a1-935d-7f4780691d9c",
+              "label": "Close",
+              "children": []
+            },
+            {
+              "id": "row_584dd1fb-ae5c-43ef-9006-cde121a933ec",
+              "label": "Near-close",
+              "children": []
+            },
+            {
+              "id": "row_35a462cd-dac3-43f0-ac6e-2c726dc8770b",
+              "label": "Close-mid",
+              "children": []
+            },
+            {
+              "id": "row_4bdefb88-968e-49fc-888e-f07296d97114",
+              "label": "Mid",
+              "children": []
+            },
+            {
+              "id": "row_4bab40d0-39f1-4042-b9be-ee31fdd6af85",
+              "label": "Open-mid",
+              "children": []
+            },
+            {
+              "id": "row_482118d7-03b9-4f23-88c2-93bdfe1980c9",
+              "label": "Near-open",
+              "children": []
+            },
+            {
+              "id": "row_3bca4f62-d687-4399-b867-e8e737b2993e",
+              "label": "Open",
+              "children": []
+            }
+          ],
+          "columns": [
+            {
+              "id": "col_4ce8c9bf-5a76-4567-b98b-14226707b59c",
+              "label": "Front",
+              "children": [
+                {
+                  "id": "col_492dcd64-0391-4aff-94d5-01150dfaeeaf",
+                  "label": "Unrounded",
+                  "children": []
+                },
+                {
+                  "id": "col_9de00a19-b3ee-4199-9400-df46bada40ae",
+                  "label": "Rounded",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "id": "col_2200561a-d239-46ab-8d4d-8ce021790247",
+              "label": "Central",
+              "children": [
+                {
+                  "id": "col_812a2b61-7bb4-44d3-a4e9-4c02f1b75ff3",
+                  "label": "Unrounded",
+                  "children": []
+                },
+                {
+                  "id": "col_f6977c28-8131-4c36-952f-45e5e82ec5b8",
+                  "label": "Rounded",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "id": "col_1cc952fb-5a36-439c-a04a-7eca0a17d40e",
+              "label": "Back",
+              "children": [
+                {
+                  "id": "col_ae1075bd-7c14-4c96-8139-f159fb6288b9",
+                  "label": "Unrounded",
+                  "children": []
+                },
+                {
+                  "id": "col_eab36159-ef86-4872-9cbb-41cd88389560",
+                  "label": "Rounded",
+                  "children": []
+                }
+              ]
+            }
+          ],
+          "cells": {},
+          "notes": ""
+        }
+      },
+      "soundChanges": [],
+      "vocabulary": [],
+      "createdAt": "2026-11-02T06:16:09.190Z"
+    }
+  ]
+}
