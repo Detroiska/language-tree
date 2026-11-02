@@ -1698,7 +1698,7 @@ a.lineage-chip:hover {
   border-collapse: separate;
   border-spacing: 0;
   table-layout: auto;
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .phonology-table th,
@@ -1719,12 +1719,12 @@ a.lineage-chip:hover {
 
 .axis-head {
   position: relative;
-  padding: 8px 7px;
+  padding: 6px 4px;
   color: var(--ink-soft);
   background: var(--surface-tint);
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.15;
   text-align: center;
   vertical-align: middle;
 }
@@ -1735,7 +1735,7 @@ a.lineage-chip:hover {
 }
 
 .col-head {
-  min-width: 78px;
+  min-width: 62px;
 }
 
 .axis-leaf.col-head {
@@ -1743,14 +1743,14 @@ a.lineage-chip:hover {
 }
 
 .axis-corner {
-  min-width: 144px;
-  padding: 9px 10px;
+  min-width: 113px;
+  padding: 7px 7px;
   color: var(--faint);
   background: #e9e4d7;
   font-family: var(--font-ui);
-  font-size: 8.5px;
+  font-size: 8px;
   font-weight: 650;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-align: left;
   text-transform: uppercase;
   vertical-align: bottom;
@@ -1770,8 +1770,8 @@ a.lineage-chip:hover {
   position: sticky;
   left: 0;
   z-index: 3;
-  min-width: 148px;
-  padding: 8px 10px;
+  min-width: 113px;
+  padding: 6px 7px;
   text-align: left;
   vertical-align: middle;
   box-shadow: 1px 0 0 var(--line);
@@ -1787,36 +1787,36 @@ a.lineage-chip:hover {
 
 .row-head .axis-label {
   display: inline-block;
-  padding-left: calc(var(--axis-depth, 0) * 11px);
+  padding-left: calc(var(--axis-depth, 0) * 9px);
 }
 
 .row-head.axis-group .axis-label {
   color: var(--ink);
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.035em;
   text-transform: uppercase;
 }
 
 .axis-menu {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 2px;
+  right: 2px;
   display: grid;
-  width: 21px;
-  height: 21px;
+  width: 18px;
+  height: 18px;
   place-items: center;
   padding: 0;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 4px;
   opacity: 0;
   transition: opacity 100ms ease, background 100ms ease;
 }
 
 .axis-menu .icon {
-  width: 13px;
-  height: 13px;
+  width: 11px;
+  height: 11px;
 }
 
 th:hover > .axis-menu,
@@ -1830,9 +1830,9 @@ th:hover > .axis-menu,
 }
 
 .phoneme-cell {
-  height: 52px;
-  min-width: 84px;
-  padding: 5px 6px;
+  height: 44px;
+  min-width: 58px;
+  padding: 3px 4px;
   background: var(--surface);
   text-align: center;
   transition: background 100ms ease;
@@ -1853,11 +1853,11 @@ th:hover > .axis-menu,
 .cell-inner {
   position: relative;
   display: flex;
-  min-height: 38px;
+  min-height: 32px;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
 }
 
 .phoneme-chips {
@@ -1865,21 +1865,21 @@ th:hover > .axis-menu,
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
 }
 
 .phoneme-chip {
   display: inline-flex;
-  height: 23px;
+  height: 21px;
   align-items: center;
   gap: 1px;
-  padding: 0 3px 0 5px;
+  padding: 0 2px 0 4px;
   color: #243a30;
   background: #edf4ef;
   border: 1px solid #d3e1d8;
-  border-radius: 5px;
+  border-radius: 4px;
   font-family: var(--font-ipa);
-  font-size: 13.5px;
+  font-size: 12.5px;
   line-height: 1;
 }
 
@@ -1889,8 +1889,8 @@ th:hover > .axis-menu,
 
 .chip-remove {
   display: grid;
-  width: 13px;
-  height: 16px;
+  width: 12px;
+  height: 14px;
   place-items: center;
   padding: 0;
   color: #7c9589;
@@ -1901,8 +1901,8 @@ th:hover > .axis-menu,
 }
 
 .chip-remove .icon {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
 }
 
 .phoneme-chip:hover .chip-remove,
@@ -1917,8 +1917,8 @@ th:hover > .axis-menu,
 
 .cell-plus {
   display: grid;
-  width: 19px;
-  height: 19px;
+  width: 17px;
+  height: 17px;
   flex: 0 0 auto;
   place-items: center;
   padding: 0;
@@ -1931,8 +1931,8 @@ th:hover > .axis-menu,
 }
 
 .cell-plus .icon {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
 }
 
 .phoneme-cell:hover .cell-plus {
@@ -1955,15 +1955,15 @@ th:hover > .axis-menu,
 }
 
 .cell-input {
-  width: 64px;
-  height: 25px;
+  width: 58px;
+  height: 22px;
   padding: 0 4px;
   color: var(--ink);
   background: #fff;
   border: 1px solid var(--accent);
   border-radius: 4px;
   font-family: var(--font-ipa);
-  font-size: 13px;
+  font-size: 12px;
   outline: none;
   box-shadow: 0 0 0 3px rgba(39, 103, 89, 0.09);
 }
