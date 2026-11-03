@@ -125,7 +125,7 @@ async function addChild(ctx, language) {
   if (!name) return;
   const child = createLanguage(name, language.id, language.inventory, language.phonotactics);
   ctx.project.languages.push(child);
-  ctx.touch();
+  ctx.touch({ label: `Add language ${child.name}` });
   ctx.refresh();
   ctx.navigate(`#/language/${child.id}/overview`);
   toast(`Created ${child.name}. Its chart was copied from ${language.name}.`, { type: "success" });
@@ -143,7 +143,7 @@ async function addAncestor(ctx, language) {
   if (!name) return;
   const ancestor = createAncestor(ctx.project, language.id, name);
   if (!ancestor) return;
-  ctx.touch();
+  ctx.touch({ label: `Add language ${ancestor.name}` });
   ctx.refresh();
   ctx.navigate(`#/language/${ancestor.id}/overview`);
   toast(`Created ${ancestor.name} above ${language.name}.`, { type: "success" });
@@ -162,7 +162,7 @@ async function addSibling(ctx, language) {
   if (!name) return;
   const sibling = createSibling(ctx.project, language.id, name);
   if (!sibling) return;
-  ctx.touch();
+  ctx.touch({ label: `Add language ${sibling.name}` });
   ctx.refresh();
   ctx.navigate(`#/language/${sibling.id}/overview`);
   toast(`Created ${sibling.name} beside ${language.name}.`, { type: "success" });
@@ -177,7 +177,7 @@ async function renameLanguage(ctx, language) {
   });
   if (!name || name === language.name) return;
   language.name = name;
-  ctx.touch();
+  ctx.touch({ label: "Rename language" });
   ctx.refresh();
 }
 
@@ -197,7 +197,7 @@ async function removeLanguage(ctx, language) {
   if (!confirmed) return;
   const snapshot = [...ctx.project.languages];
   deleteLanguage(ctx.project, language.id);
-  ctx.touch();
+  ctx.touch({ label: `Delete language ${language.name}` });
   ctx.refresh();
   const detail = wordCount ? ` ${wordCount} word${wordCount === 1 ? "" : "s"} were removed with the branch.` : "";
   toast(`Deleted ${language.name}.${detail}`, {
@@ -207,7 +207,7 @@ async function removeLanguage(ctx, language) {
       label: "Undo",
       onClick: () => {
         ctx.project.languages = snapshot;
-        ctx.touch();
+        ctx.touch({ label: `Restore language ${language.name}` });
         ctx.refresh();
         toast(`Restored ${language.name}.`, { type: "success" });
       },
@@ -299,7 +299,7 @@ export function renderTree(container, ctx) {
     if (!name) return;
     const language = createLanguage(name, null);
     ctx.project.languages.push(language);
-    ctx.touch();
+    ctx.touch({ label: `Add language ${language.name}` });
     ctx.refresh();
     ctx.navigate(`#/language/${language.id}/overview`);
     toast(`Created root language ${language.name}.`, { type: "success" });

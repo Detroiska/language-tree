@@ -468,7 +468,7 @@ export function renderChanges(container, ctx) {
     const anchor = group.children.at(-1) || parent;
     const index = language.soundChanges.indexOf(anchor);
     language.soundChanges.splice(index + 1, 0, child);
-    ctx.touch();
+    ctx.touch({ label: "Add rule" });
     ctx.refresh();
     window.setTimeout(() => {
       document.querySelector(`[data-rule-id="${child.id}"] .rule-input`)?.focus();
@@ -479,7 +479,7 @@ export function renderChanges(container, ctx) {
     button.addEventListener("click", () => {
       const rule = { id: uid("rule"), notation: "", note: "", enabled: true, parentId: null };
       language.soundChanges.push(rule);
-      ctx.touch();
+      ctx.touch({ label: "Add rule" });
       ctx.refresh();
       window.setTimeout(() => {
         document.querySelector(`[data-rule-id="${rule.id}"] .rule-input`)?.focus();
@@ -498,18 +498,18 @@ export function renderChanges(container, ctx) {
 
     notation.addEventListener("input", () => {
       rule.notation = notation.value;
-      ctx.touch();
+      ctx.touch({ label: "Edit rule" });
       updateRuleStatus(card, context, rule, parentDisabled);
       runTest();
       refreshCheck();
     });
     note.addEventListener("input", () => {
       rule.note = note.value;
-      ctx.touch();
+      ctx.touch({ label: "Edit rule" });
     });
     toggle.addEventListener("change", () => {
       rule.enabled = toggle.checked;
-      ctx.touch();
+      ctx.touch({ label: rule.enabled ? "Enable rule" : "Disable rule" });
       // Re-render so children of a disabled parent also show that they are
       // inactive. The rule tester and inherited check rerun with the view.
       ctx.refresh();
@@ -520,12 +520,12 @@ export function renderChanges(container, ctx) {
     });
     card.querySelector("[data-rule-up]")?.addEventListener("click", () => {
       if (!moveRule(rule, -1)) return;
-      ctx.touch();
+      ctx.touch({ label: "Move rule" });
       ctx.refresh();
     });
     card.querySelector("[data-rule-down]")?.addEventListener("click", () => {
       if (!moveRule(rule, 1)) return;
-      ctx.touch();
+      ctx.touch({ label: "Move rule" });
       ctx.refresh();
     });
     card.querySelector("[data-rule-delete]")?.addEventListener("click", () => {
@@ -533,7 +533,7 @@ export function renderChanges(container, ctx) {
         const index = language.soundChanges.indexOf(rule);
         if (index < 0) return;
         const [removed] = language.soundChanges.splice(index, 1);
-        ctx.touch();
+        ctx.touch({ label: "Delete rule" });
         ctx.refresh();
         toast("Rule deleted.", {
           type: "info",
@@ -542,7 +542,7 @@ export function renderChanges(container, ctx) {
             label: "Undo",
             onClick: () => {
               language.soundChanges.splice(index, 0, removed);
-              ctx.touch();
+              ctx.touch({ label: "Restore rule" });
               ctx.refresh();
             },
           },
@@ -555,7 +555,7 @@ export function renderChanges(container, ctx) {
       const index = language.soundChanges.indexOf(group.rule);
       const extra = block.length - 1;
       language.soundChanges.splice(index, block.length);
-      ctx.touch();
+      ctx.touch({ label: extra ? "Delete rule group" : "Delete rule" });
       ctx.refresh();
       toast(
         extra
@@ -568,7 +568,7 @@ export function renderChanges(container, ctx) {
             label: "Undo",
             onClick: () => {
               language.soundChanges.splice(index, 0, ...block);
-              ctx.touch();
+              ctx.touch({ label: "Restore rule group" });
               ctx.refresh();
             },
           },
@@ -609,7 +609,7 @@ export function renderChanges(container, ctx) {
           note: `Derived from ${parentLanguage.name}.`,
         });
       }
-      ctx.touch();
+      ctx.touch({ label: "Record word" });
       ctx.refresh();
       toast(`Recorded “${word.gloss}” as ${derived || "∅"}.`, { type: "success" });
     });

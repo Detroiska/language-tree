@@ -19,11 +19,13 @@ class ProjectStore {
   // #undoStack holds per-burst pre-edit states to undo into; #redoStack holds
   // states to redo into after an undo. #lastState is the pre-edit state of
   // the burst currently in progress; it becomes the next undo step on the
-  // next burst boundary.
+  // next burst boundary. Entries carry the label of the edit that produced
+  // them so undo/redo can tell the user what just happened.
   #undoStack = [];
   #redoStack = [];
   #lastState = null;
   #lastTouchAt = 0;
+  #lastLabel = null;
   #recording = false;
   #timer = null;
   #inFlight = false;
@@ -58,7 +60,7 @@ class ProjectStore {
     if (!this.project) return;
     this.revision += 1;
     this.project.updatedAt = new Date().toISOString();
-    if (this.#recording) this.#recordHistory();
+    if (this.#recording) this.#recordHistory(options.label);
     this.setSaveState(this.#inFlight ? "saving" : "pending");
     if (options.immediate) {
       this.flush();
@@ -70,15 +72,22 @@ class ProjectStore {
 
   // Called after a mutation (views edit first, then call touch()): pushes the
   // pre-edit state as an undo step unless this edit continues an active burst.
-  #recordHistory() {
+  // A label describes the edit for undo/redo feedback; bursts only coalesce
+  // while the label stays the same, so a different action always starts a new
+  // undo step even inside the time window.
+  #recordHistory(label = null) {
     const now = Date.now();
-    const coalesce = this.#undoStack.length > 0 && now - this.#lastTouchAt <= HISTORY_COALESCE_MS;
+    const coalesce =
+      this.#undoStack.length > 0 &&
+      now - this.#lastTouchAt <= HISTORY_COALESCE_MS &&
+      label === this.#lastLabel;
     if (!coalesce) {
-      this.#undoStack.push({ document: this.#lastState, time: now });
+      this.#undoStack.push({ document: this.#lastState, time: now, label: label || null });
       if (this.#undoStack.length > HISTORY_LIMIT) this.#undoStack.shift();
       this.#redoStack = [];
     }
     this.#lastTouchAt = now;
+    this.#lastLabel = label || null;
     this.#lastState = deepClone(this.project);
     this.#notifyHistory();
   }
@@ -91,21 +100,23 @@ class ProjectStore {
     return this.#redoStack.length > 0;
   }
 
+  // Both return null when there is nothing to do, otherwise an outcome
+  // object carrying the label of the change that was undone / redone.
   undo() {
-    if (!this.project || !this.#undoStack.length) return false;
+    if (!this.project || !this.#undoStack.length) return null;
     const entry = this.#undoStack.pop();
-    this.#redoStack.push({ document: deepClone(this.project), time: Date.now() });
+    this.#redoStack.push({ document: deepClone(this.project), time: Date.now(), label: entry.label });
     this.#applyHistory(entry.document);
-    return true;
+    return { label: entry.label };
   }
 
   redo() {
-    if (!this.project || !this.#redoStack.length) return false;
+    if (!this.project || !this.#redoStack.length) return null;
     const entry = this.#redoStack.pop();
-    this.#undoStack.push({ document: deepClone(this.project), time: Date.now() });
+    this.#undoStack.push({ document: deepClone(this.project), time: Date.now(), label: entry.label });
     if (this.#undoStack.length > HISTORY_LIMIT) this.#undoStack.shift();
     this.#applyHistory(entry.document);
-    return true;
+    return { label: entry.label, redo: true };
   }
 
   // Restoring a snapshot is a document change like any other: it marks the
@@ -115,6 +126,7 @@ class ProjectStore {
     this.project = deepClone(document);
     this.#lastState = deepClone(this.project);
     this.#lastTouchAt = 0;
+    this.#lastLabel = null;
     this.revision += 1;
     this.project.updatedAt = new Date().toISOString();
     this.setSaveState(this.#inFlight ? "saving" : "pending");

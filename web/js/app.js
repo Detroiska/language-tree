@@ -142,7 +142,7 @@ async function addRootLanguage() {
   if (!name) return;
   const language = createLanguage(name, null);
   store.project.languages.push(language);
-  store.touch();
+  store.touch({ label: `Add language ${language.name}` });
   render();
   store.navigate(`#/language/${language.id}/overview`);
   toast(`Created root language ${language.name}.`, { type: "success" });
@@ -217,9 +217,14 @@ function runHistoryStep(action) {
   // document-level undo would desync it.
   if (document.body.classList.contains("has-modal")) return false;
   const descriptor = focusDescriptor();
-  if (!action()) return false;
+  const outcome = action();
+  if (!outcome) return false;
   render({ preserveScroll: true });
   restoreFocus(descriptor);
+  // Undo used to happen silently; the label says what was reverted.
+  if (outcome.label) {
+    toast(`${outcome.redo ? "Redid" : "Undid"}: ${outcome.label}.`, { type: "info", duration: 2200 });
+  }
   return true;
 }
 
@@ -354,7 +359,7 @@ async function init() {
     });
     if (!title || title === store.project.title) return;
     store.project.title = title;
-    store.touch();
+    store.touch({ label: "Rename project" });
     renderSidebar(currentRoute);
     toast("Project renamed.", { type: "success" });
   });

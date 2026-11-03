@@ -191,7 +191,7 @@ function bindCellEditing(container, ctx, chart, kind) {
       if (values.length) {
         const next = addValuesToCell(chart, td.dataset.rowId, td.dataset.colId, values);
         refreshCell(td, chart, next, container, kind);
-        ctx.touch();
+        ctx.touch({ label: "Edit chart" });
       }
     }
     input.remove();
@@ -229,7 +229,7 @@ function bindCellEditing(container, ctx, chart, kind) {
         if (values.length) {
           const next = addValuesToCell(chart, td.dataset.rowId, td.dataset.colId, values);
           refreshCell(td, chart, next, container, kind);
-          ctx.touch();
+          ctx.touch({ label: "Edit chart" });
         }
         input.value = "";
       } else if (event.key === "Escape") {
@@ -256,7 +256,7 @@ function bindCellEditing(container, ctx, chart, kind) {
       const index = Number(removeButton.dataset.chipIndex);
       const values = removeValueFromCell(chart, td.dataset.rowId, td.dataset.colId, index);
       refreshCell(td, chart, values, container, kind);
-      ctx.touch();
+      ctx.touch({ label: "Edit chart" });
       return;
     }
     if (event.target.closest(".cell-input")) return;
@@ -269,7 +269,7 @@ function bindNotes(container, ctx, chart, kind) {
   if (!notes) return;
   notes.addEventListener("input", () => {
     chart.notes = notes.value;
-    ctx.touch();
+    ctx.touch({ label: "Edit chart notes" });
   });
 }
 
@@ -326,7 +326,7 @@ function addSubdivision(ctx, chart, axis, nodeId) {
     }
     const added = addAxisChild(axis === "rows" ? chart.rows : chart.columns, node.id, label, axis === "rows" ? "row" : "col");
     if (!added) return;
-    ctx.touch();
+    ctx.touch({ label: `Add chart ${singular}` });
     ctx.refresh();
     if (moved) {
       toast(`Existing sounds under “${node.label}” moved to the new “Plain” ${singular.replace("sub", "")}.`, { type: "info", duration: 5200 });
@@ -345,7 +345,7 @@ function addSibling(ctx, chart, axis, nodeId) {
     if (!label) return;
     const added = addAxisSibling(axis === "rows" ? chart.rows : chart.columns, nodeId, label, axis === "rows" ? "row" : "col");
     if (!added) return;
-    ctx.touch();
+    ctx.touch({ label: `Add chart ${singular}` });
     ctx.refresh();
   });
 }
@@ -361,7 +361,7 @@ function renameAxisNode(ctx, chart, axis, nodeId) {
   }).then((label) => {
     if (!label || label === node.label) return;
     node.label = label;
-    ctx.touch();
+    ctx.touch({ label: "Rename chart label" });
     ctx.refresh();
   });
 }
@@ -394,7 +394,7 @@ function deleteAxisNode(ctx, chart, axis, nodeId) {
       }
     }
     removeAxisNode(nodes, nodeId);
-    ctx.touch();
+    ctx.touch({ label: `Delete chart ${axis === "rows" ? "row" : "column"}` });
     ctx.refresh();
   });
 }
@@ -416,13 +416,13 @@ function openAxisActions(ctx, anchor, chart, axis, nodeId) {
     { separator: true },
     { label: moveEarlier, icon: earlierIcon, disabled: context.index === 0, onClick: () => {
       if (moveAxisNode(nodes, nodeId, -1)) {
-        ctx.touch();
+        ctx.touch({ label: `Move chart ${singular}` });
         ctx.refresh();
       }
     } },
     { label: moveLater, icon: laterIcon, disabled: context.index === context.siblings.length - 1, onClick: () => {
       if (moveAxisNode(nodes, nodeId, 1)) {
-        ctx.touch();
+        ctx.touch({ label: `Move chart ${singular}` });
         ctx.refresh();
       }
     } },
@@ -443,7 +443,7 @@ function addTopLevel(ctx, chart, axis) {
     const node = { id: uid(axis === "rows" ? "row" : "col"), label, children: [] };
     if (axis === "rows") chart.rows.push(node);
     else chart.columns.push(node);
-    ctx.touch();
+    ctx.touch({ label: `Add chart ${singular}` });
     ctx.refresh();
   });
 }

@@ -65,7 +65,7 @@ async function addDaughter(ctx) {
   if (!name) return;
   const child = createLanguage(name, ctx.language.id, ctx.language.inventory, ctx.language.phonotactics);
   ctx.project.languages.push(child);
-  ctx.touch();
+  ctx.touch({ label: `Add language ${child.name}` });
   ctx.refresh();
   ctx.navigate(languageTabHref(child, "overview"));
   toast(`Created ${child.name}.`, { type: "success" });
@@ -83,7 +83,7 @@ async function addAncestor(ctx) {
   if (!name) return;
   const ancestor = createAncestor(ctx.project, ctx.language.id, name);
   if (!ancestor) return;
-  ctx.touch();
+  ctx.touch({ label: `Add language ${ancestor.name}` });
   ctx.refresh();
   ctx.navigate(languageTabHref(ancestor, "overview"));
   toast(`Created ${ancestor.name} above ${ctx.language.name}.`, { type: "success" });
@@ -102,7 +102,7 @@ async function addSibling(ctx) {
   if (!name) return;
   const sibling = createSibling(ctx.project, ctx.language.id, name);
   if (!sibling) return;
-  ctx.touch();
+  ctx.touch({ label: `Add language ${sibling.name}` });
   ctx.refresh();
   ctx.navigate(languageTabHref(sibling, "overview"));
   toast(`Created ${sibling.name} beside ${ctx.language.name}.`, { type: "success" });
@@ -117,15 +117,16 @@ async function renameLanguage(ctx) {
   });
   if (!name || name === ctx.language.name) return;
   ctx.language.name = name;
-  ctx.touch();
+  ctx.touch({ label: "Rename language" });
   ctx.refresh();
 }
 
 async function deleteCurrent(ctx) {
+  const languageName = ctx.language.name;
   const count = descendantsCount(ctx.project, ctx.language.id);
   const message = count
-    ? `<strong>${esc(ctx.language.name)}</strong> and its <strong>${count}</strong> descendant${count === 1 ? "" : "s"} will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`
-    : `<strong>${esc(ctx.language.name)}</strong> will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`;
+    ? `<strong>${esc(languageName)}</strong> and its <strong>${count}</strong> descendant${count === 1 ? "" : "s"} will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`
+    : `<strong>${esc(languageName)}</strong> will be removed. You can undo this immediately afterward; once committed, earlier versions also remain in git history.`;
   const confirmed = await confirmDialog("Delete this language?", message, {
     confirmLabel: count ? `Delete ${count + 1} languages` : "Delete language",
     danger: true,
@@ -134,20 +135,20 @@ async function deleteCurrent(ctx) {
   const parentId = ctx.language.parentId;
   const snapshot = [...ctx.project.languages];
   deleteLanguage(ctx.project, ctx.language.id);
-  ctx.touch();
+  ctx.touch({ label: `Delete language ${languageName}` });
   ctx.refresh();
   if (parentId && findLanguage(ctx.project, parentId)) ctx.navigate(languageTabHref({ id: parentId }, "overview"));
   else ctx.navigate("#/tree");
-  toast(`Deleted ${ctx.language.name}.`, {
+  toast(`Deleted ${languageName}.`, {
     type: "info",
     duration: 7000,
     action: {
       label: "Undo",
       onClick: () => {
         ctx.project.languages = snapshot;
-        ctx.touch();
+        ctx.touch({ label: `Restore language ${languageName}` });
         ctx.refresh();
-        toast(`Restored ${ctx.language.name}.`, { type: "success" });
+        toast(`Restored ${languageName}.`, { type: "success" });
       },
     },
   });
@@ -343,7 +344,7 @@ function renderOverview(content, ctx) {
   const notes = content.querySelector("[data-language-notes]");
   notes.addEventListener("input", () => {
     language.notes = notes.value;
-    ctx.touch();
+    ctx.touch({ label: "Edit notes" });
   });
 
   content.querySelectorAll("[data-goto-tab]").forEach((button) => {
@@ -374,7 +375,7 @@ function renderOverview(content, ctx) {
       toast("Could not change the parent language.", { type: "error" });
       return;
     }
-    ctx.touch();
+    ctx.touch({ label: "Change parent language" });
     ctx.refresh();
     toast(nextParent ? "Parent language updated. Inherited checks now use the new ancestor." : "Language is now a root.", { type: "success" });
   });

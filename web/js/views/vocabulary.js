@@ -267,7 +267,7 @@ function openBulkDialog(ctx, language, words) {
         if (!ready.length) return;
         const result = applyWordList(language, ready, mode);
         close();
-        ctx.touch();
+        ctx.touch({ label: `Import ${ready.length} word${ready.length === 1 ? "" : "s"}` });
         ctx.refresh();
         const parts = [
           `${result.added} added`,
@@ -439,7 +439,7 @@ export function renderVocabulary(container, ctx) {
     lexiconFilter.status = "all";
     const word = { id: uid("word"), gloss: "", form: "", note: "" };
     language.vocabulary.push(word);
-    ctx.touch();
+    ctx.touch({ label: "Add word" });
     ctx.refresh();
     window.setTimeout(() => {
       const row = document.querySelector(`[data-word-id="${word.id}"]`);
@@ -475,7 +475,7 @@ export function renderVocabulary(container, ctx) {
       input.addEventListener("input", () => {
         const field = input.dataset.wordField;
         word[field] = input.value;
-        ctx.touch();
+        ctx.touch({ label: "Edit word" });
         if (field === "gloss" || field === "form") updateRowCheck(row, ctx, word, parent);
         if (field === "form") {
           const result = checker.validate(word.form);
@@ -523,7 +523,7 @@ export function renderVocabulary(container, ctx) {
       const index = language.vocabulary.indexOf(word);
       if (index < 0) return;
       const [removed] = language.vocabulary.splice(index, 1);
-      ctx.touch();
+      ctx.touch({ label: "Delete word" });
       ctx.refresh();
       toast("Word deleted.", {
         type: "info",
@@ -536,7 +536,7 @@ export function renderVocabulary(container, ctx) {
             const target = ctx.language;
             if (!target || target.vocabulary.some((entry) => entry.id === removed.id)) return;
             target.vocabulary.splice(Math.min(index, target.vocabulary.length), 0, removed);
-            ctx.touch();
+            ctx.touch({ label: "Restore word" });
             ctx.refresh();
           },
         },

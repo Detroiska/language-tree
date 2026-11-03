@@ -453,7 +453,7 @@ export function renderCognates(container, ctx) {
           note: `Derived from ${source.name}.`,
         });
       }
-      ctx.touch();
+      ctx.touch({ label: "Record word" });
       ctx.refresh();
       toast(`Recorded “${word.gloss}” as ${cell.derived || "∅"} in ${target.name}.`, { type: "success" });
     });

@@ -526,14 +526,14 @@ export function renderPhonotactics(container, ctx) {
       `[data-class-row][data-class-index="${index}"] [data-class-field="sounds"]`
     );
     if (input) input.value = entry.sounds;
-    ctx.touch();
+    ctx.touch({ label: "Edit category" });
     refresh();
   };
 
   const addClassRow = (entry = { name: "", sounds: "" }) => {
     const classes = language.phonotactics.classes;
     classes.push(entry);
-    ctx.touch();
+    ctx.touch({ label: "Add category" });
     renderClassList();
     refresh();
     focusClassInput(classes.length - 1);
@@ -552,7 +552,7 @@ export function renderPhonotactics(container, ctx) {
     const entry = language.phonotactics.classes[index];
     if (!entry) return;
     entry[field.dataset.classField] = field.value;
-    ctx.touch();
+    ctx.touch({ label: "Edit category" });
     refresh();
   });
 
@@ -561,7 +561,7 @@ export function renderPhonotactics(container, ctx) {
     if (removeButton) {
       const row = removeButton.closest("[data-class-row]");
       language.phonotactics.classes.splice(Number(row.dataset.classIndex), 1);
-      ctx.touch();
+      ctx.touch({ label: "Delete category" });
       renderClassList();
       refresh();
       return;
@@ -598,7 +598,7 @@ export function renderPhonotactics(container, ctx) {
   container.querySelectorAll("[data-phonotactics-field]").forEach((input) => {
     input.addEventListener("input", () => {
       language.phonotactics[input.dataset.phonotacticsField] = input.value;
-      ctx.touch();
+      ctx.touch({ label: "Edit phonotactics" });
       refresh();
     });
   });
@@ -609,7 +609,7 @@ export function renderPhonotactics(container, ctx) {
       language.phonotactics.template = template;
       const templateInput = container.querySelector('[data-phonotactics-field="template"]');
       if (templateInput) templateInput.value = template;
-      ctx.touch();
+      ctx.touch({ label: "Edit phonotactics" });
       refresh();
       templateInput?.focus();
     });
