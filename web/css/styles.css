@@ -2168,28 +2168,6 @@ a.lineage-chip:hover {
   align-items: center;
 }
 
-.chart-hint {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 9px 20px;
-  color: var(--muted);
-  background: var(--accent-faint);
-  border-bottom: 1px solid #dce9e2;
-  font-size: 10.5px;
-}
-
-.chart-hint .icon {
-  width: 14px;
-  height: 14px;
-  margin-top: 1px;
-  color: var(--accent);
-}
-
-.chart-hint strong {
-  color: var(--ink-soft);
-}
-
 .chart-scroll {
   width: 100%;
   overflow: auto;
@@ -4394,10 +4372,6 @@ th:hover > .axis-menu,
   .panel-head {
     flex-wrap: wrap;
     padding: 15px 16px;
-  }
-
-  .chart-hint {
-    padding: 9px 16px;
   }
 
   .chart-notes {

@@ -463,10 +463,6 @@ function chartPanel(ctx, chart, kind, title, subtitle) {
           <button class="button button-quiet button-small" type="button" data-add-axis="columns">${icon("plus")}Column</button>
         </div>
       </header>
-      <div class="chart-hint">
-        ${icon("info")}
-        <span>Click any cell to add sounds. Use the <strong>⋯</strong> menu in a header to add subrows, subcolumns, rename, reorder, or delete.</span>
-      </div>
       ${tableMarkup(chart, kind)}
       <div class="chart-notes">
         <label class="field">
