@@ -168,6 +168,34 @@ class ProjectStore {
     }
   }
 
+  // Closing the tab, reloading, or navigating away fires pagehide. The normal
+  // debounced flush is async and may be torn down before the request leaves
+  // the page, which loses the last SAVE_DELAY window of edits even when the
+  // user answers the beforeunload prompt with "leave". A keepalive fetch is
+  // allowed to finish in the background after the page is gone. Browsers cap
+  // keepalive bodies (64 KiB), so oversized projects still rely on the
+  // beforeunload warning; nothing is sent when the store is already clean.
+  flushOnExit() {
+    if (!this.project || !this.dirty) return;
+    let body = "";
+    try {
+      body = JSON.stringify(this.project);
+    } catch {
+      return; // A document that cannot be serialized was never savable.
+    }
+    if (!body || body.length > 60000) return;
+    try {
+      void fetch("/api/project", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      // Best effort only: the beforeunload warning remains the last resort.
+    }
+  }
+
   get dirty() {
     return this.revision !== this.savedRevision;
   }
@@ -210,3 +238,8 @@ window.addEventListener("beforeunload", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden" && store.dirty) store.flush();
 });
+
+// visibilitychange covers tab switches, where the page stays alive and the
+// async flush can complete. pagehide also fires for closes and reloads, where
+// only a keepalive request outlives the page.
+window.addEventListener("pagehide", () => store.flushOnExit());

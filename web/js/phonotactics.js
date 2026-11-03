@@ -670,7 +670,19 @@ function parseConstraintPattern(source, context, classes) {
         inner = inner.slice(1).trim();
         if (!inner) return { ok: false, error: "A negated set cannot be empty." };
       }
-      const values = expandSetValues(inner, context, classes);
+      // A broken chart class inside a set throws TemplateError. The template
+      // compiler catches it, but the forbidden-sequence loop in
+      // compilePhonotactics runs before its try/catch — an escape would take
+      // the whole view down, so a typo must land in constraintErrors instead.
+      let values;
+      try {
+        values = expandSetValues(inner, context, classes);
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof TemplateError ? error.message : `Could not read the set “[${inner}]”.`,
+        };
+      }
       if (!values.length) return { ok: false, error: `Could not read the set “[${inner}]”.` };
       atoms.push({ type: "set", values, negated });
       index = close + 1;

@@ -27,6 +27,23 @@ DATA_FILE = DATA_DIR / "project.json"
 MAX_BODY_BYTES = 12 * 1024 * 1024
 SAVE_LOCK = threading.Lock()
 
+# A browser always sends a Host header. When the server is bound to loopback,
+# any other Host means the request was routed here by something other than
+# typing the local address — the classic DNS-rebinding setup, where a remote
+# page's domain resolves to 127.0.0.1 and reads the API same-origin. Requests
+# with an unexpected Host are refused before any data is served. Custom
+# --host values (0.0.0.0, a LAN address) opt out: those deployments serve
+# other machines by design and are documented as trusted-network-only.
+LOOPBACK_BINDS = {"127.0.0.1", "localhost", "::1"}
+LOOPBACK_HOSTS = LOOPBACK_BINDS | {""}  # empty Host = HTTP/1.0 client
+
+
+def host_name_of(headers) -> str:
+    host = (headers.get("Host") or "").strip().lower()
+    if host.startswith("["):  # IPv6 literal, e.g. [::1]:8765
+        return host[1:].split("]")[0]
+    return host.split(":")[0]  # drop the port
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -71,6 +88,18 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_DIR), **kwargs)
 
+    def host_allowed(self) -> bool:
+        """False means a response was already sent; the caller should return."""
+        allowed = getattr(self.server, "allowed_hosts", None)
+        if allowed is None:
+            return True
+        host = host_name_of(self.headers)
+        if host in allowed:
+            return True
+        self.log_error("Unexpected Host header %r from %s", host, self.client_address[0])
+        self.send_json({"error": "Unexpected Host header."}, HTTPStatus.FORBIDDEN)
+        return False
+
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -90,6 +119,8 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
+        if not self.host_allowed():
+            return
         path = urlparse(self.path).path
         if path == "/api/health":
             self.send_json({"ok": True, "time": utc_now()})
@@ -108,6 +139,8 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_PUT(self) -> None:  # noqa: N802 (stdlib naming)
+        if not self.host_allowed():
+            return
         path = urlparse(self.path).path
         if path != "/api/project":
             self.send_json({"error": "Unknown API endpoint."}, HTTPStatus.NOT_FOUND)
@@ -161,13 +194,17 @@ def ensure_data_file() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Language Tree web UI.")
-    parser.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: 127.0.0.1)")
+    parser.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: 127.0.0.1). Loopback binds refuse requests whose Host header names another machine.")
     parser.add_argument("--port", type=int, default=8765, help="Port to use (default: 8765)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically")
     args = parser.parse_args()
 
     ensure_data_file()
     server = ThreadingHTTPServer((args.host, args.port), LanguageTreeHandler)
+    # Loopback binds serve this machine only, so the Host header must say so
+    # too; any other name is treated as a rebinding attempt. Non-loopback
+    # binds serve a network deliberately and skip the check.
+    server.allowed_hosts = LOOPBACK_HOSTS if args.host.strip().lower() in LOOPBACK_BINDS else None
     url = f"http://{args.host}:{args.port}/"
     print()
     print("  Language Tree")

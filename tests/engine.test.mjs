@@ -226,6 +226,32 @@ truthy(
   cyclic.compiled.classes.entries.every((entry) => entry.errors.length > 0),
 );
 
+// A bracketed chart class with a typo must surface as a constraint error,
+// not escape compilePhonotactics as an exception (the README's own
+// “[plosive.plain]#” example hits this on a chart without a Plain
+// subdivision — it used to take the whole view down).
+const brokenForbiddenSet = createPhonotacticsChecker({
+  ...language,
+  phonotactics: {
+    template: "(C)V(C)",
+    onsets: "",
+    codas: "",
+    forbidden: "VV, [nosuch.label], [plosive.plain]#",
+    notes: "",
+    classes: [],
+  },
+});
+truthy(
+  "broken class in a forbidden set is a constraint error, not a crash",
+  brokenForbiddenSet.compiled.ok &&
+    brokenForbiddenSet.compiled.constraintErrors.length === 2 &&
+    /No chart row or column is labelled/.test(brokenForbiddenSet.compiled.constraintErrors[0]),
+);
+truthy(
+  "words still validate while forbidden sets are broken",
+  brokenForbiddenSet.validate("kasa").ok,
+);
+
 /* ---- report builder ------------------------------------------------------ */
 
 const markdown = buildMarkdown(project);
