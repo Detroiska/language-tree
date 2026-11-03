@@ -199,6 +199,17 @@ git commit -m "Document Old Coastal sound changes"
 
 The server writes atomically (`.json.tmp` then replace), so an interrupted save does not leave a half-written project. Git is the safety net; commit whenever a language or branch reaches a useful state.
 
+
+## Tests
+
+The parser and derivation engines are plain ES modules without DOM dependencies, so they run directly under Node:
+
+```sh
+node tests/engine.test.mjs
+```
+
+The suite covers rule compilation and application, chart-derived classes, the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, and the Markdown report builder.
+
 ## Project layout
 
 ```text
