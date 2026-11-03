@@ -144,7 +144,9 @@ class ProjectStore {
       const result = await api.saveProject(snapshot);
       saved = true;
       this.savedRevision = revisionAtStart;
-      if (result?.savedAt) this.project.updatedAt = snapshot.updatedAt;
+      // Adopt the server's stamp so the in-memory document matches what was
+      // actually written (the server is the authority on save time).
+      if (result?.savedAt) this.project.updatedAt = result.savedAt;
       this.saveError = "";
       if (this.revision === revisionAtStart) this.setSaveState("saved");
       else this.setSaveState("pending");
