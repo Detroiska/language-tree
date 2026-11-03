@@ -456,7 +456,12 @@ export function renderVocabulary(container, ctx) {
   const statusSelect = container.querySelector("[data-word-status-filter]");
   if (filterInput && statusSelect) {
     statusSelect.value = lexiconFilter.status;
-    if (statusSelect.value !== lexiconFilter.status) lexiconFilter.status = "all"; // option absent (no parent)
+    if (statusSelect.value !== lexiconFilter.status) {
+      // The remembered option is absent (no parent language): fall back to All
+      // and reflect that in the control instead of leaving it blank.
+      lexiconFilter.status = "all";
+      statusSelect.value = "all";
+    }
     filterInput.addEventListener("input", () => {
       lexiconFilter.text = filterInput.value;
       applyFilters();
