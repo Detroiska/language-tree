@@ -22,8 +22,8 @@ The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the br
 
 - **Editable family tree** — root languages and daughter languages, with add, rename, delete, and reparent actions.
 - **Phonology charts** — separate consonant and vowel charts with editable rows and columns. Any row or column can be subdivided (aspiration, labialization, rounding, and so on).
-- **Phonotactics** — a per-language syllable template plus optional onset, coda, and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
-- **Ordered sound changes** — standard-style notation such as `p > f / V _ V`, with a live tester against ancestral forms.
+- **Phonotactics** — a per-language syllable template, named sound categories (`N` nasals, `G` glides, and whatever else you define), chart classes derived live from the phonology tables (`plosive.plain`, `V.back`), plus optional onset, coda, and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
+- **Ordered sound changes** — standard-style notation such as `p > f / V _ V` or `[plosive.plain] > ∅ / _ #`, with a live tester against ancestral forms.
 - **Basic vocabulary** — gloss + IPA form, with an inherited-form check that applies the current language's rules to the parent's words and a phonotactic validity check on every form.
 - **Cognate explorer** — follow any recorded gloss down the family: each daughter's chain-derived form next to its recorded form, with a one-click record action and a whole-lexicon matrix view.
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Shift+Z` (or the buttons in the sidebar footer) undo and redo any edit — words, rules, charts, tree changes — with rapid typing merged into single steps and each step written back to the project file.
@@ -56,7 +56,7 @@ The consonant chart starts with place columns and manner rows. The vowel chart s
 
 ### Phonotactics
 
-The **Phonotactics** tab describes the shapes a syllable may take and the sequences a word may not contain. A new language starts with `(C)V(C)`; daughters inherit their parent's template, which you can then adjust.
+The **Phonotactics** tab describes the shapes a syllable may take and the sequences a word may not contain. A new language starts with `(C)V(C)`; daughters inherit their parent's template, categories, and constraints, which you can then adjust.
 
 ```text
 (C)V(C)        optional onset, vowel, optional coda
@@ -70,16 +70,35 @@ Template syntax:
 | Piece | Meaning |
 | --- | --- |
 | `C` / `V` | any charted consonant / vowel |
-| `p`, `t͡ʃ`, … | a literal sound |
+| `N`, `G`, `L`, … | a sound category defined for this language |
+| `p`, `t͡ʃ`, … | a literal sound (write `\N` to keep a literal after defining N) |
 | `[ptk]` | one of the listed sounds |
+| `[Nt]` | sets may mix literals and categories; `[^N]` matches anything else |
+| `plosive.plain`, `back`, `V.back` | a chart class derived from the phonology tables (see below) |
 | `(C)` | an optional group |
 | `(C|CC)` | optional alternatives inside a group |
 | `C?V` | optional single slot |
 
+**Categories** give the template more letters. Each language keeps its own list (name + members) in the Categories panel: `N` for nasals, `G` for glides, `L` for liquids, `T` for stops, `OBS` for whatever you want. Rules of thumb:
+
+- Names are 1–6 capital letters; `C` and `V` are built in and cannot be redefined. `C` and `V` still match category members in their own slots, so subsets need no extra notation — in `NVC` the final `C` admits nasals.
+- A category's sound list may also name `C`, `V`, a chart class (below), or another category's letter, so classes compose: `S = N L G` collects all sonorants, `T = plosive.plain l` collects the plain stops plus l. Browse "Insert from the chart" to pull the sounds of a chart row without typing IPA.
+- A shape needs at least one nucleus-capable slot: `V`, a literal vowel, or a category whose members are all vowels. Mixed sets (glides+vowels) can fill onset and coda slots but cannot carry the nucleus alone.
+- Categories work in **forbidden sequences** too: `NN` bans adjacent nasals. Allowed onset and coda lists stay literal.
+
+**Chart classes** name a slice of the phonology table instead of listing sounds. Write the labels of the rows and columns, joined by dots — `plosive.plain` (the plain stops), `plosive.velar`, `dental-alveolar`, `V.back`, `V.back.short`, or just `back`. The classes are read from the charts on every render, so renaming a row or moving a sound updates every rule, template, and category that uses it.
+
+- A sound belongs to a class when **every** listed label applies to it, on whichever axis (row or column) that label occurs in that chart. Labels present on both axes constrain both — that is why `plosive.plain` picks out p, t and k but not the aspirated pʰ/tʰ/kʰ or the prenasal m͜b/n͜d, and why `back` is exactly the back vowels {u, o, uː, oː}.
+- `V.` / `C.` pin the reference to the vowel or consonant chart (`V.back`, `C.plosive.plain`). Without a pin, a class covers every chart that mentions the labels.
+- A bare word counts as a class when it matches a chart label (case, spaces, slashes and dashes all fold: `Dental/Alveolar` ↔ `dental-alveolar`). Single letters stay phonemes; write `\X` to force a literal sound when a name collides with a label.
+- A class that names no label **fails loudly** ("No chart row or column is labelled …"), so a typo never silently matches nothing. Outputs of sound changes must still be concrete sounds.
+- Inside compact template runs the class comes after the leading atoms: `CV.back` is a consonant plus a back vowel, `T.velar` is a T sound followed by a velar sound.
+- Classes work in sets and forbidden sequences too: `[back t]`, `[^back]`, `[plosive.plain]#` (bans a final plain stop), `[back][plosive.plain]` (a back vowel before a plain stop).
+
 Constraints are optional lists:
 
 - **Allowed onsets** and **allowed codas** restrict the clusters the template permits. Leaving a list empty allows everything; an empty onset or coda is always allowed.
-- **Forbidden sequences** match anywhere in the word. `VV` bans adjacent vowels, `CCC` bans three-consonant runs, `#CC` bans word-initial clusters, and `CC#` bans word-final clusters. `C`, `V`, `[ptk]`, literals, and `#` are supported.
+- **Forbidden sequences** match anywhere in the word. `VV` bans adjacent vowels, `CCC` bans three-consonant runs, `#CC` bans word-initial clusters, and `CC#` bans word-final clusters. `C`, `V`, categories, chart classes, `[ptk]`, literals, and `#` are supported; examples: `NN` (nasal+nasal), `[plosive.plain]#` (final plain stop), `[back][plosive.plain]` (back vowel before a plain stop).
 
 The template is expanded into a finite set of syllable shapes. Words are syllabified with the maximal onset principle, and every sound must be in the language's own chart. The **Try a form** panel validates an arbitrary word, while **Vocabulary check** lists every recorded form with its syllable break and any problems. The same check appears in the Vocabulary tab.
 
@@ -92,6 +111,8 @@ p > f / V _ V       p becomes f between vowels
 V > ∅ / _ #         word-final vowels are lost
 k > tʃ / _ i        k palatalizes before i
 [td] > ∅ / _ #      word-final t or d is lost
+[plosive.plain] > ∅ / _ #   word-final plain stops are lost
+t > tʰ / _ back     t aspirates before a back vowel
 C > ∅ / _ C         a consonant is lost before another consonant
 ```
 
@@ -106,13 +127,16 @@ Supported notation:
 | `V` / `C` | any vowel / consonant in the charted ancestry |
 | `[aeiou]` | set of sounds |
 | `[^aeiou]` | negated set |
+| `[plosive.plain]`, `back`, `V.back` | chart class — labels dotted together, read from the phonology tables |
 | `∅` / `0` | deletion |
+
+Chart classes work on the input side and in environments, alone or inside a set: `[plosive.plain] > ∅ / _ #`, `t > tʰ / _ back`, `u > ∅ / [plosive.plain] _`. A class expands to the concrete sounds the charts currently list, so outputs stay ordinary sounds and a renamed row immediately changes which sounds a rule touches. A broken class name is reported in the rule's status instead of silently matching nothing.
 
 Rules are applied in order. Within a rule, matching is left-to-right and non-overlapping. Each rule runs exactly once per application; it does not re-feed its own output.
 
 The **Rule tester** applies the current language's direct rules to a form from its immediate ancestor and shows each step. The **Inherited vocabulary check** compares the derived output with the current language's recorded glosses. **Record** creates a vocabulary entry from a derived form.
 
-Limitations of the current engine: no feature bundles, stress, syllable-boundary notation, optional elements, phonological exceptions, or allomorphy. That is deliberate for this first version; the parser is isolated in `web/js/phonology.js` so it can grow. Phonotactics deliberately uses a finite expansion of optional groups rather than full regex repetition, and checks surface forms only; it does not yet model resyllabification across morpheme boundaries or lexical exceptions.
+Limitations of the current engine: no feature bundles (chart classes are derived from the table's own row and column labels, not from a feature system; categories are explicit sound lists), stress, syllable-boundary notation, optional elements, phonological exceptions, or allomorphy. That is deliberate for this first version; the parser is isolated in `web/js/phonology.js` so it can grow. Phonotactics deliberately uses a finite expansion of optional groups rather than full regex repetition, and checks surface forms only; it does not yet model resyllabification across morpheme boundaries or lexical exceptions.
 
 ### Vocabulary
 
@@ -183,6 +207,7 @@ language-tree/
       ├─ store.js          # load, autosave, save status
       ├─ api.js
       ├─ model.js          # data model, defaults, tree/chart helpers
+      ├─ naturalclasses.js # chart-derived natural classes (plosive.plain, V.back)
       ├─ phonology.js      # rule parser and derivation engine
       ├─ phonotactics.js   # syllable template parser and word checker
       ├─ search.js         # Ctrl+K quick search palette

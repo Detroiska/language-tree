@@ -159,16 +159,18 @@ function notationHelpMarkup() {
           <li><code>V &gt; ∅ / _ #</code><span>Delete word-final vowels.</span></li>
           <li><code>k &gt; tʃ / _ i</code><span>Palatalize k before i.</span></li>
           <li><code>[td] &gt; ∅ / _ #</code><span>Delete t or d word-finally.</span></li>
+          <li><code>[back] &gt; ∅ / _ #</code><span>Delete final back vowels — a chart class instead of a sound list.</span></li>
           <li><code>C &gt; ∅ / _ C</code><span>Delete a consonant before another consonant.</span></li>
         </ul>
         <dl class="help-terms">
           <div><dt>V, C</dt><dd>Any vowel or consonant in the language’s inventory.</dd></div>
-          <div><dt>[…]</dt><dd>A set of sounds; <code>[^…]</code> negates it.</dd></div>
+          <div><dt>[…]</dt><dd>A set of sounds; <code>[^…]</code> negates it. Items may be sounds, categories, or chart classes as separate words.</dd></div>
+          <div><dt>plosive.plain</dt><dd>A chart class: dotted labels read straight from the Phonology charts, on their own or inside sets. A sound belongs when every label applies on each axis that has it — write <code>back</code>, <code>V.back</code>, or dotted paths like <code>plosive.velar</code>; pin via <code>V.</code> / <code>C.</code>.</dd></div>
           <div><dt>#</dt><dd>Word boundary in an environment.</dd></div>
           <div><dt>_</dt><dd>Marks where the input sits in the environment.</dd></div>
           <div><dt>∅, 0</dt><dd>Deletion.</dd></div>
         </dl>
-        <p class="help-foot">Rules are applied in order. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts.</p>
+        <p class="help-foot">Rules are applied in order. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry.</p>
       </div>
     </details>`;
 }

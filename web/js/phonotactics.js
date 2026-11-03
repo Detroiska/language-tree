@@ -1,9 +1,11 @@
 import { contextForInventory, normalizeForm } from "./phonology.js";
+import { classForText, parseClassRef, normalizeLabelKey } from "./naturalclasses.js";
 
 // A syllable template is a small regular expression over sounds:
 //   C, V        any charted consonant or vowel
+//   N, G, L, …  a category defined for this language (nasals, glides, …)
 //   p, t͡ʃ, ...  a literal sound
-//   [ptk]       a set of literal sounds
+//   [ptk]       a set of literal sounds (categories work inside too: [Nt])
 //   (...)       an optional group (the conventional syllable-template syntax)
 //   a|b         alternatives inside a group
 //   ?           optional, as in C?V
@@ -17,21 +19,189 @@ const REPEAT_QUANTIFIERS = new Set(["*", "+"]);
 
 class TemplateError extends Error {}
 
+/* ---- Custom sound categories ---------------------------------------------- */
+
+// Categories are named sound groups defined per language: N = nasals,
+// G = glides, OBS = obstruents, … Inside the template and forbidden
+// patterns a category letter matches one sound from its member list, so
+// subset relations come for free — C still matches a nasal in another
+// slot. A category's sound list may contain literal sounds, C or V (all
+// charted consonants or vowels), or another category's letter, so sets
+// can be composed (S = N L G).
+export function splitClassSounds(text) {
+  return String(text || "")
+    .split(/[\s,;]+/u)
+    .filter(Boolean);
+}
+
+export function compileClasses(rawEntries, context) {
+  const entries = (Array.isArray(rawEntries) ? rawEntries : []).map((entry) => {
+    const compiled = {
+      name: typeof entry?.name === "string" ? entry.name.trim() : "",
+      sounds: typeof entry?.sounds === "string" ? entry.sounds : "",
+      values: [],
+      notCharted: new Set(),
+      allVowels: false,
+      errors: [],
+      warnings: [],
+      resolved: false,
+    };
+    if (!compiled.name) compiled.errors.push("The category has no name yet.");
+    else if (!/^[A-Z]{1,6}$/u.test(compiled.name)) {
+      compiled.errors.push("Category names are 1–6 capital letters (like N, LIQ or OBS).");
+    } else if (compiled.name === "C" || compiled.name === "V") {
+      compiled.errors.push("C and V are built in: C is any charted consonant, V any charted vowel.");
+    }
+    return compiled;
+  });
+
+  const byName = new Map();
+  for (const entry of entries) {
+    if (entry.errors.length || !entry.name) continue;
+    if (byName.has(entry.name)) {
+      // A duplicate row is inert: it may not override the definition above
+      // it, and references resolve to the first occurrence.
+      entry.errors.push(`The name “${entry.name}” is already used by another category.`);
+      continue;
+    }
+    byName.set(entry.name, entry);
+  }
+
+  const resolve = (entry, visiting) => {
+    if (visiting.has(entry.name)) {
+      entry.errors.push("A category cannot include itself, directly or indirectly.");
+      entry.resolved = true;
+      entry.values = [];
+      return;
+    }
+    if (entry.resolved) return;
+    entry.resolved = true;
+    const next = new Set(visiting);
+    next.add(entry.name);
+    const values = [];
+    const notCharted = new Set();
+    for (const item of splitClassSounds(entry.sounds)) {
+      if (item === "C") {
+        values.push(...context.consonants);
+        continue;
+      }
+      if (item === "V") {
+        values.push(...context.vowels);
+        continue;
+      }
+      const other = byName.get(item);
+      if (other) {
+        resolve(other, next);
+        values.push(...other.values);
+        continue;
+      }
+      const classRef = classForText(item, context.classIndex);
+      if (classRef && !classRef.ok) {
+        entry.errors.push(classRef.error);
+        continue;
+      }
+      if (classRef) {
+        // A chart-derived reference: its members come straight from the
+        // phonology table and update with it.
+        values.push(...classRef.members);
+        continue;
+      }
+      if (/^[A-Z]{1,6}$/u.test(item)) {
+        entry.warnings.push(`“${item}” is not a defined category letter here; it is read as a literal sound.`);
+      }
+      for (const token of context.tokenize(item)) {
+        values.push(token);
+        if (!context.vowels.has(token) && !context.consonants.has(token)) notCharted.add(token);
+      }
+    }
+    entry.values = [...new Set(values)];
+    entry.notCharted = notCharted;
+    entry.allVowels = entry.values.length > 0 && entry.values.every((value) => context.isVowel(value));
+    if (!entry.values.length && !entry.errors.length) entry.errors.push("The category has no sounds yet.");
+    if (notCharted.size) {
+      entry.warnings.push(`Not in the chart: ${[...notCharted].map((sound) => `“${sound}”`).join(", ")}.`);
+    }
+  };
+
+  for (const entry of byName.values()) resolve(entry, new Set());
+
+  const map = new Map();
+  for (const entry of byName.values()) {
+    if (!entry.errors.length) map.set(entry.name, entry);
+  }
+  const names = [...map.keys()].sort((a, b) => b.length - a.length || a.localeCompare(b));
+  return { entries, map, names };
+}
+
+// A category used inside a pattern becomes a set atom so every matcher can
+// treat categories, brackets, and sets uniformly.
+function classAtom(name, classes) {
+  const info = classes.map.get(name);
+  if (!info) return { type: "literal", value: name };
+  return { type: "set", values: info.values, fromClass: name };
+}
+
+// A chart-derived class reference turns into the same kind of atom.
+function classAtomFromRef(ref) {
+  return { type: "set", values: ref.members, fromRef: ref.source };
+}
+
+// Bracket content reads as a set of words: literal sounds, C or V, category
+// letters, or chart classes, each contributing their members.
+function expandSetValues(inner, context, classes) {
+  const values = [];
+  for (const word of String(inner).split(/[\s,;]+/u)) {
+    if (!word) continue;
+    if (word === "C") {
+      values.push(...context.consonants);
+      continue;
+    }
+    if (word === "V") {
+      values.push(...context.vowels);
+      continue;
+    }
+    const info = classes.map.get(word);
+    if (info) {
+      values.push(...info.values);
+      continue;
+    }
+    const ref = classForText(word, context.classIndex);
+    if (ref && !ref.ok) throw new TemplateError(ref.error);
+    if (ref) {
+      values.push(...ref.members);
+      continue;
+    }
+    if (word.startsWith("\\") && word.length > 1) {
+      values.push(...context.tokenize(word.slice(1)));
+      continue;
+    }
+    values.push(...context.tokenize(word));
+  }
+  return [...new Set(values)];
+}
+
+// Separators between user-written pieces. Dots, dashes and middle dots are
+// NOT separators: the tokenizer drops them inside words, and chart class
+// references need them intact (`plosive.plain`, `dental-alveolar`).
 function isSpace(char) {
-  return /\s/.test(char) || char === "," || char === ";" || char === "." || char === "-" || char === "·";
+  return /\s/.test(char) || char === "," || char === ";";
 }
 
 function atomSignature(atom) {
   if (atom.type === "class") return atom.value;
   if (atom.type === "literal") return `L:${atom.value}`;
-  if (atom.type === "set") return `S:${atom.values.join("\u0001")}`;
+  if (atom.type === "set") return `S:${atom.negated ? "^" : ""}${atom.values.join("\u0001")}`;
   return atom.type;
 }
 
 function displayAtom(atom) {
   if (atom.type === "class") return atom.value;
   if (atom.type === "literal") return atom.value;
-  if (atom.type === "set") return `[${atom.values.join("")}]`;
+  if (atom.type === "set") {
+    if (atom.fromClass) return atom.negated ? `[^${atom.fromClass}]` : atom.fromClass;
+    if (atom.fromRef) return atom.negated ? `[^${atom.fromRef}]` : `[${atom.fromRef}]`;
+    return atom.negated ? `[^${atom.values.join("")}]` : `[${atom.values.join("")}]`;
+  }
   return "";
 }
 
@@ -42,7 +212,12 @@ function displayShape(atoms) {
 function isNucleusAtom(atom, context) {
   if (atom.type === "class") return atom.value === "V";
   if (atom.type === "literal") return context.isVowel(atom.value);
-  if (atom.type === "set") return atom.values.every((value) => context.isVowel(value));
+  if (atom.type === "set") {
+    // A negated set matches "everything else" — including vowels — so it
+    // can never guarantee a nucleus.
+    if (atom.negated) return false;
+    return atom.values.length > 0 && atom.values.every((value) => context.isVowel(value));
+  }
   return false;
 }
 
@@ -56,32 +231,154 @@ function tokenMatchesAtom(atom, token, context) {
   return false;
 }
 
-// Split a run of literal text into class atoms (C/V) and literal phonemes.
-// Splitting CVC without spaces is convenient for compact templates.
-function literalAtoms(chunk, context) {
+// Split a run of literal text into class atoms (C/V, categories, chart
+// classes) and literal phonemes. Splitting CVC without spaces is convenient
+// for compact templates. Category letters win over literal interpretation
+// (longest match first); `\X` writes a literal sound even when X is a
+// category or a chart label.
+//
+// Chart classes join the same system: whole chunks ("back", "V.back") and
+// prefixes inside compact writing ("velarV", "CV.back") both match. A
+// dotted reference is strict — every label must exist in some chart — so a
+// typo fails with a message instead of silently matching nothing.
+function literalAtomsStrict(chunk, context, classes) {
+  const names = classes?.names || [];
+  const index = context.classIndex || null;
   const atoms = [];
+
+  if (index) {
+    const whole = classForText(chunk, index);
+    if (whole && whole.ok) return { atoms: [classAtomFromRef(whole)] };
+  }
+
   let literal = "";
+  let error = null;
   const flush = () => {
     if (!literal) return;
     for (const token of context.tokenize(literal)) atoms.push({ type: "literal", value: token });
     literal = "";
   };
-  for (const char of Array.from(chunk)) {
-    if (char === "C" || char === "V") {
-      flush();
-      atoms.push({ type: "class", value: char });
-    } else {
-      literal += char;
+  const chars = Array.from(chunk);
+  let position = 0;
+
+  if (index && chunk.includes(".") && !chunk.includes("\\")) {
+    // Dotted chunks read as one chart reference when the first part names a
+    // chart label or a chart pin; then every label is checked strictly. When
+    // the first part is something else — a category letter or compact C/V
+    // writing — later parts may still open a reference, so the char loop
+    // decides; other unknown first parts are typos and fail loud.
+    const first = chunk.split(".")[0].trim();
+    const firstKey = normalizeLabelKey(first);
+    const isPin = ["v", "c", "vowel", "consonant"].includes(firstKey.replace(/-/gu, ""));
+    const isLabel = !isPin && index.labelKeys.has(firstKey);
+    if (isPin || isLabel) {
+      const whole = classForText(chunk, index);
+      if (whole && whole.ok) return { atoms: [classAtomFromRef(whole)] };
+      return { error: whole ? whole.error : `The class reference “${chunk}” could not be read.` };
+    }
+    const isCompact = /^(?:[CV]|\p{N})+$/u.test(first) || (classes?.names || []).includes(first);
+    if (!isCompact) {
+      return { error: `Neither a chart label nor a category is named “${firstKey}” (from “${chunk}”).` };
+    }
+    // A compact head is followed by a chart reference: after the first dot,
+    // `CV.back.short` or `T.velar` read the tail as one checked reference.
+    const tail = chunk.slice(chunk.indexOf(".") + 1);
+    const tailRef = parseClassRef(tail, index);
+    if (tailRef && !tailRef.ok) return { error: tailRef.error };
+    if (!tailRef) {
+      // Tail text that is not a reference at all (no label, multi letters).
+      const stray = tail.split(".").find((part) => {
+        const key = normalizeLabelKey(part);
+        return Array.from(key).length > 1 && !index.labelKeys.has(key);
+      });
+      if (stray) {
+        return { error: `Neither a chart label nor a category is named “${normalizeLabelKey(stray)}” (from “${chunk}”).` };
+      }
     }
   }
+
+  while (position < chars.length && !error) {
+    const char = chars[position];
+    if (char === "\\" && chars[position + 1]) {
+      flush();
+      atoms.push({ type: "literal", value: chars[position + 1] });
+      position += 2;
+      continue;
+    }
+    if (char === "C" || char === "V") {
+      // "V." / "C." opens a chart-pinned reference like V.back.
+      if (chars[position + 1] === "." && index) {
+        const rest = chars.slice(position).join("");
+        const result = classForText(rest, index);
+        if (result && result.ok) {
+          flush();
+          atoms.push(classAtomFromRef(result));
+          position = chars.length;
+          continue;
+        }
+        if (result && !result.ok) {
+          error = result.error;
+          break;
+        }
+      }
+      flush();
+      atoms.push({ type: "class", value: char });
+      position += 1;
+      continue;
+    }
+    if (char === "." && index) {
+      // Everything from the first dot of the chunk onwards is one chart
+      // reference, validated before the loop started.
+      const rest = chars.slice(position + 1).join("");
+      const ref = classForText(rest, index);
+      if (ref && ref.ok) {
+        flush();
+        atoms.push(classAtomFromRef(ref));
+        position = chars.length;
+        continue;
+      }
+      if (ref && !ref.ok) {
+        error = ref.error;
+        break;
+      }
+    }
+    const asClass = names.find((name) => {
+      const span = Array.from(name).length;
+      return span <= chars.length - position && chars.slice(position, position + span).join("") === name;
+    });
+    if (asClass) {
+      flush();
+      atoms.push(classAtom(asClass, classes));
+      position += Array.from(asClass).length;
+      continue;
+    }
+    const label = index?.sortedLabels.find((key) => {
+      const span = Array.from(key).length;
+      return span <= chars.length - position && chars.slice(position, position + span).join("") === key;
+    });
+    if (label) {
+      const result = index ? classForText(label, index) : null;
+      if (result && result.ok) {
+        flush();
+        atoms.push(classAtomFromRef(result));
+        position += Array.from(label).length;
+        continue;
+      }
+    }
+    literal += char;
+    position += 1;
+  }
+
+  if (error) return { error };
   flush();
-  return atoms;
+  return { atoms };
 }
 
 class TemplateParser {
-  constructor(source, context) {
+  constructor(source, context, classes) {
     this.source = String(source || "").normalize("NFC");
     this.context = context;
+    this.classes = classes || { map: new Map(), names: [] };
     this.index = 0;
   }
 
@@ -136,11 +433,21 @@ class TemplateParser {
     return items.length === 1 ? items[0] : { type: "seq", items };
   }
 
+  // A chart reference span starts at a C/V pin followed by a dot and runs
+  // while the characters could belong to it: letters, digits, dashes, dots
+  // and middle dots (any other punctuation in a written label is a break —
+  // normalizeLabelKey reads it as one anyway).
+  referenceEnd(start) {
+    const REFERENCE_CHAR = /[\p{L}\p{N}.\-·]/u;
+    let end = start;
+    while (end < this.source.length && REFERENCE_CHAR.test(this.source[end])) end += 1;
+    return end;
+  }
+
   parseItem() {
     this.skip();
     const char = this.peek();
     let node;
-
     if (char === "(") {
       this.index += 1;
       const inner = this.parseAlternation(true);
@@ -153,14 +460,33 @@ class TemplateParser {
       if (close === -1) this.fail("A “[” in the template is not closed.");
       let inner = this.source.slice(this.index + 1, close).trim();
       if (!inner) this.fail("A bracketed set cannot be empty.");
-      if (inner.startsWith("^")) this.fail("Negated sets are not supported in syllable templates.");
-      const values = this.context.tokenize(inner);
+      let negated = false;
+      if (inner.startsWith("^")) {
+        negated = true;
+        inner = inner.slice(1).trim();
+        if (!inner) this.fail("A negated set cannot be empty.");
+      }
+      const values = expandSetValues(inner, this.context, this.classes);
       if (!values.length) this.fail(`Could not read the set “[${inner}]”.`);
-      node = { type: "set", values };
+      node = { type: "set", values, negated };
       this.index = close + 1;
     } else if (char === "C" || char === "V") {
-      node = { type: "class", value: char };
-      this.index += 1;
+      // A dot straight after opens a pinned chart reference (V.back, …).
+      const next = this.source[this.index + 1];
+      if (next === "." && this.context.classIndex) {
+        const end = this.referenceEnd(this.index);
+        const refText = this.source.slice(this.index, end);
+        const result = classForText(refText, this.context.classIndex);
+        if (result && result.ok) {
+          this.index = end;
+          node = classAtomFromRef(result);
+        } else {
+          this.fail(result ? result.error : `Could not read “${refText}” in the template.`);
+        }
+      } else {
+        node = { type: "class", value: char };
+        this.index += 1;
+      }
     } else if (char === "#") {
       this.fail("Word boundaries (#) belong in forbidden sequences, not in a syllable template.");
     } else if (REPEAT_QUANTIFIERS.has(char)) {
@@ -173,9 +499,10 @@ class TemplateParser {
         this.index += 1;
       }
       const chunk = this.source.slice(start, this.index);
-      const atoms = literalAtoms(chunk, this.context);
-      if (!atoms.length) this.fail(`Could not read “${chunk}” in the template.`);
-      node = atoms.length === 1 ? atoms[0] : { type: "seq", items: atoms };
+      const parsed = literalAtomsStrict(chunk, this.context, this.classes);
+      if (parsed.error) this.fail(parsed.error);
+      if (!parsed.atoms.length) this.fail(`Could not read “${chunk}” in the template.`);
+      node = parsed.atoms.length === 1 ? parsed.atoms[0] : { type: "seq", items: parsed.atoms };
     }
 
     this.skip();
@@ -217,14 +544,16 @@ function expandNode(node) {
   return results;
 }
 
-function compileTemplate(source, context) {
-  const parser = new TemplateParser(source, context);
+function compileTemplate(source, context, classes) {
+  const parser = new TemplateParser(source, context, classes);
   const ast = parser.parse();
   const rawShapes = expandNode(ast);
   const seen = new Set();
   const shapes = [];
   const unknownSounds = new Set();
-  let withoutNucleus = 0;
+  const emptyClasses = new Set();
+  let withoutNucleus = [];
+  const dropped = [];
 
   for (const atoms of rawShapes) {
     if (!atoms.length) continue;
@@ -239,13 +568,20 @@ function compileTemplate(source, context) {
         unknownSounds.add(atom.value);
       }
       if (atom.type === "set") {
+        if (!atom.values.length) {
+          emptyClasses.add(atom.fromRef || atom.fromClass || "a bracketed set");
+          continue;
+        }
+        const info = atom.fromClass ? classes.map.get(atom.fromClass) : null;
         for (const value of atom.values) {
+          if (info && info.values.includes(value)) continue; // members warned by the category itself
           if (!context.vowels.has(value) && !context.consonants.has(value)) unknownSounds.add(value);
         }
       }
     }
     if (!atoms.some((atom) => isNucleusAtom(atom, context))) {
-      withoutNucleus += 1;
+      withoutNucleus.push({ atoms, signature });
+      dropped.push(displayShape(atoms));
       continue;
     }
     shapes.push({ atoms, signature, display: displayShape(atoms) });
@@ -255,20 +591,34 @@ function compileTemplate(source, context) {
     return {
       ok: false,
       error: withoutNucleus
-        ? "Every syllable shape needs a vowel. Use V or a vowel sound."
+        ? "Every syllable shape needs a vowel. Use V, a vowel sound, or a category whose members are all vowels."
         : "The template does not define a syllable.",
     };
   }
 
   shapes.sort((a, b) => a.atoms.length - b.atoms.length || a.display.localeCompare(b.display));
   const warnings = [];
-  if (withoutNucleus) {
+  if (withoutNucleus.length) {
+    const list = dropped.map((display) => `“${display}”`).join(", ");
     warnings.push(
-      `${withoutNucleus} optional ${withoutNucleus === 1 ? "shape has" : "shapes have"} no vowel and ${withoutNucleus === 1 ? "was" : "were"} ignored.`
+      `${withoutNucleus.length} ${withoutNucleus.length === 1 ? "shape has" : "shapes have"} no vowel and ${withoutNucleus.length === 1 ? "was" : "were"} ignored: ${list}. Mixed sets (like a glide+vowel category) cannot fill a nucleus slot.`
     );
   }
   if (unknownSounds.size) {
     warnings.push(`The template uses ${[...unknownSounds].map((sound) => `“${sound}”`).join(", ")}, which ${unknownSounds.size === 1 ? "is" : "are"} not in the chart.`);
+    const stray = [...unknownSounds].filter((sound) => /^[A-Z]$/.test(sound) && !classes.names.includes(sound));
+    if (stray.length) {
+      warnings.push(
+        `Capital letters count as literal sounds until you define them as categories — ${stray
+          .map((letter) => `“${letter}”`)
+          .join(", ")} is read literally.`
+      );
+    }
+  }
+  if (emptyClasses.size) {
+    warnings.push(
+      `${[...emptyClasses].map((name) => `“${name}”`).join(", ")} ${emptyClasses.size === 1 ? "matches" : "match"} no sounds right now — check that the chart labels still exist.`
+    );
   }
   return { ok: true, shapes, warnings };
 }
@@ -293,7 +643,7 @@ function parseClusterList(value, context) {
   return allowed;
 }
 
-function parseConstraintPattern(source, context) {
+function parseConstraintPattern(source, context, classes) {
   const text = String(source || "").normalize("NFC");
   const atoms = [];
   let index = 0;
@@ -320,7 +670,7 @@ function parseConstraintPattern(source, context) {
         inner = inner.slice(1).trim();
         if (!inner) return { ok: false, error: "A negated set cannot be empty." };
       }
-      const values = context.tokenize(inner);
+      const values = expandSetValues(inner, context, classes);
       if (!values.length) return { ok: false, error: `Could not read the set “[${inner}]”.` };
       atoms.push({ type: "set", values, negated });
       index = close + 1;
@@ -340,9 +690,10 @@ function parseConstraintPattern(source, context) {
     let end = index;
     while (end < text.length && !isSpace(text[end]) && !TEMPLATE_SYNTAX.has(text[end]) && text[end] !== "[") end += 1;
     const chunk = text.slice(index, end);
-    const parsed = literalAtoms(chunk, context);
-    if (!parsed.length) return { ok: false, error: `Could not read “${chunk}”.` };
-    atoms.push(...parsed);
+    const parsed = literalAtomsStrict(chunk, context, classes);
+    if (parsed.error) return { ok: false, error: parsed.error };
+    if (!parsed.atoms.length) return { ok: false, error: `Could not read “${chunk}”.` };
+    atoms.push(...parsed.atoms);
     index = end;
   }
 
@@ -491,12 +842,14 @@ function findForbidden(pattern, tokens, context) {
 
 export function compilePhonotactics(phonotactics, context) {
   const source = typeof phonotactics?.template === "string" ? phonotactics.template.trim() : "";
+  const classes = compileClasses(phonotactics?.classes, context);
   const result = {
     ok: false,
     empty: false,
     error: "",
     warnings: [],
     shapes: [],
+    classes,
     onsets: parseClusterList(phonotactics?.onsets, context),
     codas: parseClusterList(phonotactics?.codas, context),
     forbidden: [],
@@ -504,7 +857,7 @@ export function compilePhonotactics(phonotactics, context) {
   };
 
   for (const raw of splitList(phonotactics?.forbidden)) {
-    const pattern = parseConstraintPattern(raw, context);
+    const pattern = parseConstraintPattern(raw, context, classes);
     if (pattern.ok) result.forbidden.push(pattern);
     else result.constraintErrors.push(`“${raw}”: ${pattern.error}`);
   }
@@ -515,7 +868,7 @@ export function compilePhonotactics(phonotactics, context) {
   }
 
   try {
-    const compiled = compileTemplate(source, context);
+    const compiled = compileTemplate(source, context, classes);
     if (!compiled.ok) {
       result.error = compiled.error;
       return result;

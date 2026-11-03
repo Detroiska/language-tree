@@ -118,6 +118,11 @@ function phonotacticsRows(language) {
   };
   const p = language.phonotactics || {};
   push("Syllable template", p.template);
+  for (const category of Array.isArray(p.classes) ? p.classes : []) {
+    const name = typeof category?.name === "string" ? category.name.trim() : "";
+    const sounds = typeof category?.sounds === "string" ? category.sounds.trim() : "";
+    if (name) push(`Category ${name}`, sounds);
+  }
   push("Onset rules", p.onsets);
   push("Coda rules", p.codas);
   push("Forbidden clusters", p.forbidden);

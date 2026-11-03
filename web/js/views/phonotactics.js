@@ -1,5 +1,7 @@
 import { createPhonotacticsChecker } from "../phonotactics.js";
-import { esc, icon } from "../ui.js";
+import { suggestClassRefs } from "../naturalclasses.js";
+import { cellKey, chartLeaves, nodeLeafIds } from "../model.js";
+import { esc, icon, toast } from "../ui.js";
 
 const PRESETS = [
   "(C)V(C)",
@@ -9,6 +11,39 @@ const PRESETS = [
   "(C)V(V)(C)",
   "(C)V(C)(C)",
 ];
+
+const CLASS_PRESETS = [
+  { name: "N", label: "N · nasals", sounds: "m n ɲ ŋ" },
+  { name: "G", label: "G · glides", sounds: "j w" },
+  { name: "L", label: "L · liquids", sounds: "l r ɾ ʎ" },
+  { name: "T", label: "T · stops", sounds: "p t k ʔ" },
+  { name: "F", label: "F · fricatives", sounds: "f s ʃ x" },
+];
+
+// Row labels of both charts, with the sounds sitting under each row. These
+// become "insert from the chart" buttons so category sound lists can be
+// built without typing IPA by hand.
+function chartSuggestions(inventory) {
+  const items = [];
+  const collect = (chart, mark) => {
+    if (!chart) return;
+    const columns = chartLeaves(chart.columns || []);
+    for (const node of chart.rows || []) {
+      const rowIds = nodeLeafIds(node);
+      const sounds = new Set();
+      for (const rowId of rowIds) {
+        for (const leaf of columns) {
+          for (const sound of chart.cells?.[cellKey(rowId, leaf.node.id)] || []) sounds.add(sound);
+        }
+      }
+      if (!sounds.size) continue;
+      items.push({ label: `${mark} · ${node.label}`, sounds: [...sounds].join(" ") });
+    }
+  };
+  collect(inventory?.consonants, "Consonants");
+  collect(inventory?.vowels, "Vowels");
+  return items;
+}
 
 function statusOf(result) {
   if (result.empty) return "empty";
@@ -90,6 +125,54 @@ function shapeMarkup(compiled) {
         ${compiled.shapes.map((shape) => `<code class="shape-chip">${esc(shape.display)}</code>`).join("")}
       </div>
     </div>`;
+}
+
+function classMetaMarkup(diag) {
+  if (!diag) return "";
+  const pieces = [];
+  for (const message of diag.errors) {
+    pieces.push(`<p class="class-message is-error">${icon("warning")}<span>${esc(message)}</span></p>`);
+  }
+  const warnings = [...new Set(diag.warnings)];
+  for (const message of warnings) {
+    pieces.push(`<p class="class-message">${icon("info")}<span>${esc(message)}</span></p>`);
+  }
+  if (!diag.errors.length && diag.values.length) {
+    const shown = diag.values.slice(0, 12);
+    const rest = diag.values.length - shown.length;
+    const chips = shown.map((sound) => `<code class="shape-chip">${esc(sound)}</code>`).join("");
+    pieces.push(
+      `<div class="class-members">${chips}${rest > 0 ? `<span class="muted class-more">+${rest}</span>` : ""}</div>`
+    );
+    if (diag.allVowels) {
+      pieces.push(`<span class="class-pill" title="Every member is a vowel, so this category can fill the nucleus slot.">nucleus-capable</span>`);
+    }
+  }
+  return pieces.join("");
+}
+
+function classListMarkup(language) {
+  const classes = language.phonotactics.classes;
+  if (!classes.length) {
+    return `<p class="class-empty">No categories yet. Define groups like <code>N</code> (nasals) or <code>G</code> (glides) and use those letters in the template and forbidden patterns.</p>`;
+  }
+  return classes
+    .map(
+      (entry, index) => `
+    <div class="class-row" data-class-row data-class-index="${index}">
+      <label class="field class-name-field">
+        <span class="field-label">Letter</span>
+        <input class="input class-name-input" type="text" data-class-field="name" value="${esc(entry.name)}" maxlength="6" autocomplete="off" spellcheck="false" aria-label="Category letter">
+      </label>
+      <label class="field class-sounds-field">
+        <span class="field-label">Sounds</span>
+        <input class="input class-sounds-input" type="text" data-class-field="sounds" value="${esc(entry.sounds)}" autocomplete="off" spellcheck="false" aria-label="Sounds in the category">
+      </label>
+      <button class="icon-button icon-button-small class-remove" type="button" data-class-remove aria-label="Remove category ${esc(entry.name || "row")}">${icon("trash")}</button>
+      <div class="class-meta" data-class-meta></div>
+    </div>`
+    )
+    .join("");
 }
 
 function summaryCounts(results) {
@@ -183,6 +266,7 @@ export function renderPhonotactics(container, ctx) {
   const { language } = ctx;
   const phonotactics = language.phonotactics;
   let checker = createPhonotacticsChecker(language);
+  const chartClasses = suggestClassRefs(checker.context.classIndex);
 
   container.innerHTML = `
     <div class="workspace-stack">
@@ -201,7 +285,7 @@ export function renderPhonotactics(container, ctx) {
             <header class="panel-head">
               <div class="panel-title">
                 <h2>Syllable template</h2>
-                <p>Optional pieces go in parentheses. <strong>C</strong> is any charted consonant; <strong>V</strong> is any charted vowel.</p>
+                <p>Optional pieces go in parentheses. <strong>C</strong> is any charted consonant and <strong>V</strong> any charted vowel; more letters come from the Categories panel below.</p>
               </div>
               <span data-template-status></span>
             </header>
@@ -209,7 +293,7 @@ export function renderPhonotactics(container, ctx) {
               <label class="field">
                 <span class="field-label">Template</span>
                 <input class="input phonotactics-template-input" type="text" data-phonotactics-field="template" value="${esc(phonotactics.template)}" placeholder="(C)V(C)" autocomplete="off" spellcheck="false" aria-label="Syllable template">
-                <span class="field-help">Examples: <code>(C)V(C)</code>, <code>(C)(C)V(C)</code>, <code>CV(C)</code>, <code>(C)V(V)(C)</code>. Leave it blank to turn phonotactic checks off.</span>
+                <span class="field-help">Examples: <code>(C)V(C)</code>, <code>(C)(C)V(C)</code>, <code>CVN</code>, <code>(C)V(G)</code> — letters beyond <code>C</code> and <code>V</code> come from Categories below, and dotted chart labels like <code>plosive.plain</code> are classes read straight from the Phonology charts. Leave it blank to turn phonotactic checks off.</span>
               </label>
               <div class="template-presets">
                 <span class="field-label">Presets</span>
@@ -219,6 +303,62 @@ export function renderPhonotactics(container, ctx) {
               </div>
               <div data-template-feedback></div>
               <div data-template-shapes></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header class="panel-head">
+              <div class="panel-title">
+                <h2>Categories</h2>
+                <p>Named sound groups that behave like <code>C</code> and <code>V</code>: <strong>N</strong> nasals, <strong>G</strong> glides, <strong>L</strong> liquids, or whatever you define. Slots are checked individually, so <code>N</code> can sit inside <code>C</code> elsewhere in the word — subsets need no extra setup.</p>
+              </div>
+              <div class="panel-actions">
+                <button class="button button-quiet button-small" type="button" data-class-add>Add category</button>
+              </div>
+            </header>
+            <div class="panel-body form-stack">
+              <div class="class-list" data-class-list></div>
+              <div class="class-tools">
+                <div class="template-presets">
+                  <span class="field-label">Starter categories</span>
+                  <div class="preset-row">
+                    ${CLASS_PRESETS.map((preset) => `<button class="preset-button" type="button" data-class-preset="${esc(preset.name)}" title="sounds like ${esc(preset.sounds)}">${esc(preset.label)}</button>`).join("")}
+                  </div>
+                </div>
+                <details class="class-from-chart">
+                  <summary>Insert from the chart</summary>
+                  <div class="preset-row" data-class-chart-row>
+                    <button class="preset-button" type="button" data-chart-ref="C" title="All charted consonants, as a reference">All consonants (C)</button>
+                    <button class="preset-button" type="button" data-chart-ref="V" title="All charted vowels, as a reference">All vowels (V)</button>
+                    ${chartSuggestions(language.inventory)
+                      .map(
+                        (item, index) =>
+                          `<button class="preset-button" type="button" data-chart-suggest="${index}" title="${esc(item.sounds)}">${esc(item.label)}</button>`
+                      )
+                      .join("")}
+                  </div>
+                </details>
+                <details class="class-from-chart">
+                  <summary>Chart classes</summary>
+                  <div class="preset-row" data-chart-class-row>
+                    ${
+                      chartClasses.length
+                        ? chartClasses
+                            .map(
+                              (item) =>
+                                `<button class="preset-button" type="button" data-class-ref="${esc(item.ref)}" title="members: ${esc(
+                                  item.members.join(" ")
+                                )}">${esc(item.ref)}</button>`
+                            )
+                            .join("")
+                        : `<span class="muted">No chart labels yet — add sounds to the Phonology charts first.</span>`
+                    }
+                  </div>
+                  <p class="field-help">Chart classes are written straight from the tables: dotted labels like
+                    <code>plosive.plain</code> or <code>V.back</code>. Every listed label must apply to the sound on each axis it appears in. A class also works in the template, forbidden patterns, and sound-change rules.</p>
+                </details>
+                <p class="field-help">A category's sounds list may also contain <code>C</code>, <code>V</code>, or another category's letter — for example list <code>N L G</code> under <code>S</code> for all sonorants.</p>
+              </div>
             </div>
           </section>
 
@@ -245,7 +385,7 @@ export function renderPhonotactics(container, ctx) {
               <label class="field">
                 <span class="field-label">Forbidden sequences <span class="field-optional">optional</span></span>
                 <input class="input" type="text" data-phonotactics-field="forbidden" value="${esc(phonotactics.forbidden)}" placeholder="VV, CCC, #CC, CC#" autocomplete="off" spellcheck="false">
-                <span class="field-help">Comma-separated patterns. <code>C</code>, <code>V</code>, <code>[ptk]</code>, and <code>#</code> (word edge) are supported; for example <code>VV</code> bans hiatus and <code>#CC</code> bans word-initial clusters.</span>
+                <span class="field-help">Comma-separated patterns. <code>C</code>, <code>V</code>, categories, chart classes, <code>[ptk]</code>, and <code>#</code> (word edge) are supported; for example <code>VV</code> bans hiatus and <code>#CC</code> bans word-initial clusters.</span>
               </label>
               <label class="field">
                 <span class="field-label">Notes <span class="field-optional">optional</span></span>
@@ -284,14 +424,20 @@ export function renderPhonotactics(container, ctx) {
               <ul class="help-list">
                 <li><code>C</code><span>Any consonant in this language’s chart.</span></li>
                 <li><code>V</code><span>Any vowel in this language’s chart.</span></li>
-                <li><code>(C)</code><span>An optional consonant slot. Parentheses are optional groups.</span></li>
+                <li><code>N</code><span>A category defined for this language — any of its member sounds. Category letters may also list <code>C</code>, <code>V</code>, chart classes, or other letters in their own sounds field.</span></li>
+                <li><code>plosive.plain</code><span>A chart class: chart labels dotted together, read against the Phonology charts. A sound belongs when every listed label applies on each axis where it appears — so <code>plosive.plain</code> is the plain oral stops and <code>back</code> (or <code>V.back</code>) is every back vowel. Pin a chart with <code>V.</code> / <code>C.</code>.</span></li>
+                <li><code>(N)</code><span>An optional category slot, like any other optional group.</span></li>
                 <li><code>[ptk]</code><span>One of the listed literal sounds.</span></li>
+                <li><code>[Nt]</code><span>Sets accept categories and chart classes (<code>[back t]</code>), and <code>[^…]</code> matches any sound not listed — vowels included, so use with intention.</span></li>
                 <li><code>(C|CC)</code><span>Optional alternatives inside a group.</span></li>
                 <li><code>C?V</code><span>Optional single slot; equivalent to <code>(C)V</code>.</span></li>
               </ul>
               <dl class="help-terms">
-                <div><dt>Onsets and codas</dt><dd>Empty lists mean “anything the template permits”; empty onsets or codas are always allowed.</dd></div>
-                <div><dt>Forbidden sequences</dt><dd>Match anywhere in the word. <code>#</code> anchors to the start or end, so <code>#CC</code> means word-initial two-consonant cluster.</dd></div>
+                <div><dt>Nucleus rule</dt><dd>A shape needs at least one nucleus-capable slot: <code>V</code>, a literal vowel, or a category whose members are all vowels. Mixed sets like a glide+vowel category can’t carry the nucleus alone.</dd></div>
+                <div><dt>Subsets</dt><dd>Slots are matched one at a time, so a category can be a subset of another: in <code>NVC</code> the <code>C</code> still admits nasals.</dd></div>
+                <div><dt>Literal category letters</dt><dd>Write <code>\N</code> to use the literal sound “N” after you define N as a category.</dd></div>
+                <div><dt>Onsets and codas</dt><dd>Empty lists mean “anything the template permits”; empty onsets or codas are always allowed. Cluster lists stay literal — categories don’t apply there.</dd></div>
+                <div><dt>Forbidden sequences</dt><dd>Match anywhere in the word and honor categories too: <code>NN</code> bans adjacent nasals, <code>#CC</code> bans word-initial clusters.</dd></div>
               </dl>
               <p class="help-foot">The template is expanded into a finite set of syllable shapes. Words are syllabified with the maximal onset principle, and every sound must be in the language’s own chart.</p>
             </div>
@@ -333,6 +479,7 @@ export function renderPhonotactics(container, ctx) {
     templateStatusElement.innerHTML = templateStatusMarkup(checker.compiled);
     templateFeedbackElement.innerHTML = templateFeedbackMarkup(checker.compiled);
     templateShapesElement.innerHTML = shapeMarkup(checker.compiled);
+    syncClassRows();
     updateTest();
   };
 
@@ -340,6 +487,112 @@ export function renderPhonotactics(container, ctx) {
     if (!testInput || !testResultElement) return;
     testResultElement.innerHTML = testResultMarkup(checker.validate(testInput.value));
   };
+
+  const classListElement = container.querySelector("[data-class-list]");
+  let activeClassIndex = -1;
+
+  const focusClassInput = (index, field = "name") => {
+    classListElement
+      .querySelector(`[data-class-row][data-class-index="${index}"] [data-class-field="${field}"]`)
+      ?.focus();
+  };
+
+  const syncClassRows = () => {
+    const diags = checker.compiled.classes?.entries || [];
+    classListElement.querySelectorAll("[data-class-row]").forEach((row) => {
+      const meta = row.querySelector("[data-class-meta]");
+      if (meta) meta.innerHTML = classMetaMarkup(diags[Number(row.dataset.classIndex)]);
+    });
+  };
+
+  const renderClassList = () => {
+    classListElement.innerHTML = classListMarkup(language);
+    activeClassIndex = language.phonotactics.classes.length - 1;
+    syncClassRows();
+  };
+
+  const appendClassSounds = (text) => {
+    const classes = language.phonotactics.classes;
+    if (!classes.length) {
+      toast("Add a category first, then insert chart sounds into it.");
+      return;
+    }
+    const index = activeClassIndex >= 0 && activeClassIndex < classes.length ? activeClassIndex : classes.length - 1;
+    const entry = classes[index];
+    const current = entry.sounds.trim();
+    entry.sounds = current ? `${current.replace(/[,\s;]+$/u, "")} ${text}` : text;
+    const input = classListElement.querySelector(
+      `[data-class-row][data-class-index="${index}"] [data-class-field="sounds"]`
+    );
+    if (input) input.value = entry.sounds;
+    ctx.touch();
+    refresh();
+  };
+
+  const addClassRow = (entry = { name: "", sounds: "" }) => {
+    const classes = language.phonotactics.classes;
+    classes.push(entry);
+    ctx.touch();
+    renderClassList();
+    refresh();
+    focusClassInput(classes.length - 1);
+  };
+
+  classListElement.addEventListener("focusin", (event) => {
+    const row = event.target.closest("[data-class-row]");
+    if (row) activeClassIndex = Number(row.dataset.classIndex);
+  });
+
+  classListElement.addEventListener("input", (event) => {
+    const field = event.target.closest("[data-class-field]");
+    if (!field) return;
+    const row = field.closest("[data-class-row]");
+    const index = Number(row.dataset.classIndex);
+    const entry = language.phonotactics.classes[index];
+    if (!entry) return;
+    entry[field.dataset.classField] = field.value;
+    ctx.touch();
+    refresh();
+  });
+
+  classListElement.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-class-remove]");
+    if (removeButton) {
+      const row = removeButton.closest("[data-class-row]");
+      language.phonotactics.classes.splice(Number(row.dataset.classIndex), 1);
+      ctx.touch();
+      renderClassList();
+      refresh();
+      return;
+    }
+  });
+
+  container.addEventListener("click", (event) => {
+    const presetButton = event.target.closest("[data-class-preset]");
+    if (presetButton) {
+      const name = presetButton.dataset.classPreset;
+      const classes = language.phonotactics.classes;
+      if (classes.some((entry) => entry.name.trim() === name)) {
+        toast(`Category ${name} already exists.`);
+        return;
+      }
+      const preset = CLASS_PRESETS.find((item) => item.name === name);
+      addClassRow({ name, sounds: preset?.sounds || "" });
+      return;
+    }
+    const chartButton = event.target.closest("[data-chart-suggest]");
+    if (chartButton) {
+      const item = chartSuggestions(language.inventory)[Number(chartButton.dataset.chartSuggest)];
+      if (item) appendClassSounds(item.sounds);
+      return;
+    }
+    const refButton = event.target.closest("[data-chart-ref]");
+    if (refButton) appendClassSounds(refButton.dataset.chartRef);
+    const classRefButton = event.target.closest("[data-class-ref]");
+    if (classRefButton) appendClassSounds(classRefButton.dataset.classRef);
+  });
+
+  container.querySelector("[data-class-add]").addEventListener("click", () => addClassRow());
 
   container.querySelectorAll("[data-phonotactics-field]").forEach((input) => {
     input.addEventListener("input", () => {
@@ -369,5 +622,6 @@ export function renderPhonotactics(container, ctx) {
     }
   });
 
+  renderClassList();
   refresh();
 }

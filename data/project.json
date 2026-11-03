@@ -2,7 +2,7 @@
   "version": 1,
   "title": "Untitled language family",
   "createdAt": "2026-11-02T06:15:57Z",
-  "updatedAt": "2026-11-02T16:24:06Z",
+  "updatedAt": "2026-11-03T07:23:36Z",
   "languages": [
     {
       "id": "lang_ae5c0ecc-f672-47a8-90f3-7b7bef5302e7",
@@ -71,7 +71,7 @@
                 },
                 {
                   "id": "col_ec4c946e-4b69-44fc-ad03-bff82098f272",
-                  "label": "aspirated",
+                  "label": "Aspirated",
                   "children": []
                 }
               ]
@@ -113,7 +113,7 @@
                 },
                 {
                   "id": "col_d5feb057-fa52-4afb-8d1b-fcea6e226c01",
-                  "label": "aspirated",
+                  "label": "Aspirated",
                   "children": []
                 }
               ]
@@ -288,25 +288,25 @@
       "soundChanges": [
         {
           "id": "rule_4edddc0c-a8a4-43c3-ac15-0c33ede3c06d",
-          "notation": "ŋ > n / _ [^u, o]",
+          "notation": "ŋ > n / _ [^u, o, uː, oː]",
           "note": "",
           "enabled": true
         },
         {
           "id": "rule_05a88b97-1379-4f4e-ac9b-2a9dd5c57356",
-          "notation": "ŋ > m / _ [u, o]",
+          "notation": "ŋ > m / _ [u, o, uː, oː]",
           "note": "",
           "enabled": true
         },
         {
           "id": "rule_34120477-ce3e-4736-a7e0-7cf5aabaea7f",
-          "notation": "ŋ͡g > n͜d / _ [^u, o]",
+          "notation": "ŋ͡g > n͜d / _ [^u, o, uː, oː]",
           "note": "",
           "enabled": true
         },
         {
           "id": "rule_2f17bb60-366e-4131-859d-9292db24caea",
-          "notation": "ŋ͡g > m͜b / _ [u, o]",
+          "notation": "ŋ͡g > m͜b / _ [u, o, uː, oː]",
           "note": "",
           "enabled": true
         }
@@ -349,7 +349,8 @@
         "onsets": "",
         "codas": "",
         "forbidden": "",
-        "notes": ""
+        "notes": "",
+        "classes": []
       }
     }
   ]

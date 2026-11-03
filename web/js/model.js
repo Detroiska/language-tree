@@ -80,6 +80,8 @@ export function defaultInventory() {
 // The phonotactics template is deliberately data, not code: every language
 // carries its own copy so a daughter can inherit and then diverge. Empty
 // constraint lists mean "no extra restriction beyond the template".
+// Categories are the language's named sound classes (N, G, L, …) usable in
+// the template and forbidden sequences.
 export function defaultPhonotactics() {
   return {
     template: "(C)V(C)",
@@ -87,6 +89,7 @@ export function defaultPhonotactics() {
     codas: "",
     forbidden: "",
     notes: "",
+    classes: [],
   };
 }
 
@@ -192,6 +195,14 @@ function ensurePhonotactics(value) {
     codas: typeof base.codas === "string" ? base.codas : defaults.codas,
     forbidden: typeof base.forbidden === "string" ? base.forbidden : defaults.forbidden,
     notes: typeof base.notes === "string" ? base.notes : defaults.notes,
+    classes: Array.isArray(base.classes)
+      ? base.classes
+          .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+          .map((entry) => ({
+            name: typeof entry.name === "string" ? entry.name : "",
+            sounds: typeof entry.sounds === "string" ? entry.sounds : "",
+          }))
+      : [],
   };
 }
 

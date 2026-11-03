@@ -1,4 +1,5 @@
 import { chartPhonemeList, getLineage } from "./model.js";
+import { buildClassIndex, classForText } from "./naturalclasses.js";
 
 const VOWEL_FALLBACK = new Set([
   "a", "e", "i", "o", "u", "y", "æ", "ɑ", "ɒ", "ɐ", "ə", "ɘ", "ɛ", "ɜ", "ɞ", "ɤ", "ɔ", "ø", "œ", "ɵ",
@@ -22,9 +23,13 @@ function normalizeForm(text) {
 }
 
 export class SegmentContext {
-  constructor({ known = [], vowels = [], consonants = [] } = {}) {
+  constructor({ known = [], vowels = [], consonants = [], classIndex = [] } = {}) {
     this.vowels = new Set(vowels);
     this.consonants = new Set(consonants);
+    // Chart-derived natural classes ( labeled hierarchies from the phonology
+    // tables): a reference like plosive.plain or V.back expands against
+    // these. Kept per-language or per-lineage by the context builders.
+    this.classIndex = classIndex;
     this.known = [...new Set(known.filter(Boolean))].sort((a, b) => b.length - a.length);
   }
 
@@ -102,7 +107,11 @@ export function contextForInventory(inventory) {
     const base = firstBase(phoneme);
     if (base) known.add(base);
   }
-  return new SegmentContext({ known: [...known], vowels: [...vowels], consonants: [...consonants] });
+  const classIndex = buildClassIndex([
+    { chart: inventory.consonants, kind: "consonant" },
+    { chart: inventory.vowels, kind: "vowel" },
+  ]);
+  return new SegmentContext({ known: [...known], vowels: [...vowels], consonants: [...consonants], classIndex });
 }
 
 // Rule application reads the whole lineage because an ancestral sound may
@@ -128,7 +137,16 @@ export function contextForLanguage(project, languageId) {
       if (base) known.add(base);
     }
   }
-  return new SegmentContext({ known: [...known], vowels: [...vowels], consonants: [...consonants] });
+  // Classes read the whole lineage: a class keeps meaning the same sounds
+  // while a chart changes, because each generation contributes its own
+  // labelled cells.
+  const classIndex = buildClassIndex(
+    lineage.flatMap((language) => [
+      { chart: language.inventory.consonants, kind: "consonant" },
+      { chart: language.inventory.vowels, kind: "vowel" },
+    ])
+  );
+  return new SegmentContext({ known: [...known], vowels: [...vowels], consonants: [...consonants], classIndex });
 }
 
 function chunksOf(text) {
@@ -179,6 +197,35 @@ function parsePattern(text, context, options = {}) {
   const chunks = chunksOf(text);
   if (!chunks.length) return { ok: false, error: `The ${role} is empty.` };
   const pattern = [];
+
+  // Set content reads as separated words: literal sounds, chart classes, or
+  // sound sequences. `[u, o]`, `[^back]` and `[plosive.plain t]` all work.
+  const setValues = (inner, negated) => {
+    if (!inner.trim()) return { ok: false, error: "A bracketed set cannot be empty." };
+    const values = [];
+    const hadWords = [];
+    for (const word of inner.split(/[\s,;]+/u)) {
+      if (!word) continue;
+      hadWords.push(word);
+      const ref = classForText(word, context.classIndex);
+      if (ref && !ref.ok) return ref;
+      if (ref) {
+        values.push(...ref.members);
+        continue;
+      }
+      values.push(...context.tokenize(word));
+    }
+    if (!values.length) {
+      return {
+        ok: false,
+        error: negated
+          ? `The negated set matches no sounds (its chart labels select nothing here): ${hadWords.map((word) => `“${word}”`).join(", ")}.`
+          : `The bracketed set matches no sounds: ${hadWords.map((word) => `“${word}”`).join(", ")}.`,
+      };
+    }
+    return { ok: true, values };
+  };
+
   for (const chunk of chunks) {
     if (chunk === "#") {
       if (!allowBoundary) return { ok: false, error: "A word boundary (#) is only valid in the environment." };
@@ -198,13 +245,32 @@ function parsePattern(text, context, options = {}) {
         negated = true;
         inner = inner.slice(1);
       }
-      const values = context.tokenize(inner);
-      if (!values.length) return { ok: false, error: "A bracketed set cannot be empty." };
-      pattern.push({ type: "set", values, negated });
+      const values = setValues(inner, negated);
+      if (!values.ok) return { ok: false, error: values.error };
+      pattern.push({ type: "set", values: values.values, negated });
+      continue;
+    }
+    if (chunk.startsWith("\\") && chunk.length > 1) {
+      // An escape keeps the rest of the chunk literal, so a name that
+      // happens to match a chart label can still be written as sounds.
+      const segments = context.tokenize(chunk.slice(1));
+      for (const segment of segments) pattern.push({ type: "literal", value: segment });
       continue;
     }
     if (chunk.includes("[") || chunk.includes("]")) {
       return { ok: false, error: "Unclosed or misplaced bracket in the rule." };
+    }
+    const classRef = classForText(chunk, context.classIndex);
+    if (classRef) {
+      if (!classRef.ok) return { ok: false, error: classRef.error };
+      if (!allowSet) {
+        return {
+          ok: false,
+          error: `The output needs concrete sounds: “${classRef.source}” is a chart class, and class references work only in the input and the environment.`,
+        };
+      }
+      pattern.push({ type: "set", values: classRef.members, negated: false, fromRef: classRef.source });
+      continue;
     }
     const segments = context.tokenize(chunk);
     if (!segments.length) return { ok: false, error: `Could not read “${chunk}”.` };
