@@ -12,6 +12,10 @@ function normalizeGloss(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+// Filter state lives at module level so it survives the full re-render that
+// follows every edit (add word, delete word, undo, …).
+const lexiconFilter = { text: "", status: "all" };
+
 function expectedFor(ctx, word, parent) {
   if (!parent) return null;
   const parentWord = parent.vocabulary.find(
@@ -345,6 +349,17 @@ export function renderVocabulary(container, ctx) {
         ${
           words.length
             ? `
+              <div class="lexicon-filters">
+                <input class="input lexicon-filter-input" data-word-filter type="text" value="${esc(lexiconFilter.text)}" placeholder="Filter by gloss, form, or note" autocomplete="off" spellcheck="false" aria-label="Filter words">
+                <select class="select lexicon-filter-select" data-word-status-filter aria-label="Filter words by status">
+                  <option value="all">All words</option>
+                  <option value="issues">Needs attention</option>
+                  <option value="drafts">Drafts (no form)</option>
+                  <option value="invalid">Phonotactics: invalid</option>
+                  ${hasParent ? `<option value="differs">Inherited: differs</option>` : ""}
+                </select>
+                <span class="lexicon-filter-count" data-filter-count></span>
+              </div>
               <div class="table-scroll">
                 <table class="data-table word-table">
                   <thead>
@@ -361,6 +376,7 @@ export function renderVocabulary(container, ctx) {
                 </table>
               </div>
               <p class="table-foot">${hasParent ? "A dash means no word with that gloss exists in the ancestor. The inherited check uses only this language’s direct sound changes; top-level rules match the ancestor’s form together, then sequential rules run in order." : "Add descendant languages to compare their forms against these roots."} The phonotactics column checks this language’s own inventory and syllable template.</p>
+              <p class="lexicon-filter-empty" data-filter-empty hidden>No words match the current filter.</p>
             `
             : `
               <div class="lexicon-empty">
@@ -373,6 +389,48 @@ export function renderVocabulary(container, ctx) {
       </section>
     </div>
   `;
+
+  // Status buckets reused by the filter: draft (no form), phonotactically
+  // invalid, inherited-check differs, or rule error on the derivation.
+  const wordStatus = (word) => {
+    if (!word.form.trim()) return "draft";
+    const phono = phonotacticStatus(checker.validate(word.form));
+    if (phono === "invalid" || phono === "template-error") return "invalid";
+    if (parent) {
+      const expected = expectedFor(ctx, word, parent);
+      if (expected?.error) return "error";
+      if (expected && !sameForm(word.form, expected.derived)) return "differs";
+    }
+    return "ok";
+  };
+  const issueStatuses = new Set(["draft", "invalid", "differs", "error"]);
+
+  const applyFilters = () => {
+    const query = lexiconFilter.text.trim().toLowerCase();
+    const filtering = Boolean(query) || lexiconFilter.status !== "all";
+    let visible = 0;
+    container.querySelectorAll("[data-word-id]").forEach((row) => {
+      const word = language.vocabulary.find((entry) => entry.id === row.dataset.wordId);
+      if (!word) return;
+      const haystack = [word.gloss, word.form, word.note].join(" ").toLowerCase();
+      const matchesText = !query || haystack.includes(query);
+      const status = wordStatus(word);
+      const statusFilter = lexiconFilter.status;
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "issues" && issueStatuses.has(status)) ||
+        (statusFilter === "drafts" && status === "draft") ||
+        (statusFilter === "invalid" && status === "invalid") ||
+        (statusFilter === "differs" && status === "differs");
+      const show = matchesText && matchesStatus;
+      row.hidden = !show;
+      if (show) visible += 1;
+    });
+    const count = container.querySelector("[data-filter-count]");
+    if (count) count.textContent = filtering ? `${visible} of ${words.length} shown` : "";
+    const empty = container.querySelector("[data-filter-empty]");
+    if (empty) empty.hidden = visible > 0;
+  };
 
   const addWord = () => {
     const word = { id: uid("word"), gloss: "", form: "", note: "" };
@@ -390,6 +448,22 @@ export function renderVocabulary(container, ctx) {
     openBulkDialog(ctx, language, words);
   });
 
+  const filterInput = container.querySelector("[data-word-filter]");
+  const statusSelect = container.querySelector("[data-word-status-filter]");
+  if (filterInput && statusSelect) {
+    statusSelect.value = lexiconFilter.status;
+    if (statusSelect.value !== lexiconFilter.status) lexiconFilter.status = "all"; // option absent (no parent)
+    filterInput.addEventListener("input", () => {
+      lexiconFilter.text = filterInput.value;
+      applyFilters();
+    });
+    statusSelect.addEventListener("change", () => {
+      lexiconFilter.status = statusSelect.value;
+      applyFilters();
+    });
+    applyFilters();
+  }
+
   container.querySelectorAll("[data-word-id]").forEach((row) => {
     const word = language.vocabulary.find((entry) => entry.id === row.dataset.wordId);
     if (!word) return;
@@ -405,6 +479,7 @@ export function renderVocabulary(container, ctx) {
           const summary = container.querySelector("[data-phonotactics-summary]");
           if (summary) summary.textContent = validitySummary(words, checker);
         }
+        applyFilters();
       });
       if (input.dataset.wordField === "gloss") {
         input.addEventListener("keydown", (event) => {
