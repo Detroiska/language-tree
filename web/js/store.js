@@ -16,6 +16,7 @@ class ProjectStore {
   saving = false;
   saveState = "loading";
   saveError = "";
+  lastSavedAt = null;
   // #undoStack holds per-burst pre-edit states to undo into; #redoStack holds
   // states to redo into after an undo. #lastState is the pre-edit state of
   // the burst currently in progress; it becomes the next undo step on the
@@ -157,7 +158,9 @@ class ProjectStore {
       saved = true;
       this.savedRevision = revisionAtStart;
       // Adopt the server's stamp so the in-memory document matches what was
-      // actually written (the server is the authority on save time).
+      // actually written (the server is the authority on save time). Kept on
+      // the store so the save indicator can show when the last save happened.
+      this.lastSavedAt = result?.savedAt || null;
       if (result?.savedAt) this.project.updatedAt = result.savedAt;
       this.saveError = "";
       if (this.revision === revisionAtStart) this.setSaveState("saved");

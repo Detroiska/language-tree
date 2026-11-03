@@ -34,7 +34,6 @@ const paths = {
   external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5H5V5h5"/>',
   refresh: '<path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M18.4 9A7.5 7.5 0 0 0 5.8 6.2L4 8M5.6 15A7.5 7.5 0 0 0 18.2 17.8L20 16"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
-  drag: '<circle cx="9" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1" fill="currentColor" stroke="none"/>',
 };
 
 export function icon(name, className = "") {
@@ -149,7 +148,7 @@ export function confirmDialog(title, message, options = {}) {
       settled = true;
       resolve(value);
     };
-    const { root, close } = openModal({
+    openModal({
       title,
       width: "small",
       body: `<p class="modal-copy">${message}</p>`,
@@ -180,8 +179,6 @@ export function confirmDialog(title, message, options = {}) {
       }
     });
     observer.observe(document.getElementById("modal-root"), { childList: true });
-    void root;
-    void close;
   });
 }
 
@@ -193,7 +190,7 @@ export function promptDialog({ title, label, value = "", placeholder = "", confi
       settled = true;
       resolve(result);
     };
-    const { root, close } = openModal({
+    openModal({
       title,
       width: "small",
       body: `
@@ -233,7 +230,6 @@ export function promptDialog({ title, label, value = "", placeholder = "", confi
         backdrop.addEventListener("pointerdown", (event) => {
           if (event.target === backdrop) finish(null);
         });
-        void close;
       },
     });
     const observer = new MutationObserver(() => {
@@ -243,7 +239,6 @@ export function promptDialog({ title, label, value = "", placeholder = "", confi
       }
     });
     observer.observe(document.getElementById("modal-root"), { childList: true });
-    void root;
   });
 }
 

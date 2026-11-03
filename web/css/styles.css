@@ -2109,16 +2109,6 @@ a.lineage-chip:hover {
   box-shadow: 0 0 0 3px rgba(161, 67, 59, 0.1);
 }
 
-.input-with-button {
-  display: flex;
-  gap: 6px;
-}
-
-.input-with-button .input {
-  min-width: 0;
-  flex: 1;
-}
-
 .ipa-input {
   font-family: var(--font-ipa);
   font-size: 15px;

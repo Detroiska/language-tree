@@ -325,7 +325,14 @@ function bootError(error) {
       </div>
       <p class="boot-hint">The local server is normally started with <code>start.bat</code> or <code>python server.py</code>. Data is stored in <code>data/project.json</code>.</p>
     </div>`;
-  viewRoot.querySelector("#retry-load").addEventListener("click", () => window.location.reload());
+  // "Try again" re-runs the load in place — a server that was just started
+  // does not need a full page reload — while "Reload page" resets everything.
+  viewRoot.querySelector("#retry-load").addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Retrying…";
+    void boot();
+  });
   viewRoot.querySelector("#reload-page").addEventListener("click", () => window.location.reload());
 }
 
@@ -337,13 +344,26 @@ function setSaveState(state, error) {
   else if (state === "pending") label.textContent = "Unsaved changes";
   else if (state === "error") label.textContent = "Save failed";
   else if (state === "loading") label.textContent = "Loading…";
-  else label.textContent = "Saved";
+  else label.textContent = store.lastSavedAt ? `Saved · ${new Date(store.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved";
   saveState.title =
     state === "error"
       ? `${error || "Could not save"} — click to retry`
       : state === "saved"
         ? "All changes are written to data/project.json"
         : "Changes are written automatically";
+}
+
+async function boot() {
+  try {
+    await store.load();
+    booted = true;
+    appShell.classList.add("is-ready");
+    if (!window.location.hash) window.history.replaceState(null, "", "#/tree");
+    render();
+  } catch (error) {
+    console.error(error);
+    bootError(error);
+  }
 }
 
 async function init() {
@@ -395,14 +415,9 @@ async function init() {
   scrim.addEventListener("click", () => document.body.classList.remove("sidebar-open"));
 
   try {
-    await store.load();
-    booted = true;
-    appShell.classList.add("is-ready");
-    if (!window.location.hash) window.history.replaceState(null, "", "#/tree");
-    render();
-  } catch (error) {
-    console.error(error);
-    bootError(error);
+    await boot();
+  } catch {
+    // boot() reports its own failures through bootError().
   }
 
   window.addEventListener("hashchange", () => {

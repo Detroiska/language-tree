@@ -167,10 +167,7 @@ function testPanelMarkup(ctx) {
           ? `
             <div class="test-input-wrap">
               <label class="field-label" for="test-word">Input form <span class="field-optional">${esc(parent.name)}</span></label>
-              <div class="input-with-button">
-                <input class="input ipa-input" id="test-word" data-test-input value="${esc(parent.vocabulary.find((word) => word.form.trim())?.form || "")}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
-                <button class="button button-quiet button-small" type="button" data-test-run>Apply</button>
-              </div>
+              <input class="input ipa-input" id="test-word" data-test-input value="${esc(parent.vocabulary.find((word) => word.form.trim())?.form || "")}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
               ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-test-word="${esc(word.form)}" title="${esc(word.gloss)}">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
             </div>
             <div class="derivation" data-derivation>
@@ -420,6 +417,8 @@ export function renderChanges(container, ctx) {
   };
 
   if (testInput) {
+    // The derivation updates live on every keystroke (and Enter re-runs it),
+    // so no explicit Apply control is needed.
     testInput.addEventListener("input", runTest);
     testInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -427,7 +426,6 @@ export function renderChanges(container, ctx) {
         runTest();
       }
     });
-    testPanel.querySelector("[data-test-run]")?.addEventListener("click", runTest);
     testPanel.querySelectorAll("[data-test-word]").forEach((button) => {
       button.addEventListener("click", () => {
         testInput.value = button.dataset.testWord;
