@@ -39,12 +39,16 @@ function sameForm(a, b) {
 function statusFor(rule, context) {
   if (!rule.notation.trim()) return { kind: "empty", label: "Empty rule" };
   const compiled = compileRule(rule.notation, context);
+  // A warning keeps the rule usable — the user may be mid-edit — while making
+  // an inert rule (for example compact “CV > x” letter literals) visible.
+  if (compiled.ok && compiled.warnings?.length) return { kind: "warn", label: compiled.warnings[0] };
   if (compiled.ok) return { kind: "ok", label: "Valid" };
   return { kind: "error", label: compiled.error };
 }
 
 function statusMarkup(status) {
-  const glyph = status.kind === "ok" ? "check" : status.kind === "error" ? "warning" : "info";
+  const glyph =
+    status.kind === "ok" ? "check" : status.kind === "error" || status.kind === "warn" ? "warning" : "info";
   return `${icon(glyph)}<span>${esc(status.label)}</span>`;
 }
 

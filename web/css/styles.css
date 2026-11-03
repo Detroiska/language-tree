@@ -3027,6 +3027,11 @@ th:hover > .axis-menu,
   background: #e5f1eb;
 }
 
+.status-warn {
+  color: #8a6a2f;
+  background: #f6edd9;
+}
+
 .status-error {
   color: var(--danger);
   background: var(--danger-soft);

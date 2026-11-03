@@ -371,8 +371,45 @@ export function compileRule(notation, context) {
     }
   }
 
+  // A literal sound that no chart in the context lists can never match a
+  // charted form, so the rule would sit valid-but-inert. Compact template
+  // writing makes this easy to hit: "CV > x" reads here as the literal
+  // sounds C and V, while phonotactics templates treat the same letters as
+  // classes. Chart classes already fail loudly; literal inputs get a warning.
+  const unchartedOf = (pattern) => {
+    const found = new Set();
+    for (const atom of pattern) {
+      if (atom.type !== "literal") continue;
+      if (!context.vowels.has(atom.value) && !context.consonants.has(atom.value)) found.add(atom.value);
+    }
+    return found;
+  };
+  const warnings = [];
+  const unchartedInput = unchartedOf(target.pattern);
+  const unchartedEnv = new Set([...unchartedOf(left), ...unchartedOf(right)]);
+  if (unchartedInput.size) {
+    const list = [...unchartedInput].map((sound) => `“${sound}”`).join(", ");
+    let message = `The input ${unchartedInput.size === 1 ? "sound" : "sounds"} ${list} ${
+      unchartedInput.size === 1 ? "is" : "are"
+    } not in the charted ancestry, so the rule cannot match a charted form. Add ${
+      unchartedInput.size === 1 ? "it" : "them"
+    } to a Phonology chart, or check the spelling.`;
+    if (unchartedInput.has("C") || unchartedInput.has("V")) {
+      message += " Classes need spaces in rules (“C V > x”); compact class writing works only in phonotactics templates.";
+    }
+    warnings.push(message);
+  } else if (unchartedEnv.size) {
+    const list = [...unchartedEnv].map((sound) => `“${sound}”`).join(", ");
+    warnings.push(
+      `The environment ${unchartedEnv.size === 1 ? "sound" : "sounds"} ${list} ${
+        unchartedEnv.size === 1 ? "is" : "are"
+      } not in the charted ancestry, so the rule cannot apply to a charted form.`
+    );
+  }
+
   return {
     ok: true,
+    warnings,
     rule: {
       source,
       target: target.pattern,
