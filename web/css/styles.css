@@ -3786,6 +3786,19 @@ th:hover > .axis-menu,
   text-align: center;
 }
 
+/* The lexicon is the one table that grows without bound, so it scrolls
+   inside the panel with its header pinned. The th background is already
+   opaque (var(--surface-soft)); sticky just lifts it above the rows. */
+.lexicon-scroll {
+  max-height: min(560px, 68vh);
+}
+
+.lexicon-scroll .word-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
 .lexicon-empty {
   display: flex;
   flex-direction: column;

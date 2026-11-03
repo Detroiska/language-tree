@@ -360,7 +360,7 @@ export function renderVocabulary(container, ctx) {
                 </select>
                 <span class="lexicon-filter-count" data-filter-count></span>
               </div>
-              <div class="table-scroll">
+              <div class="table-scroll lexicon-scroll">
                 <table class="data-table word-table">
                   <thead>
                     <tr>
