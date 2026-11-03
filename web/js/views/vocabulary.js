@@ -433,6 +433,10 @@ export function renderVocabulary(container, ctx) {
   };
 
   const addWord = () => {
+    // Adding is entering, not reviewing: clear the filters so the new draft
+    // row is guaranteed visible (its empty fields match no text or status).
+    lexiconFilter.text = "";
+    lexiconFilter.status = "all";
     const word = { id: uid("word"), gloss: "", form: "", note: "" };
     language.vocabulary.push(word);
     ctx.touch();
@@ -494,6 +498,16 @@ export function renderVocabulary(container, ctx) {
           if (event.key === "Enter") {
             event.preventDefault();
             row.querySelector('[data-word-field="note"]')?.focus();
+          }
+        });
+      }
+      if (input.dataset.wordField === "note") {
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            // Finishing the gloss → form → note chain rolls straight into
+            // the next entry, like a spreadsheet.
+            addWord();
           }
         });
       }
