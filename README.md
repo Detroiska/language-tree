@@ -16,6 +16,14 @@ Requirements: Python 3.10 or newer.
 python server.py
 ```
 
+```sh
+# macOS / Linux
+./start.sh
+
+# or directly
+python3 server.py
+```
+
 The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the browser launch, or `--port 9000` to choose another port.
 
 ## What is here
