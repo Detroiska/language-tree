@@ -1,4 +1,4 @@
-import { chartPhonemeList, getLineage } from "./model.js";
+import { chartPhonemeList, getLineage, ruleGroups, ruleNumberMap } from "./model.js";
 import { buildClassIndex, classForText } from "./naturalclasses.js";
 
 const VOWEL_FALLBACK = new Set([
@@ -421,10 +421,9 @@ export function compileRule(notation, context) {
   };
 }
 
-export function applyRule(tokens, compiled, context) {
-  const output = [];
+export function findRuleMatches(tokens, compiled, context) {
+  const matches = [];
   let index = 0;
-  let changed = false;
   while (index < tokens.length) {
     const length = matchTarget(tokens, index, compiled.target, context);
     if (
@@ -432,15 +431,26 @@ export function applyRule(tokens, compiled, context) {
       matchesLeft(tokens, index, compiled.left, context) &&
       matchesRight(tokens, index + length, compiled.right, context)
     ) {
-      output.push(...compiled.replacement);
+      matches.push({ start: index, end: index + length, replacement: compiled.replacement });
       index += length;
-      changed = true;
     } else {
-      output.push(tokens[index]);
       index += 1;
     }
   }
-  return { tokens: output, changed };
+  return matches;
+}
+
+export function applyRule(tokens, compiled, context) {
+  const matches = findRuleMatches(tokens, compiled, context);
+  if (!matches.length) return { tokens: [...tokens], changed: false };
+  const output = [];
+  let cursor = 0;
+  for (const match of matches) {
+    output.push(...tokens.slice(cursor, match.start), ...match.replacement);
+    cursor = match.end;
+  }
+  output.push(...tokens.slice(cursor));
+  return { tokens: output, changed: true };
 }
 
 export function compileRules(rules, context) {
@@ -450,18 +460,30 @@ export function compileRules(rules, context) {
   });
 }
 
+// Compile a language's rules into top-level groups and their sequential
+// children. Labels are the display numbers (1, 1.1, 1.2, 2, ...).
+export function compileRuleStages(rules, context) {
+  const numbers = ruleNumberMap(rules);
+  return ruleGroups(rules).map((group) => ({
+    rule: group.rule,
+    label: numbers.get(group.rule.id),
+    compiled: compileRule(group.rule.notation, context),
+    children: group.children.map((child) => ({
+      rule: child,
+      label: numbers.get(child.id),
+      compiled: compileRule(child.notation, context),
+    })),
+  }));
+}
+
 export function compileRuleChain(project, languageId) {
   const context = contextForLanguage(project, languageId);
   const lineage = getLineage(project, languageId);
-  const compiled = [];
-  for (const sourceLanguage of lineage) {
-    for (const rule of sourceLanguage.soundChanges) {
-      if (rule.enabled === false) continue;
-      const result = compileRule(rule.notation, context);
-      compiled.push({ ...result, sourceRule: rule, sourceLanguage });
-    }
-  }
-  return { context, compiled, lineage };
+  const stages = lineage.map((language) => ({
+    language,
+    groups: compileRuleStages(language.soundChanges, context),
+  }));
+  return { context, stages, lineage };
 }
 
 // The cognate explorer derives one ancestor word in every language it reaches.
@@ -474,33 +496,162 @@ export function compileChainFrom(project, sourceId, targetId) {
   const lineage = getLineage(project, targetId);
   const sourceIndex = lineage.findIndex((language) => language.id === sourceId);
   if (sourceIndex === -1) {
-    return { ok: false, reason: "not-descended", lineage, compiled: [], context: null };
+    return { ok: false, reason: "not-descended", lineage, stages: [], context: null };
   }
   const context = contextForLanguage(project, targetId);
-  const compiled = [];
-  for (const sourceLanguage of lineage.slice(sourceIndex + 1)) {
-    for (const rule of sourceLanguage.soundChanges) {
-      if (rule.enabled === false) continue;
-      const result = compileRule(rule.notation, context);
-      compiled.push({ ...result, sourceRule: rule, sourceLanguage });
-    }
-  }
-  return { ok: true, reason: "", lineage, sourceIndex, compiled, context };
+  const stages = lineage.slice(sourceIndex + 1).map((language) => ({
+    language,
+    groups: compileRuleStages(language.soundChanges, context),
+  }));
+  return { ok: true, reason: "", lineage, sourceIndex, stages, context };
 }
 
-export function deriveTokens(inputTokens, compiledRules, context) {
+// Top-level rules all match the frozen ancestral form. Their edits are
+// combined in one pass, so the order of the list never changes which rules
+// apply. Two top-level rules that touch the same part of the form are a
+// conflict: the derivation stops with an error instead of guessing an order.
+function applyParallel(tokens, groups, context) {
+  const entries = groups.map((group) => ({
+    group,
+    matches: findRuleMatches(tokens, group.compiled.rule, context),
+  }));
+  const changes = [];
+  for (const entry of entries) {
+    for (const match of entry.matches) changes.push({ ...match, entry });
+  }
+  changes.sort((a, b) => a.start - b.start || a.end - b.end);
+
+  let furthest = null;
+  for (const change of changes) {
+    if (furthest && change.start < furthest.end) {
+      const a = furthest.entry.group;
+      const b = change.entry.group;
+      return {
+        ok: false,
+        error: `Rules ${a.label} (“${a.rule.notation}”) and ${b.label} (“${b.rule.notation}”) both change overlapping parts of the ancestral form “${tokens.join("")}”. Make one of them sequential or make the rules mutually exclusive.`,
+      };
+    }
+    if (!furthest || change.end > furthest.end) furthest = change;
+  }
+
+  if (!changes.length) return { ok: true, tokens: [...tokens], changed: false, entries };
+  const output = [];
+  let cursor = 0;
+  for (const change of changes) {
+    output.push(...tokens.slice(cursor, change.start), ...change.replacement);
+    cursor = change.end;
+  }
+  output.push(...tokens.slice(cursor));
+  return { ok: true, tokens: output, changed: true, entries };
+}
+
+export function deriveStages(inputTokens, stages, context) {
   let current = [...inputTokens];
   const steps = [];
-  for (const compiled of compiledRules) {
-    if (!compiled.ok) {
-      steps.push({ compiled, before: current, after: current, changed: false, error: compiled.error });
-      continue;
+  const errors = [];
+  let fatal = false;
+
+  for (const stage of stages) {
+    const languageName = stage.language?.name || "";
+    const groups = (stage.groups || []).filter((group) => group.rule.enabled !== false);
+    if (!groups.length) continue;
+
+    // Broken rules are reported but do not prevent other rules from running.
+    // Empty rules are unfinished, so they produce a step but no hard error.
+    const usable = [];
+    for (const group of groups) {
+      if (group.compiled.ok) {
+        usable.push(group);
+        continue;
+      }
+      steps.push({
+        kind: "error",
+        label: group.label,
+        rule: group.rule,
+        compiled: group.compiled,
+        error: group.compiled.error,
+        before: [...current],
+        after: [...current],
+        changed: false,
+        languageName,
+      });
+      if (!group.compiled.empty) errors.push(group.compiled.error);
     }
-    const result = applyRule(current, compiled.rule, context);
-    steps.push({ compiled, before: current, after: result.tokens, changed: result.changed });
-    current = result.tokens;
+
+    const before = [...current];
+    const parallel = applyParallel(current, usable, context);
+    if (!parallel.ok) {
+      steps.push({
+        kind: "error",
+        label: "anc",
+        error: parallel.error,
+        before,
+        after: [...before],
+        changed: false,
+        languageName,
+      });
+      errors.push(parallel.error);
+      fatal = true;
+      break;
+    }
+
+    if (usable.length) {
+      const matches = parallel.entries.reduce((total, entry) => total + entry.matches.length, 0);
+      steps.push({
+        kind: "parallel",
+        label: "anc",
+        before,
+        after: [...parallel.tokens],
+        changed: matches > 0,
+        entries: parallel.entries.map((entry) => ({
+          label: entry.group.label,
+          notation: entry.group.rule.notation,
+          matches: entry.matches.length,
+        })),
+        languageName,
+      });
+      current = parallel.tokens;
+    }
+
+    // Sequential children run after the whole ancestral pass, in display
+    // order. They see the combined output of every top-level rule. A broken
+    // parent is reported separately; it does not take its children down with
+    // it, just as a broken flat rule never stopped the next rule.
+    for (const group of groups) {
+      for (const child of group.children) {
+        if (child.rule.enabled === false) continue;
+        if (!child.compiled.ok) {
+          steps.push({
+            kind: "error",
+            label: child.label,
+            rule: child.rule,
+            compiled: child.compiled,
+            error: child.compiled.error,
+            before: [...current],
+            after: [...current],
+            changed: false,
+            languageName,
+          });
+          if (!child.compiled.empty) errors.push(child.compiled.error);
+          continue;
+        }
+        const result = applyRule(current, child.compiled.rule, context);
+        steps.push({
+          kind: "sequential",
+          label: child.label,
+          rule: child.rule,
+          compiled: child.compiled,
+          before: [...current],
+          after: [...result.tokens],
+          changed: result.changed,
+          languageName,
+        });
+        current = result.tokens;
+      }
+    }
   }
-  return { tokens: current, steps };
+
+  return { tokens: current, steps, errors, fatal };
 }
 
 export function deriveForm(form, project, languageId, options = {}) {
@@ -508,24 +659,38 @@ export function deriveForm(form, project, languageId, options = {}) {
   const context = contextForLanguage(project, languageId);
   const lineage = getLineage(project, languageId);
   const languages = directOnly ? lineage.slice(-1) : lineage;
-  const compiled = [];
-  for (const sourceLanguage of languages) {
-    for (const rule of sourceLanguage.soundChanges) {
-      if (rule.enabled === false) continue;
-      const result = compileRule(rule.notation, context);
-      compiled.push({ ...result, sourceRule: rule, sourceLanguage });
-    }
-  }
+  const stages = languages.map((language) => ({
+    language,
+    groups: compileRuleStages(language.soundChanges, context),
+  }));
   const tokens = context.tokenize(form);
-  const derived = deriveTokens(tokens, compiled, context);
+  const derived = deriveStages(tokens, stages, context);
   return {
     input: tokens,
     output: derived.tokens,
     steps: derived.steps,
-    compiled,
+    errors: derived.errors,
+    error: derived.errors[0] || "",
+    fatal: derived.fatal,
+    stages,
     context,
     text: derived.tokens.join(""),
   };
+}
+
+export function ruleCompileErrors(stages) {
+  const errors = [];
+  for (const stage of stages || []) {
+    for (const group of stage.groups || []) {
+      if (group.rule.enabled === false) continue;
+      if (!group.compiled.ok && !group.compiled.empty) errors.push(group.compiled.error);
+      for (const child of group.children || []) {
+        if (child.rule.enabled === false) continue;
+        if (!child.compiled.ok && !child.compiled.empty) errors.push(child.compiled.error);
+      }
+    }
+  }
+  return errors;
 }
 
 export function firstRuleError(compiledRules) {

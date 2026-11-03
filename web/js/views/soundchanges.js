@@ -2,32 +2,35 @@ import {
   ancestorsOf,
   getLineage,
   languageStats,
+  ruleGroups,
   uid,
 } from "../model.js";
 import {
   compileRule,
-  compileRules,
+  compileRuleStages,
   contextForLanguage,
   deriveForm,
-  deriveTokens,
+  deriveStages,
 } from "../phonology.js";
+import { derivationStepsMarkup } from "../derivation.js";
 import { esc, icon, toast } from "../ui.js";
 
 function compileDirect(ctx) {
   const context = contextForLanguage(ctx.project, ctx.language.id);
-  const rules = ctx.language.soundChanges.filter((rule) => rule.enabled !== false);
-  return { context, compiled: compileRules(rules, context) };
+  return { context, groups: compileRuleStages(ctx.language.soundChanges, context) };
 }
 
 function directDerivation(ctx, form) {
-  const { context, compiled } = compileDirect(ctx);
+  const { context, groups } = compileDirect(ctx);
   const tokens = context.tokenize(form);
-  const result = deriveTokens(tokens, compiled, context);
+  const result = deriveStages(tokens, [{ language: ctx.language, groups }], context);
   return {
     inputTokens: tokens,
     outputTokens: result.tokens,
     steps: result.steps,
     text: result.tokens.join(""),
+    errors: result.errors,
+    fatal: result.fatal,
   };
 }
 
@@ -52,50 +55,95 @@ function statusMarkup(status) {
   return `${icon(glyph)}<span>${esc(status.label)}</span>`;
 }
 
-function updateRuleStatus(card, context, rule) {
+function updateRuleStatus(card, context, rule, parentDisabled = false) {
   const element = card.querySelector("[data-rule-status]");
   if (!element) return;
-  const status = rule.enabled === false ? { kind: "off", label: "Disabled" } : statusFor(rule, context);
+  const status =
+    rule.enabled === false
+      ? { kind: "off", label: "Disabled" }
+      : parentDisabled
+        ? { kind: "off", label: "Parent disabled" }
+        : statusFor(rule, context);
   element.className = `rule-status status-${status.kind}`;
   element.innerHTML = statusMarkup(status);
   element.title = status.label;
 }
 
+function ruleCardMarkup(
+  rule,
+  { index, childIndex = null, context, parentDisabled = false, canMoveUp = false, canMoveDown = false }
+) {
+  const isChild = childIndex !== null;
+  const disabled = rule.enabled === false || parentDisabled;
+  const status = rule.enabled === false
+    ? { kind: "off", label: "Disabled" }
+    : parentDisabled
+      ? { kind: "off", label: "Parent disabled" }
+      : statusFor(rule, context);
+  const number = isChild ? `${index + 1}.${childIndex + 1}` : String(index + 1);
+  return `
+    <article class="rule-card ${isChild ? "is-child" : ""} ${disabled ? "is-disabled" : ""}" data-rule-id="${esc(rule.id)}">
+      <div class="rule-number ${isChild ? "is-dotted" : ""}">${esc(number)}</div>
+      <div class="rule-body">
+        <div class="rule-notation-row">
+          <input class="rule-input" type="text" value="${esc(rule.notation)}" placeholder="p > f / V _ V" autocomplete="off" spellcheck="false" aria-label="Sound change notation">
+          <span class="rule-status status-${status.kind}" data-rule-status title="${esc(status.label)}">${statusMarkup(status)}</span>
+        </div>
+        <input class="rule-note-input" type="text" value="${esc(rule.note)}" placeholder="Optional description, e.g. Verner’s law" autocomplete="off" aria-label="Rule note">
+      </div>
+      <div class="rule-controls">
+        <label class="switch" title="${rule.enabled === false ? "Enable rule" : "Disable rule"}">
+          <input type="checkbox" data-rule-toggle ${rule.enabled === false ? "" : "checked"} aria-label="Enable rule">
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+        ${isChild ? "" : `<button class="icon-button icon-button-small" type="button" data-add-child title="Add sequential rule" aria-label="Add sequential rule">${icon("plus")}</button>`}
+        <button class="icon-button icon-button-small" type="button" data-rule-up title="Move up" aria-label="Move rule up" ${canMoveUp ? "" : "disabled"}>${icon("arrowUp")}</button>
+        <button class="icon-button icon-button-small" type="button" data-rule-down title="Move down" aria-label="Move rule down" ${canMoveDown ? "" : "disabled"}>${icon("arrowDown")}</button>
+        <button class="icon-button icon-button-small danger-hover" type="button" data-rule-delete title="Delete rule" aria-label="Delete rule">${icon("trash")}</button>
+      </div>
+    </article>`;
+}
+
 function rulesMarkup(language, context) {
-  if (!language.soundChanges.length) {
+  const groups = ruleGroups(language.soundChanges);
+  if (!groups.length) {
     return `
       <div class="rules-empty">
         <div class="empty-icon small">${icon("sound")}</div>
         <h3>No sound changes yet</h3>
-        <p>Add the first ordered change from the ancestral language. Rules apply from top to bottom.</p>
+        <p>Add the first change from the ancestral language. Top-level rules are checked against the inherited form; sequential rules run after them.</p>
         <button class="button button-primary button-small" type="button" data-add-rule>${icon("plus")}Add a rule</button>
       </div>`;
   }
   return `
     <div class="rules-list">
-      ${language.soundChanges
-        .map((rule, index) => {
-          const status = rule.enabled === false ? { kind: "off", label: "Disabled" } : statusFor(rule, context);
+      ${groups
+        .map((group, index) => {
           return `
-            <article class="rule-card ${rule.enabled === false ? "is-disabled" : ""}" data-rule-id="${esc(rule.id)}">
-              <div class="rule-number">${String(index + 1).padStart(2, "0")}</div>
-              <div class="rule-body">
-                <div class="rule-notation-row">
-                  <input class="rule-input" type="text" value="${esc(rule.notation)}" placeholder="p > f / V _ V" autocomplete="off" spellcheck="false" aria-label="Sound change notation">
-                  <span class="rule-status status-${status.kind}" data-rule-status title="${esc(status.label)}">${statusMarkup(status)}</span>
-                </div>
-                <input class="rule-note-input" type="text" value="${esc(rule.note)}" placeholder="Optional description, e.g. Verner’s law" autocomplete="off" aria-label="Rule note">
-              </div>
-              <div class="rule-controls">
-                <label class="switch" title="${rule.enabled === false ? "Enable rule" : "Disable rule"}">
-                  <input type="checkbox" data-rule-toggle ${rule.enabled === false ? "" : "checked"} aria-label="Enable rule">
-                  <span class="switch-track"><span class="switch-thumb"></span></span>
-                </label>
-                <button class="icon-button icon-button-small" type="button" data-rule-up title="Move up" aria-label="Move rule up" ${index === 0 ? "disabled" : ""}>${icon("arrowUp")}</button>
-                <button class="icon-button icon-button-small" type="button" data-rule-down title="Move down" aria-label="Move rule down" ${index === language.soundChanges.length - 1 ? "disabled" : ""}>${icon("arrowDown")}</button>
-                <button class="icon-button icon-button-small danger-hover" type="button" data-rule-delete title="Delete rule" aria-label="Delete rule">${icon("trash")}</button>
-              </div>
-            </article>`;
+            <div class="rule-group">
+              ${ruleCardMarkup(group.rule, {
+                index,
+                context,
+                canMoveUp: index > 0,
+                canMoveDown: index < groups.length - 1,
+              })}
+              ${
+                group.children.length
+                  ? `<div class="rule-children">${group.children
+                      .map((child, childIndex) =>
+                        ruleCardMarkup(child, {
+                          index,
+                          childIndex,
+                          context,
+                          parentDisabled: group.rule.enabled === false,
+                          canMoveUp: childIndex > 0,
+                          canMoveDown: childIndex < group.children.length - 1,
+                        })
+                      )
+                      .join("")}</div>`
+                  : ""
+              }
+            </div>`;
         })
         .join("")}
     </div>`;
@@ -174,7 +222,7 @@ function notationHelpMarkup() {
           <div><dt>_</dt><dd>Marks where the input sits in the environment.</dd></div>
           <div><dt>∅, 0</dt><dd>Deletion.</dd></div>
         </dl>
-        <p class="help-foot">Rules are applied in order. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry.</p>
+        <p class="help-foot">Top-level rules are all checked against the form inherited from the parent, so their order does not change whether they apply. Dotted rules run after that pass, in order, against the changed form. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry.</p>
       </div>
     </details>`;
 }
@@ -218,17 +266,33 @@ function checkRows(ctx) {
     if (word.gloss.trim()) byGloss.set(word.gloss.trim().toLowerCase(), word);
   }
   const rows = parentWords.map((word, index) => {
-    const derived = deriveForm(word.form, ctx.project, ctx.language.id, { directOnly: true }).text;
+    const derived = deriveForm(word.form, ctx.project, ctx.language.id, { directOnly: true });
     const recorded = byGloss.get(word.gloss.trim().toLowerCase()) || null;
-    const status = !recorded?.form.trim() ? "missing" : sameForm(recorded.form, derived) ? "match" : "differs";
-    return { word, derived, recorded, status, index };
+    const status = derived.error
+      ? "error"
+      : !recorded?.form.trim()
+        ? "missing"
+        : sameForm(recorded.form, derived.text)
+          ? "match"
+          : "differs";
+    return {
+      word,
+      derived: derived.error ? "" : derived.text,
+      recorded,
+      status,
+      error: derived.error,
+      index,
+    };
   });
   const matches = rows.filter((row) => row.status === "match").length;
   const recordedCount = rows.filter((row) => row.status !== "missing").length;
+  const errorCount = rows.filter((row) => row.status === "error").length;
   const summary =
     recordedCount === 0
       ? `${rows.length} ancestral ${rows.length === 1 ? "word" : "words"} · none recorded yet`
-      : `${matches} of ${recordedCount} recorded ${recordedCount === 1 ? "form matches" : "forms match"}`;
+      : `${matches} of ${recordedCount} recorded ${recordedCount === 1 ? "form matches" : "forms match"}${
+          errorCount ? ` · ${errorCount} rule ${errorCount === 1 ? "error" : "errors"}` : ""
+        }`;
 
   const html = `
     <div class="check-table-wrap">
@@ -246,13 +310,13 @@ function checkRows(ctx) {
                   <td><code class="ipa derived-form">${esc(row.derived) || "—"}</code></td>
                   <td>${row.recorded ? `<code class="ipa">${esc(row.recorded.form) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
                   <td>
-                    <span class="status-chip status-${row.status}">
-                      ${row.status === "match" ? icon("check") : row.status === "differs" ? icon("warning") : icon("info")}
-                      ${row.status === "match" ? "Matches" : row.status === "differs" ? "Differs" : "Missing"}
+                    <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
+                      ${row.status === "match" ? icon("check") : row.status === "differs" || row.status === "error" ? icon("warning") : icon("info")}
+                      ${row.status === "match" ? "Matches" : row.status === "differs" ? "Differs" : row.status === "error" ? "Rule error" : "Missing"}
                     </span>
                   </td>
                   <td class="row-actions">
-                    <button class="button button-quiet button-tiny" type="button" data-record-word="${row.index}" ${row.status === "match" ? "disabled" : ""}>
+                    <button class="button button-quiet button-tiny" type="button" data-record-word="${row.index}" ${row.status === "match" || row.status === "error" ? "disabled" : ""}>
                       ${row.status === "missing" ? "Record" : "Use derived"}
                     </button>
                   </td>
@@ -262,7 +326,7 @@ function checkRows(ctx) {
         </tbody>
       </table>
     </div>
-    <p class="check-foot">Comparison is by gloss, using only this language’s direct changes. Not every word needs to be inherited; use “Use derived” when a reflex is correct.</p>`;
+    <p class="check-foot">Comparison is by gloss, using only this language’s direct changes. Not every word needs to be inherited; use “Use derived” when a reflex is correct. Top-level rules that change the same part of a word stop the derivation and appear as a rule error.</p>`;
   return { summary, html, rows, parent, byGloss };
 }
 
@@ -291,7 +355,7 @@ export function renderChanges(container, ctx) {
         <div>
           <p class="eyebrow">Sound changes</p>
           <h2>From ${parent ? esc(parent.name) : "an unattested ancestor"}</h2>
-          <p class="section-copy">${parent ? `These ${stats.changes} ordered rules describe how ${esc(language.name)} develops from ${esc(parent.name)}.` : "This is a root language. Its daughter languages will define ordered changes from it."}</p>
+          <p class="section-copy">${parent ? `These ${stats.changes} rules describe how ${esc(language.name)} develops from ${esc(parent.name)}.` : "This is a root language. Its daughter languages will define changes from it."}</p>
           ${lineageMarkup(ctx)}
         </div>
         <div class="inventory-summary">
@@ -305,8 +369,8 @@ export function renderChanges(container, ctx) {
           <section class="panel rules-panel">
             <header class="panel-head">
               <div class="panel-title">
-                <h2>Ordered rules</h2>
-                <p>Each rule runs once, in order, after the one above it.</p>
+                <h2>Rules</h2>
+                <p>Top-level rules match the inherited form together; sequential rules then run in order.</p>
               </div>
               <button class="button button-primary button-small" type="button" data-add-rule>${icon("plus")}Add rule</button>
             </header>
@@ -334,7 +398,7 @@ export function renderChanges(container, ctx) {
     const output = testPanel.querySelector("[data-test-output]");
     const parsed = testPanel.querySelector("[data-test-parsed]");
     const steps = testPanel.querySelector("[data-test-steps]");
-    output.textContent = result.text || "—";
+    output.textContent = result.fatal ? "—" : result.text || "—";
     parsed.innerHTML = result.inputTokens.length
       ? `<span>Read as</span> ${result.inputTokens.map((token) => `<code>${esc(token)}</code>`).join(" ")}`
       : `<span>Type a form to test.</span>`;
@@ -342,29 +406,10 @@ export function renderChanges(container, ctx) {
       steps.innerHTML = `<p class="derivation-empty">No changes yet — the output stays identical to the input.</p>`;
       return;
     }
-    steps.innerHTML = result.steps
-      .map((step, index) => {
-        if (step.error) {
-          return `
-            <div class="derivation-step is-error">
-              <span class="step-index">${index + 1}</span>
-              <div class="step-body">
-                <div class="step-rule"><code>${esc(step.compiled.rule.source || "Empty rule")}</code></div>
-                <div class="step-error">${esc(step.error)}</div>
-              </div>
-            </div>`;
-        }
-        const ruleSource = step.compiled.rule.source || "";
-        return `
-          <div class="derivation-step ${step.changed ? "is-changed" : ""}">
-            <span class="step-index">${index + 1}</span>
-            <div class="step-body">
-              <div class="step-rule"><code>${esc(ruleSource)}</code>${step.changed ? "" : `<span class="step-skip">unchanged</span>`}</div>
-              <div class="step-form"><code class="ipa">${esc(step.before.join("")) || "∅"}</code><span class="step-arrow">→</span><code class="ipa">${esc(step.after.join("")) || "∅"}</code></div>
-            </div>
-          </div>`;
-      })
-      .join("");
+    steps.innerHTML = derivationStepsMarkup(result.steps, {
+      emptyText: "No rules change this form — it passes through unchanged.",
+      hideEmpty: true,
+    });
   };
 
   const refreshCheck = () => {
@@ -395,9 +440,44 @@ export function renderChanges(container, ctx) {
 
   refreshCheck();
 
+  const moveRule = (rule, direction) => {
+    if (!rule.parentId) {
+      const groups = ruleGroups(language.soundChanges);
+      const index = groups.findIndex((group) => group.rule.id === rule.id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= groups.length) return false;
+      [groups[index], groups[target]] = [groups[target], groups[index]];
+      language.soundChanges = groups.flatMap((group) => [group.rule, ...group.children]);
+      return true;
+    }
+    const siblings = language.soundChanges.filter((item) => item.parentId === rule.parentId);
+    const index = siblings.indexOf(rule);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= siblings.length) return false;
+    const other = siblings[target];
+    const a = language.soundChanges.indexOf(rule);
+    const b = language.soundChanges.indexOf(other);
+    [language.soundChanges[a], language.soundChanges[b]] = [language.soundChanges[b], language.soundChanges[a]];
+    return true;
+  };
+
+  const addChildRule = (parent) => {
+    const group = ruleGroups(language.soundChanges).find((item) => item.rule.id === parent.id);
+    if (!group) return;
+    const child = { id: uid("rule"), notation: "", note: "", enabled: true, parentId: parent.id };
+    const anchor = group.children.at(-1) || parent;
+    const index = language.soundChanges.indexOf(anchor);
+    language.soundChanges.splice(index + 1, 0, child);
+    ctx.touch();
+    ctx.refresh();
+    window.setTimeout(() => {
+      document.querySelector(`[data-rule-id="${child.id}"] .rule-input`)?.focus();
+    }, 0);
+  };
+
   container.querySelectorAll("[data-add-rule]").forEach((button) => {
     button.addEventListener("click", () => {
-      const rule = { id: uid("rule"), notation: "", note: "", enabled: true };
+      const rule = { id: uid("rule"), notation: "", note: "", enabled: true, parentId: null };
       language.soundChanges.push(rule);
       ctx.touch();
       ctx.refresh();
@@ -410,6 +490,8 @@ export function renderChanges(container, ctx) {
   container.querySelectorAll(".rule-card").forEach((card) => {
     const rule = language.soundChanges.find((item) => item.id === card.dataset.ruleId);
     if (!rule) return;
+    const parentRule = rule.parentId ? language.soundChanges.find((item) => item.id === rule.parentId) : null;
+    const parentDisabled = parentRule?.enabled === false;
     const notation = card.querySelector(".rule-input");
     const note = card.querySelector(".rule-note-input");
     const toggle = card.querySelector("[data-rule-toggle]");
@@ -417,7 +499,7 @@ export function renderChanges(container, ctx) {
     notation.addEventListener("input", () => {
       rule.notation = notation.value;
       ctx.touch();
-      updateRuleStatus(card, context, rule);
+      updateRuleStatus(card, context, rule, parentDisabled);
       runTest();
       refreshCheck();
     });
@@ -427,45 +509,71 @@ export function renderChanges(container, ctx) {
     });
     toggle.addEventListener("change", () => {
       rule.enabled = toggle.checked;
-      card.classList.toggle("is-disabled", !rule.enabled);
       ctx.touch();
-      updateRuleStatus(card, context, rule);
-      runTest();
-      refreshCheck();
+      // Re-render so children of a disabled parent also show that they are
+      // inactive. The rule tester and inherited check rerun with the view.
+      ctx.refresh();
     });
 
+    card.querySelector("[data-add-child]")?.addEventListener("click", () => {
+      addChildRule(rule);
+    });
     card.querySelector("[data-rule-up]")?.addEventListener("click", () => {
-      const index = language.soundChanges.indexOf(rule);
-      if (index <= 0) return;
-      [language.soundChanges[index - 1], language.soundChanges[index]] = [language.soundChanges[index], language.soundChanges[index - 1]];
+      if (!moveRule(rule, -1)) return;
       ctx.touch();
       ctx.refresh();
     });
     card.querySelector("[data-rule-down]")?.addEventListener("click", () => {
-      const index = language.soundChanges.indexOf(rule);
-      if (index < 0 || index >= language.soundChanges.length - 1) return;
-      [language.soundChanges[index + 1], language.soundChanges[index]] = [language.soundChanges[index], language.soundChanges[index + 1]];
+      if (!moveRule(rule, 1)) return;
       ctx.touch();
       ctx.refresh();
     });
     card.querySelector("[data-rule-delete]")?.addEventListener("click", () => {
-      const index = language.soundChanges.indexOf(rule);
-      if (index < 0) return;
-      const [removed] = language.soundChanges.splice(index, 1);
+      if (rule.parentId) {
+        const index = language.soundChanges.indexOf(rule);
+        if (index < 0) return;
+        const [removed] = language.soundChanges.splice(index, 1);
+        ctx.touch();
+        ctx.refresh();
+        toast("Rule deleted.", {
+          type: "info",
+          duration: 6000,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              language.soundChanges.splice(index, 0, removed);
+              ctx.touch();
+              ctx.refresh();
+            },
+          },
+        });
+        return;
+      }
+      const group = ruleGroups(language.soundChanges).find((item) => item.rule.id === rule.id);
+      if (!group) return;
+      const block = [group.rule, ...group.children];
+      const index = language.soundChanges.indexOf(group.rule);
+      const extra = block.length - 1;
+      language.soundChanges.splice(index, block.length);
       ctx.touch();
       ctx.refresh();
-      toast("Rule deleted.", {
-        type: "info",
-        duration: 6000,
-        action: {
-          label: "Undo",
-          onClick: () => {
-            language.soundChanges.splice(index, 0, removed);
-            ctx.touch();
-            ctx.refresh();
+      toast(
+        extra
+          ? `Rule and ${extra} sequential ${extra === 1 ? "rule" : "rules"} deleted.`
+          : "Rule deleted.",
+        {
+          type: "info",
+          duration: 6000,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              language.soundChanges.splice(index, 0, ...block);
+              ctx.touch();
+              ctx.refresh();
+            },
           },
-        },
-      });
+        }
+      );
     });
   });
 
@@ -482,7 +590,12 @@ export function renderChanges(container, ctx) {
       const words = parentLanguage.vocabulary.filter((word) => word.form.trim() && word.gloss.trim());
       const word = words[Number(recordButton.dataset.recordWord)];
       if (!word) return;
-      const derived = deriveForm(word.form, ctx.project, language.id, { directOnly: true }).text;
+      const derivation = deriveForm(word.form, ctx.project, language.id, { directOnly: true });
+      if (derivation.error) {
+        toast(`Cannot record “${word.gloss}”: ${derivation.error}`, { type: "error" });
+        return;
+      }
+      const derived = derivation.text;
       const normalizedGloss = word.gloss.trim().toLowerCase();
       let existing = language.vocabulary.find((entry) => entry.gloss.trim().toLowerCase() === normalizedGloss);
       if (existing) {

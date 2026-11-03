@@ -1,6 +1,6 @@
 # Language Tree
 
-A local-first web tool for documenting a constructed language family. It keeps the family tree, phoneme inventories, ordered sound changes, and a small lexicon in one git-friendly JSON file.
+A local-first web tool for documenting a constructed language family. It keeps the family tree, phoneme inventories, sound changes, and a small lexicon in one git-friendly JSON file.
 
 The app is dependency-free: a small Python standard-library server serves a vanilla JavaScript frontend. No build step, package manager, or database is required.
 
@@ -31,7 +31,7 @@ The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the br
 - **Editable family tree** — root languages and daughter languages, with add, rename, delete, and reparent actions.
 - **Phonology charts** — separate consonant and vowel charts with editable rows and columns. Any row or column can be subdivided (aspiration, labialization, rounding, and so on).
 - **Phonotactics** — a per-language syllable template, named sound categories (`N` nasals, `G` glides, and whatever else you define), chart classes derived live from the phonology tables (`plosive.plain`, `V.back`), plus optional onset, coda, and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
-- **Ordered sound changes** — standard-style notation such as `p > f / V _ V` or `[plosive.plain] > ∅ / _ #`, with a live tester against ancestral forms.
+- **Sound changes** — standard-style notation such as `p > f / V _ V` or `[plosive.plain] > ∅ / _ #`, with a live tester against ancestral forms. Top-level rules apply together; dotted child rules run in sequence.
 - **Basic vocabulary** — gloss + IPA form, with an inherited-form check that applies the current language's rules to the parent's words and a phonotactic validity check on every form.
 - **Cognate explorer** — follow any recorded gloss down the family: each daughter's chain-derived form next to its recorded form, with a one-click record action and a whole-lexicon matrix view.
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Shift+Z` (or the buttons in the sidebar footer) undo and redo any edit — words, rules, charts, tree changes — with rapid typing merged into single steps and each step written back to the project file.
@@ -112,7 +112,16 @@ The template is expanded into a finite set of syllable shapes. Words are syllabi
 
 ### Sound changes
 
-Rules are listed in application order and run top to bottom.
+Rules form two tiers. A **top-level rule** (1, 2, 3, 4) is checked only against the language’s ancestral form — the form inherited from its parent. Top-level rules never see each other’s output, so their order does not change whether they apply. If two top-level rules change the same part of a form, the derivation stops and reports a conflict.
+
+A rule’s **sequential children** (1.1, 1.2, …) run after the whole top-level pass, in order, against the changed form. Use them for genuine feeding or bleeding: rule 1 `p > f` can feed rule 1.1 `a > ə / f _`, which can feed 1.2 `t > s / ə _`. A top-level rule still only sees the ancestral form even after a sequential rule has changed it. Only one level of nesting is supported for now.
+
+```text
+1    p > f                 checked against the inherited form
+1.1  a > ə / f _           runs after the top-level pass
+1.2  t > s / ə _           runs after 1.1
+2    k > x                 also checked against the inherited form
+```
 
 ```text
 p > f / V _ V       p becomes f between vowels
@@ -140,9 +149,9 @@ Supported notation:
 
 Chart classes work on the input side and in environments, alone or inside a set: `[plosive.plain] > ∅ / _ #`, `t > tʰ / _ back`, `u > ∅ / [plosive.plain] _`. A class expands to the concrete sounds the charts currently list, so outputs stay ordinary sounds and a renamed row immediately changes which sounds a rule touches. A broken class name is reported in the rule's status instead of silently matching nothing.
 
-Rules are applied in order. Within a rule, matching is left-to-right and non-overlapping. Each rule runs exactly once per application; it does not re-feed its own output.
+Top-level rules are applied together to the ancestral form. Within one rule, matching is left-to-right and non-overlapping; each rule runs exactly once per application and does not re-feed its own output. Sequential rules then run in order on the result, so they can see segments and environments created by earlier changes. A conflict between top-level rules is reported in the rule tester, the inherited check, and the cognate explorer.
 
-The **Rule tester** applies the current language's direct rules to a form from its immediate ancestor and shows each step. The **Inherited vocabulary check** compares the derived output with the current language's recorded glosses. **Record** creates a vocabulary entry from a derived form.
+The **Rule tester** applies the current language’s rules to a form from its immediate ancestor and shows the ancestral pass and every sequential step. The **Inherited vocabulary check** compares the derived output with the current language’s recorded glosses. **Record** creates a vocabulary entry from a derived form; derivations with a rule error cannot be recorded.
 
 Limitations of the current engine: no feature bundles (chart classes are derived from the table's own row and column labels, not from a feature system; categories are explicit sound lists), stress, syllable-boundary notation, optional elements, phonological exceptions, or allomorphy. That is deliberate for this first version; the parser is isolated in `web/js/phonology.js` so it can grow. Phonotactics deliberately uses a finite expansion of optional groups rather than full regex repetition, and checks surface forms only; it does not yet model resyllabification across morpheme boundaries or lexical exceptions.
 
@@ -155,7 +164,7 @@ The lexicon is intentionally small: gloss, IPA form, optional note. The **Phonot
 The **Cognate explorer** follows one recorded word down the whole family. Open it from the sidebar, or press the trace button on any vocabulary row.
 
 - **Pick a source language**, then either trace a single gloss or browse **all glosses** as a matrix with one chip per descended language.
-- Each chip compares the recorded form with the output of that language's **chain of rules**: every language applies its own ordered rules to what it receives from the ancestor, starting strictly below the source. A language's own rules never re-apply to its recorded forms.
+- Each chip compares the recorded form with the output of that language's **chain of rules**: every language applies its own staged rules to what it receives from the ancestor, starting strictly below the source. A language's own rules never re-apply to its recorded forms.
 - Status chips reuse the vocabulary conventions: **Matches** agrees with the derivation, **Differs** has a recorded form that does not (the tooltip shows what the rules predict), and a dash means the gloss is not recorded in that language. A **Rule error** chip means a rule on the chain fails to compile.
 - Expand a row with the chevron to see the derivation step by step. **Record** (or **Use derived**) writes the derived form into that language's lexicon when a reflex is correct.
 - Comparison is by gloss only: the first entry with the same gloss (case-insensitive) is used, matching the inherited check. Languages outside the source's line of descent are not compared.

@@ -6,7 +6,7 @@
 // report builder are DOM-free ES modules, so they import and run directly.
 // Every assertion prints a line; the process exits non-zero on any failure.
 
-import { defaultInventory } from "../web/js/model.js";
+import { defaultInventory, ensureProject, ruleNumberMap } from "../web/js/model.js";
 import {
   contextForInventory,
   compileRule,
@@ -162,8 +162,154 @@ const project = {
     },
   ],
 };
-equal("direct rules apply in order", deriveForm("apas", project, "child", { directOnly: true }).text, "afa");
+equal("direct rules apply to the ancestral form", deriveForm("apas", project, "child", { directOnly: true }).text, "afa");
 equal("disabled rules are skipped", deriveForm("kapta", project, "child", { directOnly: true }).text, "kapta");
+
+/* ---- two-tier rules ----------------------------------------------------- */
+
+function stagedProject(soundChanges) {
+  return {
+    title: "Staged",
+    languages: [
+      { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+      { id: "child", name: "Child", parentId: "root", ...language, soundChanges, vocabulary: [] },
+    ],
+  };
+}
+
+const parallel = stagedProject([
+  { id: "r1", notation: "i > ∅ / _ #", note: "", enabled: true, parentId: null },
+  { id: "r2", notation: "a > e / _ i", note: "", enabled: true, parentId: null },
+]);
+equal(
+  "top-level rules all match the ancestral form",
+  deriveForm("pai", parallel, "child", { directOnly: true }).text,
+  "pe"
+);
+
+const reversed = stagedProject([...parallel.languages[1].soundChanges].reverse());
+equal(
+  "top-level rule order does not change matching",
+  deriveForm("pai", reversed, "child", { directOnly: true }).text,
+  "pe"
+);
+
+const sequential = stagedProject([
+  { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+  { id: "c1", notation: "a > e / f _", note: "", enabled: true, parentId: "r1" },
+  { id: "c2", notation: "t > s / e _", note: "", enabled: true, parentId: "r1" },
+]);
+equal(
+  "sequential rules run in order after the ancestral pass",
+  deriveForm("pata", sequential, "child", { directOnly: true }).text,
+  "fesa"
+);
+
+const childCannotFeedTopLevel = stagedProject([
+  { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+  { id: "c1", notation: "a > e / f _", note: "", enabled: true, parentId: "r1" },
+  { id: "r2", notation: "t > s / e _", note: "", enabled: true, parentId: null },
+]);
+equal(
+  "a sequential rule cannot feed a top-level rule",
+  deriveForm("pata", childCannotFeedTopLevel, "child", { directOnly: true }).text,
+  "feta"
+);
+
+const overlapping = stagedProject([
+  { id: "r1", notation: "t > s", note: "", enabled: true, parentId: null },
+  { id: "r2", notation: "t > k", note: "", enabled: true, parentId: null },
+]);
+const conflict = deriveForm("pata", overlapping, "child", { directOnly: true });
+truthy("overlapping top-level rules report an error", /overlapping parts/.test(conflict.error));
+equal("a conflict leaves the ancestral form underived", conflict.text, "pata");
+
+const sequentialOverlap = stagedProject([
+  { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+  { id: "c1", notation: "f > v", note: "", enabled: true, parentId: "r1" },
+]);
+const sequentialResult = deriveForm("pata", sequentialOverlap, "child", { directOnly: true });
+equal("sequential rules may change their parent's output", sequentialResult.text, "vata");
+equal("sequential overlap is not a conflict", sequentialResult.error, "");
+
+const disabledParent = stagedProject([
+  { id: "r1", notation: "p > f", note: "", enabled: false, parentId: null },
+  { id: "c1", notation: "a > e / f _", note: "", enabled: true, parentId: "r1" },
+]);
+equal(
+  "disabling a top-level rule disables its sequential children",
+  deriveForm("pata", disabledParent, "child", { directOnly: true }).text,
+  "pata"
+);
+
+const emptyRule = stagedProject([{ id: "r1", notation: "", note: "", enabled: true, parentId: null }]);
+const emptyResult = deriveForm("pata", emptyRule, "child", { directOnly: true });
+equal("an empty rule leaves the form unchanged", emptyResult.text, "pata");
+equal("an empty rule is not a hard derivation error", emptyResult.error, "");
+
+const emptyParentWithChild = stagedProject([
+  { id: "r1", notation: "", note: "", enabled: true, parentId: null },
+  { id: "c1", notation: "a > e", note: "", enabled: true, parentId: "r1" },
+]);
+equal(
+  "an empty parent does not block its sequential children",
+  deriveForm("pata", emptyParentWithChild, "child", { directOnly: true }).text,
+  "pete"
+);
+
+const interleaved = ensureProject({
+  title: "Interleaved",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [
+        { id: "r1", notation: "a > e", note: "", enabled: true },
+        { id: "r2", notation: "e > i", note: "", enabled: true },
+        { id: "c1", notation: "i > u", note: "", enabled: true, parentId: "r1" },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const normalizedRules = interleaved.languages[0].soundChanges;
+equal(
+  "rule normalization keeps sequential rules with their parent",
+  normalizedRules.map((rule) => rule.id),
+  ["r1", "c1", "r2"]
+);
+const normalizedNumbers = ruleNumberMap(normalizedRules);
+equal("sequential rules receive dotted numbers", normalizedNumbers.get("c1"), "1.1");
+equal("later top-level rules keep whole numbers", normalizedNumbers.get("r2"), "2");
+
+const depthProject = {
+  title: "Depth",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [{ id: "r1", notation: "p > f", note: "", enabled: true, parentId: null }],
+      vocabulary: [],
+    },
+    {
+      id: "grandchild",
+      name: "Grandchild",
+      parentId: "child",
+      ...language,
+      soundChanges: [{ id: "r2", notation: "f > v", note: "", enabled: true, parentId: null }],
+      vocabulary: [],
+    },
+  ],
+};
+equal(
+  "each generation applies its rules to the previous generation's output",
+  deriveForm("pata", depthProject, "grandchild").text,
+  "vata"
+);
 
 /* ---- phonotactics ------------------------------------------------------- */
 

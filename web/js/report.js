@@ -6,6 +6,7 @@ import {
   languageStats,
   projectStats,
   rootLanguages,
+  ruleNumberMap,
 } from "./model.js";
 import { esc, openMenu, toast } from "./ui.js";
 
@@ -191,8 +192,9 @@ function mdLanguageSection(project, language) {
   }
 
   if (language.soundChanges.length) {
-    const rows = language.soundChanges.map((rule, index) => [
-      String(index + 1),
+    const numbers = ruleNumberMap(language.soundChanges);
+    const rows = language.soundChanges.map((rule) => [
+      numbers.get(rule.id) || "",
       `${rule.notation}${rule.enabled === false ? " *(disabled)*" : ""}`,
       rule.note,
     ]);
@@ -293,11 +295,12 @@ function htmlLanguageSection(project, language, index) {
     ? htmlTable(["Setting", "Value"], phonoRows, { formColumns: [] })
     : "";
 
+  const ruleNumbers = ruleNumberMap(language.soundChanges);
   const rulesHtml = language.soundChanges.length
     ? htmlTable(
         ["#", "Rule", "Note"],
-        language.soundChanges.map((rule, ruleIndex) => [
-          String(ruleIndex + 1),
+        language.soundChanges.map((rule) => [
+          ruleNumbers.get(rule.id) || "",
           `${rule.notation}${rule.enabled === false ? " (disabled)" : ""}`,
           rule.note,
         ]),

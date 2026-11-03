@@ -1,10 +1,11 @@
 import { findLanguage, getLineage, uid } from "../model.js";
-import { compileChainFrom, deriveTokens } from "../phonology.js";
+import { compileChainFrom, deriveStages, ruleCompileErrors } from "../phonology.js";
+import { derivationStepsMarkup } from "../derivation.js";
 import { esc, icon, toast } from "../ui.js";
 
 // The explorer follows one word (a gloss plus its form) through the family.
 // Rule chains mirror the inherited vocabulary check: each language applies
-// its own ordered rules to what it receives from its ancestor, so a
+// its own staged rules to what it receives from its ancestor, so a
 // language's rules never re-apply to its own recorded forms. Chains compile
 // once per render and are reused for every gloss in the matrix.
 
@@ -58,9 +59,7 @@ function buildRows(project, source) {
       continue;
     }
     const chain = compileChainFrom(project, source.id, language.id);
-    const errors = chain.ok
-      ? chain.compiled.filter((item) => !item.ok && !item.empty).map((item) => item.error).filter(Boolean)
-      : [];
+    const errors = chain.ok ? ruleCompileErrors(chain.stages) : [];
     rows.push({
       language,
       depth,
@@ -84,11 +83,11 @@ function deriveFor(row, sourceWord) {
     };
   }
   const tokens = row.chain.context.tokenize(sourceWord.form);
-  const result = deriveTokens(tokens, row.chain.compiled, row.chain.context);
+  const result = deriveStages(tokens, row.chain.stages, row.chain.context);
   return {
     derived: result.tokens.join(""),
     steps: result.steps,
-    error: row.errors[0] || "",
+    error: row.errors[0] || result.errors[0] || "",
     recorded: recordedFor(row.language, sourceWord.gloss),
   };
 }
@@ -156,31 +155,11 @@ function pathMarkup(row) {
 }
 
 function stepsMarkup(cell) {
-  const visible = (cell.steps || []).filter((step) => !(step.error && step.compiled.empty));
-  if (!visible.length) return `<p class="derivation-empty">No rules change this form — it passes through unchanged.</p>`;
-  return visible
-    .map((step, index) => {
-      const notation = step.compiled.sourceRule?.notation || step.compiled.rule?.source || "";
-      if (step.error) {
-        return `
-          <div class="derivation-step is-error">
-            <span class="step-index">${index + 1}</span>
-            <div class="step-body">
-              <div class="step-rule"><code>${esc(notation || "Broken rule")}</code></div>
-              <div class="step-error">${esc(step.error)}</div>
-            </div>
-          </div>`;
-      }
-      return `
-        <div class="derivation-step ${step.changed ? "is-changed" : ""}">
-          <span class="step-index">${index + 1}</span>
-          <div class="step-body">
-            <div class="step-rule"><code>${esc(notation)}</code>${step.changed ? "" : `<span class="step-skip">unchanged</span>`}</div>
-            <div class="step-form"><code class="ipa">${esc(step.before.join("")) || "∅"}</code><span class="step-arrow">→</span><code class="ipa">${esc(step.after.join("")) || "∅"}</code></div>
-          </div>
-        </div>`;
-    })
-    .join("");
+  return derivationStepsMarkup(cell.steps, {
+    hideEmpty: true,
+    showLanguage: true,
+    emptyText: "No rules change this form — it passes through unchanged.",
+  });
 }
 
 const singleHash = (languageId, wordId) => `#/cognates/${encodeURIComponent(languageId)}/${encodeURIComponent(wordId)}`;
@@ -326,7 +305,7 @@ function traceMarkup(source, word, rows) {
       </table>
     </div>
     <p class="check-foot">
-      The derived form applies every language’s ordered rules along the path below ${esc(source.name)}; a language’s own rules never apply again to its recorded forms.
+      The derived form applies every language’s staged rules along the path below ${esc(source.name)}; a language’s own rules never apply again to its recorded forms.
       ${outside ? `${outside} language${outside === 1 ? "" : "s"} outside this line of descent ${outside === 1 ? "is" : "are"} not compared.` : ""}
       Record the derived form when a reflex is correct.
     </p>`;
@@ -385,7 +364,7 @@ export function renderCognates(container, ctx) {
           <p class="section-copy">${
             singleMode
               ? `The trace of <strong>${esc(word.gloss)}</strong> from ${esc(source.name)} through every language it reaches.`
-              : `Pick a language below, and follow every recorded gloss down through its daughters. Chains apply the ordered rules of each language, from ${esc(source.name)} onward.`
+              : `Pick a language below, and follow every recorded gloss down through its daughters. Chains apply the staged rules of each language, from ${esc(source.name)} onward.`
           }</p>
         </div>
         ${singleMode ? "" : introSummary(words, targetRows, matrixCells)}

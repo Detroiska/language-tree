@@ -1,4 +1,4 @@
-import { getLineage } from "./model.js";
+import { getLineage, ruleNumberMap } from "./model.js";
 import { esc, icon } from "./ui.js";
 
 // The command palette: Ctrl+K opens a searchable index of the whole project —
@@ -59,13 +59,14 @@ function indexEntries(project) {
       });
     }
 
-    language.soundChanges.forEach((rule, index) => {
+    const ruleNumbers = ruleNumberMap(language.soundChanges);
+    language.soundChanges.forEach((rule) => {
       entries.push({
         type: "rule",
         id: rule.id,
         languageId: language.id,
         title: rule.notation.trim() || "Empty rule",
-        subtitle: `${language.name} · rule ${index + 1}${rule.enabled === false ? " · off" : ""}`,
+        subtitle: `${language.name} · rule ${ruleNumbers.get(rule.id) || ""}${rule.enabled === false ? " · off" : ""}`,
         searchText: `${rule.notation} ${rule.note} ${language.name}`,
         hash: `#/language/${encodeURIComponent(language.id)}/changes`,
         focus: { kind: "rule", id: rule.id },

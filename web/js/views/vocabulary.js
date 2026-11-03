@@ -18,9 +18,11 @@ function expectedFor(ctx, word, parent) {
     (candidate) => candidate.form.trim() && normalizeGloss(candidate.gloss) === normalizeGloss(word.gloss) && word.gloss.trim()
   );
   if (!parentWord) return null;
+  const derived = deriveForm(parentWord.form, ctx.project, ctx.language.id, { directOnly: true });
   return {
     parentWord,
-    derived: deriveForm(parentWord.form, ctx.project, ctx.language.id, { directOnly: true }).text,
+    derived: derived.text,
+    error: derived.error,
   };
 }
 
@@ -31,6 +33,9 @@ function sameForm(a, b) {
 
 function checkCellMarkup(word, expected) {
   if (!expected) return `<span class="muted">—</span>`;
+  if (expected.error) {
+    return `<span class="status-chip status-differs" title="${esc(expected.error)}">${icon("warning")}Rule error</span>`;
+  }
   if (!word.form.trim()) return `<span class="status-chip status-missing">${icon("info")}No form</span>`;
   if (sameForm(word.form, expected.derived)) {
     return `<span class="status-chip status-match" title="Matches the derived form">${icon("check")}Matches</span>`;
@@ -284,7 +289,7 @@ export function renderVocabulary(container, ctx) {
   if (parent) {
     for (const word of words) {
       const expected = expectedFor(ctx, word, parent);
-      if (!expected) continue;
+      if (!expected || expected.error) continue;
       checks += 1;
       if (word.form.trim() && sameForm(word.form, expected.derived)) matches += 1;
     }
@@ -330,7 +335,7 @@ export function renderVocabulary(container, ctx) {
         <header class="panel-head">
           <div class="panel-title">
             <h2>${esc(language.name)} lexicon</h2>
-            <p>${hasParent ? `Expected forms come from ${esc(parent.name)} via the ordered rules.` : "Root vocabulary is the starting point for descendant checks."}</p>
+            <p>${hasParent ? `Expected forms come from ${esc(parent.name)} via the staged sound changes.` : "Root vocabulary is the starting point for descendant checks."}</p>
           </div>
           <span class="bulk-actions">
             <button class="button button-quiet button-small" type="button" data-bulk-words title="Import or export the word list" aria-label="Import or export the word list">${icon("external")}Import / export</button>
@@ -355,7 +360,7 @@ export function renderVocabulary(container, ctx) {
                   <tbody>${rows}</tbody>
                 </table>
               </div>
-              <p class="table-foot">${hasParent ? "A dash means no word with that gloss exists in the ancestor. The inherited check uses only this language’s direct sound changes." : "Add descendant languages to compare their forms against these roots."} The phonotactics column checks this language’s own inventory and syllable template.</p>
+              <p class="table-foot">${hasParent ? "A dash means no word with that gloss exists in the ancestor. The inherited check uses only this language’s direct sound changes; top-level rules match the ancestor’s form together, then sequential rules run in order." : "Add descendant languages to compare their forms against these roots."} The phonotactics column checks this language’s own inventory and syllable template.</p>
             `
             : `
               <div class="lexicon-empty">

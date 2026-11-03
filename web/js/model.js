@@ -241,8 +241,18 @@ export function ensureProject(raw) {
             notation: typeof rule.notation === "string" ? rule.notation : "",
             note: typeof rule.note === "string" ? rule.note : "",
             enabled: rule.enabled !== false,
+            parentId: typeof rule.parentId === "string" ? rule.parentId : null,
           }))
       : [];
+    // Sequential rules are children of a top-level rule. Only one level of
+    // nesting is supported: a parent must itself be a top-level rule.
+    const topLevelRuleIds = new Set(
+      language.soundChanges.filter((rule) => !rule.parentId).map((rule) => rule.id)
+    );
+    for (const rule of language.soundChanges) {
+      if (rule.parentId && !topLevelRuleIds.has(rule.parentId)) rule.parentId = null;
+    }
+    language.soundChanges = normalizeRuleOrder(language.soundChanges);
     language.vocabulary = Array.isArray(language.vocabulary)
       ? language.vocabulary
           .filter((entry) => entry && typeof entry === "object")
@@ -515,6 +525,54 @@ export function projectStats(project) {
     },
     { languages: project.languages.length, consonants: 0, vowels: 0, changes: 0, words: 0 }
   );
+}
+
+// Sound changes are stored as one flat array, but only top-level rules are
+// independently ordered. A sequential rule names its parent with parentId and
+// follows that parent on screen. Grouping is order-preserving, so the array
+// remains the source of truth for both levels.
+export function ruleGroups(rules) {
+  const groups = [];
+  const byId = new Map();
+  for (const rule of rules) {
+    if (rule.parentId) continue;
+    const group = { rule, children: [] };
+    groups.push(group);
+    byId.set(rule.id, group);
+  }
+  for (const rule of rules) {
+    if (!rule.parentId) continue;
+    const group = byId.get(rule.parentId);
+    if (group) {
+      group.children.push(rule);
+      continue;
+    }
+    // A missing parent should not make the rule disappear. Treat it as a
+    // top-level rule until ensureProject repairs the link.
+    const orphan = { rule, children: [] };
+    groups.push(orphan);
+    byId.set(rule.id, orphan);
+  }
+  return groups;
+}
+
+export function ruleNumberMap(rules) {
+  const numbers = new Map();
+  ruleGroups(rules).forEach((group, index) => {
+    numbers.set(group.rule.id, String(index + 1));
+    group.children.forEach((child, childIndex) => {
+      numbers.set(child.id, `${index + 1}.${childIndex + 1}`);
+    });
+  });
+  return numbers;
+}
+
+export function normalizeRuleOrder(rules) {
+  const ordered = [];
+  for (const group of ruleGroups(rules)) {
+    ordered.push(group.rule, ...group.children);
+  }
+  return ordered;
 }
 
 export function ruleChain(project, languageId, { includeSelf = true } = {}) {
