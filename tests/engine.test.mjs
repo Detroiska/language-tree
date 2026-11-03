@@ -353,6 +353,71 @@ const validate3 = (form) => onsetLimited.validate(form).issues.map((issue) => is
 equal("onset not in allowed list", validate3("sa"), ["onset"]);
 equal("allowed onset passes", validate3("ta"), []);
 
+const forbiddenOnset = createPhonotacticsChecker({
+  ...language,
+  phonotactics: {
+    template: "(C)V(C)",
+    onsets: "t",
+    codas: "",
+    onsetsMode: "forbidden",
+    codasMode: "allowed",
+    forbiddenOnsets: "s, x",
+    forbiddenCodas: "",
+    forbidden: "",
+    notes: "",
+    classes: [],
+  },
+});
+const validate4 = (form) => forbiddenOnset.validate(form).issues.map((issue) => issue.type);
+equal("forbidden onset rejected", validate4("sa"), ["onset"]);
+equal("other onset passes", validate4("ta"), []);
+equal("inactive allowed list is ignored in forbidden mode", validate4("ka"), []);
+
+const forbiddenCoda = createPhonotacticsChecker({
+  ...language,
+  phonotactics: {
+    template: "(C)V(C)",
+    onsets: "",
+    codas: "",
+    onsetsMode: "allowed",
+    codasMode: "forbidden",
+    forbiddenOnsets: "",
+    forbiddenCodas: "n, s",
+    forbidden: "",
+    notes: "",
+    classes: [],
+  },
+});
+const validate5 = (form) => forbiddenCoda.validate(form).issues.map((issue) => issue.type);
+equal("forbidden coda rejected", validate5("pan"), ["coda"]);
+equal("other coda passes", validate5("pat"), []);
+equal("open syllable passes forbidden coda list", validate5("pa"), []);
+
+const migrated = ensureProject({
+  title: "Modes",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      phonotactics: { template: "(C)V(C)", onsets: "p, t" },
+      soundChanges: [],
+      vocabulary: [],
+    },
+  ],
+});
+const migratedPhonotactics = migrated.languages[0].phonotactics;
+equal(
+  "phonotactic constraint modes default to allowed",
+  [migratedPhonotactics.onsetsMode, migratedPhonotactics.codasMode],
+  ["allowed", "allowed"],
+);
+equal(
+  "missing forbidden lists normalize to empty",
+  [migratedPhonotactics.forbiddenOnsets, migratedPhonotactics.forbiddenCodas],
+  ["", ""],
+);
+
 const cyclic = createPhonotacticsChecker({
   ...language,
   phonotactics: {

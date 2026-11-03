@@ -81,12 +81,17 @@ export function defaultInventory() {
 // carries its own copy so a daughter can inherit and then diverge. Empty
 // constraint lists mean "no extra restriction beyond the template".
 // Categories are the language's named sound classes (N, G, L, …) usable in
-// the template and forbidden sequences.
+// the template and forbidden sequences. Onsets and codas keep separate
+// allowed and forbidden lists so switching modes never rewrites the text.
 export function defaultPhonotactics() {
   return {
     template: "(C)V(C)",
     onsets: "",
     codas: "",
+    onsetsMode: "allowed",
+    codasMode: "allowed",
+    forbiddenOnsets: "",
+    forbiddenCodas: "",
     forbidden: "",
     notes: "",
     classes: [],
@@ -187,12 +192,19 @@ function ensureChart(chart, fallbackFactory, kind) {
 function ensurePhonotactics(value) {
   const defaults = defaultPhonotactics();
   const base = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const mode = (raw) => (raw === "forbidden" ? "forbidden" : "allowed");
   return {
     // An explicitly empty template is meaningful: it turns phonotactic
     // checking off. Only a missing field gets the default template.
     template: typeof base.template === "string" ? base.template : defaults.template,
     onsets: typeof base.onsets === "string" ? base.onsets : defaults.onsets,
     codas: typeof base.codas === "string" ? base.codas : defaults.codas,
+    onsetsMode: mode(base.onsetsMode),
+    codasMode: mode(base.codasMode),
+    forbiddenOnsets:
+      typeof base.forbiddenOnsets === "string" ? base.forbiddenOnsets : defaults.forbiddenOnsets,
+    forbiddenCodas:
+      typeof base.forbiddenCodas === "string" ? base.forbiddenCodas : defaults.forbiddenCodas,
     forbidden: typeof base.forbidden === "string" ? base.forbidden : defaults.forbidden,
     notes: typeof base.notes === "string" ? base.notes : defaults.notes,
     classes: Array.isArray(base.classes)

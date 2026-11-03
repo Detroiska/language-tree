@@ -30,7 +30,7 @@ The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the br
 
 - **Editable family tree** — root languages and daughter languages, with add, rename, delete, and reparent actions.
 - **Phonology charts** — separate consonant and vowel charts with editable rows and columns. Any row or column can be subdivided (aspiration, labialization, rounding, and so on).
-- **Phonotactics** — a per-language syllable template, named sound categories (`N` nasals, `G` glides, and whatever else you define), chart classes derived live from the phonology tables (`plosive.plain`, `V.back`), plus optional onset, coda, and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
+- **Phonotactics** — a per-language syllable template, named sound categories (`N` nasals, `G` glides, and whatever else you define), chart classes derived live from the phonology tables (`plosive.plain`, `V.back`), plus optional allowed/forbidden onset and coda lists and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
 - **Sound changes** — standard-style notation such as `p > f / V _ V` or `[plosive.plain] > ∅ / _ #`, with a live tester against ancestral forms. Top-level rules apply together; dotted child rules run in sequence.
 - **Basic vocabulary** — gloss + IPA form, with an inherited-form check that applies the current language's rules to the parent's words and a phonotactic validity check on every form.
 - **Cognate explorer** — follow any recorded gloss down the family: each daughter's chain-derived form next to its recorded form, with a one-click record action and a whole-lexicon matrix view.
@@ -92,7 +92,7 @@ Template syntax:
 - Names are 1–6 capital letters; `C` and `V` are built in and cannot be redefined. `C` and `V` still match category members in their own slots, so subsets need no extra notation — in `NVC` the final `C` admits nasals.
 - A category's sound list may also name `C`, `V`, a chart class (below), or another category's letter, so classes compose: `S = N L G` collects all sonorants, `T = plosive.plain l` collects the plain stops plus l. Browse "Insert from the chart" to pull the sounds of a chart row without typing IPA.
 - A shape needs at least one nucleus-capable slot: `V`, a literal vowel, or a category whose members are all vowels. Mixed sets (glides+vowels) can fill onset and coda slots but cannot carry the nucleus alone.
-- Categories work in **forbidden sequences** too: `NN` bans adjacent nasals. Allowed onset and coda lists stay literal.
+- Categories work in **forbidden sequences** too: `NN` bans adjacent nasals. Onset and coda lists (allowed or forbidden) stay literal.
 
 **Chart classes** name a slice of the phonology table instead of listing sounds. Write the labels of the rows and columns, joined by dots — `plosive.plain` (the plain stops), `plosive.velar`, `dental-alveolar`, `V.back`, `V.back.short`, or just `back`. The classes are read from the charts on every render, so renaming a row or moving a sound updates every rule, template, and category that uses it.
 
@@ -105,7 +105,7 @@ Template syntax:
 
 Constraints are optional lists:
 
-- **Allowed onsets** and **allowed codas** restrict the clusters the template permits. Leaving a list empty allows everything; an empty onset or coda is always allowed.
+- **Onsets** and **codas** each have an **Allowed** / **Forbidden** switch. An allowed list restricts the clusters the template permits; an empty allowed list allows everything. A forbidden list rejects the clusters listed; an empty forbidden list forbids nothing. Empty onsets or codas are always allowed, and the switch is per list, so allowed onsets can combine with forbidden codas. Switching keeps both lists, so you can flip back without retyping.
 - **Forbidden sequences** match anywhere in the word. `VV` bans adjacent vowels, `CCC` bans three-consonant runs, `#CC` bans word-initial clusters, and `CC#` bans word-final clusters. `C`, `V`, categories, chart classes, `[ptk]`, literals, and `#` are supported; examples: `NN` (nasal+nasal), `[plosive.plain]#` (final plain stop), `[back][plosive.plain]` (back vowel before a plain stop).
 
 The template is expanded into a finite set of syllable shapes. Words are syllabified with the maximal onset principle, and every sound must be in the language's own chart. The **Try a form** panel validates an arbitrary word, while **Vocabulary check** lists every recorded form with its syllable break and any problems. The same check appears in the Vocabulary tab.

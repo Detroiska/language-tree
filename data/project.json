@@ -2,7 +2,7 @@
   "version": 1,
   "title": "Untitled language family",
   "createdAt": "2026-11-02T06:15:57Z",
-  "updatedAt": "2026-11-03T11:57:18Z",
+  "updatedAt": "2026-11-03T14:15:35Z",
   "languages": [
     {
       "id": "lang_4a601696-4ce1-4096-b253-1900abaaa860",
@@ -295,6 +295,10 @@
         "template": "(C)V(C)",
         "onsets": "",
         "codas": "",
+        "onsetsMode": "allowed",
+        "codasMode": "forbidden",
+        "forbiddenOnsets": "",
+        "forbiddenCodas": "aspirated",
         "forbidden": "",
         "notes": "",
         "classes": []
@@ -664,6 +668,10 @@
         "template": "(C)V(C)",
         "onsets": "",
         "codas": "",
+        "onsetsMode": "allowed",
+        "codasMode": "allowed",
+        "forbiddenOnsets": "",
+        "forbiddenCodas": "",
         "forbidden": "",
         "notes": "",
         "classes": []

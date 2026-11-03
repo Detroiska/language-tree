@@ -862,8 +862,12 @@ export function compilePhonotactics(phonotactics, context) {
     warnings: [],
     shapes: [],
     classes,
+    onsetsMode: phonotactics?.onsetsMode === "forbidden" ? "forbidden" : "allowed",
+    codasMode: phonotactics?.codasMode === "forbidden" ? "forbidden" : "allowed",
     onsets: parseClusterList(phonotactics?.onsets, context),
     codas: parseClusterList(phonotactics?.codas, context),
+    forbiddenOnsets: parseClusterList(phonotactics?.forbiddenOnsets, context),
+    forbiddenCodas: parseClusterList(phonotactics?.forbiddenCodas, context),
     forbidden: [],
     constraintErrors: [],
   };
@@ -948,15 +952,23 @@ export function validateWord(form, compiled, context) {
 
   if (parse.ok) {
     for (const syllable of parse.syllables) {
-      if (syllable.onset.length && compiled.onsets.size) {
+      if (syllable.onset.length) {
         const onset = syllable.onset.join("");
-        if (!compiled.onsets.has(onset)) {
+        if (compiled.onsetsMode === "forbidden") {
+          if (compiled.forbiddenOnsets.has(onset)) {
+            result.issues.push({ type: "onset", message: `Onset “${onset}” is forbidden.` });
+          }
+        } else if (compiled.onsets.size && !compiled.onsets.has(onset)) {
           result.issues.push({ type: "onset", message: `Onset “${onset}” is not in the allowed onsets.` });
         }
       }
-      if (syllable.coda.length && compiled.codas.size) {
+      if (syllable.coda.length) {
         const coda = syllable.coda.join("");
-        if (!compiled.codas.has(coda)) {
+        if (compiled.codasMode === "forbidden") {
+          if (compiled.forbiddenCodas.has(coda)) {
+            result.issues.push({ type: "coda", message: `Coda “${coda}” is forbidden.` });
+          }
+        } else if (compiled.codas.size && !compiled.codas.has(coda)) {
           result.issues.push({ type: "coda", message: `Coda “${coda}” is not in the allowed codas.` });
         }
       }

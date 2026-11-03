@@ -124,8 +124,10 @@ function phonotacticsRows(language) {
     const sounds = typeof category?.sounds === "string" ? category.sounds.trim() : "";
     if (name) push(`Category ${name}`, sounds);
   }
-  push("Onset rules", p.onsets);
-  push("Coda rules", p.codas);
+  const onsetsForbidden = p.onsetsMode === "forbidden";
+  push(onsetsForbidden ? "Forbidden onsets" : "Allowed onsets", onsetsForbidden ? p.forbiddenOnsets : p.onsets);
+  const codasForbidden = p.codasMode === "forbidden";
+  push(codasForbidden ? "Forbidden codas" : "Allowed codas", codasForbidden ? p.forbiddenCodas : p.codas);
   push("Forbidden clusters", p.forbidden);
   push("Notes", p.notes);
   return rows;

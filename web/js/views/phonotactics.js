@@ -20,6 +20,48 @@ const CLASS_PRESETS = [
   { name: "F", label: "F · fricatives", sounds: "f s ʃ x" },
 ];
 
+function constraintModeOf(phonotactics, kind) {
+  const key = kind === "onsets" ? "onsetsMode" : "codasMode";
+  return phonotactics[key] === "forbidden" ? "forbidden" : "allowed";
+}
+
+function constraintFieldKey(kind, mode) {
+  if (mode !== "forbidden") return kind;
+  return kind === "onsets" ? "forbiddenOnsets" : "forbiddenCodas";
+}
+
+function constraintPlaceholder(kind, mode) {
+  if (kind === "onsets") return mode === "forbidden" ? "ts, ʃt" : "pr, tr, kl";
+  return mode === "forbidden" ? "nt, st" : "n, s, r";
+}
+
+function constraintHelp(kind, mode) {
+  const noun = kind === "onsets" ? "onset" : "coda";
+  return mode === "forbidden"
+    ? `Comma-separated ${noun} sounds or clusters. Any ${noun} listed here is rejected; empty forbids nothing.`
+    : `Comma-separated ${noun} sounds or clusters. Empty allows every ${noun} the template permits.`;
+}
+
+function constraintFieldMarkup(phonotactics, kind) {
+  const isOnset = kind === "onsets";
+  const label = isOnset ? "Onsets" : "Codas";
+  const mode = constraintModeOf(phonotactics, kind);
+  const key = constraintFieldKey(kind, mode);
+  const active = (value) => (mode === value ? " is-active" : "");
+  return `
+    <div class="field">
+      <div class="field-head">
+        <label class="field-label" for="phonotactics-${kind}">${label} <span class="field-optional">optional</span></label>
+        <div class="mode-toggle" role="group" aria-label="${label} constraint type">
+          <button class="mode-button${active("allowed")}" type="button" data-constraint-mode="${kind}" data-constraint-value="allowed" aria-pressed="${mode === "allowed"}">Allowed</button>
+          <button class="mode-button${active("forbidden")}" type="button" data-constraint-mode="${kind}" data-constraint-value="forbidden" aria-pressed="${mode === "forbidden"}">Forbidden</button>
+        </div>
+      </div>
+      <input class="input" id="phonotactics-${kind}" type="text" data-constraint-input="${kind}" data-phonotactics-field="${key}" value="${esc(phonotactics[key])}" placeholder="${constraintPlaceholder(kind, mode)}" autocomplete="off" spellcheck="false" aria-label="${mode === "forbidden" ? "Forbidden" : "Allowed"} ${isOnset ? "onsets" : "codas"}">
+      <span class="field-help" data-constraint-help="${kind}">${constraintHelp(kind, mode)}</span>
+    </div>`;
+}
+
 // Row labels of both charts, with the sounds sitting under each row. These
 // become "insert from the chart" buttons so category sound lists can be
 // built without typing IPA by hand.
@@ -275,7 +317,7 @@ export function renderPhonotactics(container, ctx) {
         <div>
           <p class="eyebrow">Phonotactics</p>
           <h2>Syllable structure and word shape</h2>
-          <p class="section-copy">Describe the shapes a syllable may take, then constrain onsets, codas, or sequences. Vocabulary forms are checked against the inventory and these rules.</p>
+          <p class="section-copy">Describe the shapes a syllable may take, then allow or forbid onsets and codas, or constrain sequences. Vocabulary forms are checked against the inventory and these rules.</p>
         </div>
         <div class="inventory-summary" data-phonotactics-summary></div>
       </section>
@@ -372,16 +414,8 @@ export function renderPhonotactics(container, ctx) {
             </header>
             <div class="panel-body form-stack">
               <div class="form-row">
-                <label class="field">
-                  <span class="field-label">Allowed onsets <span class="field-optional">optional</span></span>
-                  <input class="input" type="text" data-phonotactics-field="onsets" value="${esc(phonotactics.onsets)}" placeholder="pr, tr, kl" autocomplete="off" spellcheck="false">
-                  <span class="field-help">Comma-separated onset sounds or clusters. Empty allows every onset the template permits.</span>
-                </label>
-                <label class="field">
-                  <span class="field-label">Allowed codas <span class="field-optional">optional</span></span>
-                  <input class="input" type="text" data-phonotactics-field="codas" value="${esc(phonotactics.codas)}" placeholder="n, s, r" autocomplete="off" spellcheck="false">
-                  <span class="field-help">Comma-separated coda sounds or clusters. Empty allows every coda the template permits.</span>
-                </label>
+                ${constraintFieldMarkup(phonotactics, "onsets")}
+                ${constraintFieldMarkup(phonotactics, "codas")}
               </div>
               <label class="field">
                 <span class="field-label">Forbidden sequences <span class="field-optional">optional</span></span>
@@ -437,7 +471,7 @@ export function renderPhonotactics(container, ctx) {
                 <div><dt>Nucleus rule</dt><dd>A shape needs at least one nucleus-capable slot: <code>V</code>, a literal vowel, or a category whose members are all vowels. Mixed sets like a glide+vowel category can’t carry the nucleus alone.</dd></div>
                 <div><dt>Subsets</dt><dd>Slots are matched one at a time, so a category can be a subset of another: in <code>NVC</code> the <code>C</code> still admits nasals.</dd></div>
                 <div><dt>Literal category letters</dt><dd>Write <code>\N</code> to use the literal sound “N” after you define N as a category.</dd></div>
-                <div><dt>Onsets and codas</dt><dd>Empty lists mean “anything the template permits”; empty onsets or codas are always allowed. Cluster lists stay literal — categories don’t apply there.</dd></div>
+                <div><dt>Onsets and codas</dt><dd>Each list can be switched between <strong>Allowed</strong> and <strong>Forbidden</strong>. An empty allowed list permits anything the template allows; an empty forbidden list rejects nothing. Empty onsets or codas are always allowed. Cluster lists stay literal — categories don’t apply there.</dd></div>
                 <div><dt>Forbidden sequences</dt><dd>Match anywhere in the word and honor categories too: <code>NN</code> bans adjacent nasals, <code>#CC</code> bans word-initial clusters.</dd></div>
               </dl>
               <p class="help-foot">The template is expanded into a finite set of syllable shapes. Words are syllabified with the maximal onset principle, and every sound must be in the language’s own chart.</p>
@@ -487,6 +521,35 @@ export function renderPhonotactics(container, ctx) {
   const updateTest = () => {
     if (!testInput || !testResultElement) return;
     testResultElement.innerHTML = testResultMarkup(checker.validate(testInput.value));
+  };
+
+  const constraintFields = {
+    onsets: {
+      input: container.querySelector('[data-constraint-input="onsets"]'),
+      help: container.querySelector('[data-constraint-help="onsets"]'),
+    },
+    codas: {
+      input: container.querySelector('[data-constraint-input="codas"]'),
+      help: container.querySelector('[data-constraint-help="codas"]'),
+    },
+  };
+
+  const syncConstraintField = (kind) => {
+    const field = constraintFields[kind];
+    if (!field?.input) return;
+    const mode = constraintModeOf(language.phonotactics, kind);
+    const key = constraintFieldKey(kind, mode);
+    const noun = kind === "onsets" ? "onset" : "coda";
+    field.input.dataset.phonotacticsField = key;
+    field.input.value = language.phonotactics[key] || "";
+    field.input.placeholder = constraintPlaceholder(kind, mode);
+    field.input.setAttribute("aria-label", `${mode === "forbidden" ? "Forbidden" : "Allowed"} ${noun}s`);
+    if (field.help) field.help.textContent = constraintHelp(kind, mode);
+    container.querySelectorAll(`[data-constraint-mode="${kind}"]`).forEach((button) => {
+      const active = button.dataset.constraintValue === mode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
   };
 
   const classListElement = container.querySelector("[data-class-list]");
@@ -569,6 +632,20 @@ export function renderPhonotactics(container, ctx) {
   });
 
   container.addEventListener("click", (event) => {
+    const modeButton = event.target.closest("[data-constraint-mode]");
+    if (modeButton) {
+      const kind = modeButton.dataset.constraintMode;
+      const mode = modeButton.dataset.constraintValue === "forbidden" ? "forbidden" : "allowed";
+      const key = kind === "onsets" ? "onsetsMode" : "codasMode";
+      if (language.phonotactics[key] !== mode) {
+        language.phonotactics[key] = mode;
+        syncConstraintField(kind);
+        ctx.touch({ label: "Edit phonotactics" });
+        refresh();
+        constraintFields[kind].input?.focus();
+      }
+      return;
+    }
     const presetButton = event.target.closest("[data-class-preset]");
     if (presetButton) {
       const name = presetButton.dataset.classPreset;
