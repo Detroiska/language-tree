@@ -218,7 +218,7 @@ function testResultMarkup(result) {
     </div>`;
 }
 
-function wordCheckMarkup(language, checker) {
+function wordCheckMarkup(language, checker, results) {
   if (!language.vocabulary.length) {
     return `
       <div class="notice notice-quiet">
@@ -228,7 +228,8 @@ function wordCheckMarkup(language, checker) {
       </div>`;
   }
 
-  const results = language.vocabulary.map((word) => checker.validate(word.form));
+  // results are computed once by refresh() and passed in: validating the
+  // whole lexicon twice per keystroke doubles the cost for no benefit.
   const rows = language.vocabulary
     .map((word, index) => {
       const result = results[index];
@@ -475,7 +476,7 @@ export function renderPhonotactics(container, ctx) {
     const results = language.vocabulary.map((word) => checker.validate(word.form));
     summaryElement.innerHTML = summaryMarkup(results, checker.compiled);
     wordSummaryElement.textContent = summaryText(results, checker.compiled);
-    wordCheckElement.innerHTML = wordCheckMarkup(language, checker);
+    wordCheckElement.innerHTML = wordCheckMarkup(language, checker, results);
     templateStatusElement.innerHTML = templateStatusMarkup(checker.compiled);
     templateFeedbackElement.innerHTML = templateFeedbackMarkup(checker.compiled);
     templateShapesElement.innerHTML = shapeMarkup(checker.compiled);
