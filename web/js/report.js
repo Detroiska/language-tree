@@ -148,13 +148,19 @@ function mdTable(headers, rows) {
 
 function mdHeading(project, language) {
   const depth = Math.max(0, getLineage(project, language.id).length - 1);
-  return "#".repeat(Math.min(depth, 3) + 2);
+  // Cap at two levels so the inner sections (depth + 1 and + 2) never run
+  // past h5; deeper families still keep a strictly nested outline.
+  return "#".repeat(Math.min(depth, 2) + 2);
 }
 
 function mdLanguageSection(project, language) {
   const stats = languageStats(language);
   const chain = getLineage(project, language.id).map((item) => item.name);
   const heading = mdHeading(project, language);
+  // Inner sections stay strictly below the language heading, whatever its
+  // depth — a fixed "###" used to put them at or above their parent section.
+  const section = `${heading}#`;
+  const sub = `${heading}##`;
   const parts = [];
 
   parts.push(
@@ -171,17 +177,17 @@ function mdLanguageSection(project, language) {
     );
   }
 
-  parts.push(`### Phonology`);
+  parts.push(`${section} Phonology`);
   for (const [title, chart] of [["Consonants", language.inventory.consonants], ["Vowels", language.inventory.vowels]]) {
     const table = chartTableData(chart);
     if (!table.rows.length && table.headers.length === 1) continue;
-    parts.push(`#### ${title}\n\n${mdTable(table.headers, table.rows)}`);
+    parts.push(`${sub} ${title}\n\n${mdTable(table.headers, table.rows)}`);
     if (table.notes.trim()) parts.push(`*${title} notes: ${table.notes.trim()}*`);
   }
 
   const phonotactics = phonotacticsRows(language);
   if (phonotactics.length) {
-    parts.push(`### Phonotactics\n\n${mdTable(["Setting", "Value"], phonotactics)}`);
+    parts.push(`${section} Phonotactics\n\n${mdTable(["Setting", "Value"], phonotactics)}`);
   }
 
   if (language.soundChanges.length) {
@@ -191,7 +197,7 @@ function mdLanguageSection(project, language) {
       rule.note,
     ]);
     const disabledCount = language.soundChanges.filter((rule) => rule.enabled === false).length;
-    parts.push(`### Sound changes\n\n${mdTable(["#", "Rule", "Note"], rows)}`);
+    parts.push(`${section} Sound changes\n\n${mdTable(["#", "Rule", "Note"], rows)}`);
     if (disabledCount) {
       parts.push(`_${disabledCount} of ${language.soundChanges.length} rule${language.soundChanges.length === 1 ? "" : "s"} disabled._`);
     }
@@ -199,13 +205,13 @@ function mdLanguageSection(project, language) {
 
   if (language.vocabulary.length) {
     parts.push(
-      `### Vocabulary\n\n${mdTable(
+      `${section} Vocabulary\n\n${mdTable(
         ["Gloss", "Form", "Note"],
         language.vocabulary.map((word) => [word.gloss, word.form, word.note])
       )}`
     );
   } else {
-    parts.push(`### Vocabulary\n\n_No words recorded._`);
+    parts.push(`${section} Vocabulary\n\n_No words recorded._`);
   }
 
   return parts.join("\n\n");
