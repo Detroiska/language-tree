@@ -1,5 +1,4 @@
 import {
-  allophonyRules,
   ancestorsOf,
   getLineage,
   languageStats,
@@ -12,17 +11,23 @@ import {
   contextForLanguage,
   deriveForm,
   deriveStages,
+  hasSurfaceDisplay,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic } from "../notation.js";
+import { formatPhonemic, formatPhonetic, stripStressMarks } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
+import { reconstructForm, reconstructionAlternatives } from "../reconstruction.js";
 import { debounce, esc, icon, toast } from "../ui.js";
 
 // The tester input is re-created on every view render (which edits trigger),
 // so the typed form is remembered per language — otherwise adding a rule or
 // recording a word wipes what was being tested.
 const testerMemory = new Map();
+// The reconstruction field is remembered for the same reason. The value is
+// `{ form, gloss }` so a selected vocabulary item keeps its gloss across
+// re-renders and the parent-lexicon check can use it.
+const reconstructionMemory = new Map();
 
 function compileDirect(ctx) {
   const context = contextForLanguage(ctx.project, ctx.language.id);
@@ -40,7 +45,7 @@ function directDerivation(ctx, form) {
     outputTokens: result.tokens,
     steps: result.steps,
     text: phonemic,
-    surface: surface?.errors.length ? null : surface?.text || "",
+    surface: surface?.errors.length ? null : surface?.display || "",
     surfaceError: surface?.errors[0] || "",
     errors: result.errors,
     fatal: result.fatal,
@@ -48,7 +53,10 @@ function directDerivation(ctx, form) {
 }
 
 function sameForm(a, b) {
-  const normalize = (value) => String(value || "").normalize("NFC").replace(/\s+/g, " ").trim();
+  const normalize = (value) =>
+    stripStressMarks(String(value || "").normalize("NFC"))
+      .replace(/[.\-·\s]+/gu, "")
+      .trim();
   return normalize(a) === normalize(b);
 }
 
@@ -190,7 +198,7 @@ function testPanelMarkup(ctx) {
                 <span class="derivation-label">Phonemic</span>
                 <output class="derivation-output ipa" data-test-output>—</output>
               </div>
-              <div class="derivation-output-row" data-test-surface-row ${allophonyRules(ctx.language.allophony).length ? "" : "hidden"}>
+              <div class="derivation-output-row" data-test-surface-row ${hasSurfaceDisplay(ctx.language) ? "" : "hidden"}>
                 <span class="derivation-label">Surface</span>
                 <output class="derivation-output ipa allo-surface-output" data-test-surface>—</output>
               </div>
@@ -207,6 +215,112 @@ function testPanelMarkup(ctx) {
           `
       }
     </section>`;
+}
+
+function reconstructPanelMarkup(ctx) {
+  const lineage = getLineage(ctx.project, ctx.language.id);
+  const parent = lineage.length > 1 ? lineage[lineage.length - 2] : null;
+  const suggestions = ctx.language.vocabulary.filter((word) => word.form.trim()).slice(0, 4);
+  const remembered = reconstructionMemory.get(ctx.language.id);
+  const initialValue = remembered?.form ?? (suggestions[0]?.form || "");
+  return `
+    <section class="panel test-panel reconstruct-panel" data-reconstruct-panel>
+      <header class="panel-head">
+        <div class="panel-title">
+          <h2>Reconstruction</h2>
+          <p>${parent ? `Invert these rules to propose the ${esc(parent.name)} form.` : "A root language has no ancestor to reconstruct."}</p>
+        </div>
+        <span class="panel-icon">${icon("refresh")}</span>
+      </header>
+      ${
+        parent
+          ? `
+            <div class="test-input-wrap">
+              <label class="field-label" for="reconstruct-word">Daughter form <span class="field-optional">${esc(ctx.language.name)}</span></label>
+              <input class="input ipa-input" id="reconstruct-word" data-reconstruct-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+              ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-reconstruct-word="${esc(word.form)}" data-reconstruct-gloss="${esc(word.gloss)}" title="${esc(word.gloss)}">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
+            </div>
+            <div class="derivation" data-reconstruct>
+              <div class="derivation-output-row">
+                <span class="derivation-label">${esc(parent.name)}</span>
+                <output class="derivation-output ipa reconstruct-output" data-reconstruct-output>—</output>
+              </div>
+              <div class="derivation-parsed" data-reconstruct-parsed></div>
+              <div class="reconstruct-notes" data-reconstruct-notes></div>
+            </div>
+          `
+          : `
+            <div class="notice notice-quiet">
+              ${icon("info")}
+              <p>A root language has no ancestral input, so there are no rules to invert. Reconstruction starts one generation below a root.</p>
+            </div>
+          `
+      }
+    </section>`;
+}
+
+function renderReconstruction(panel, result) {
+  const output = panel.querySelector("[data-reconstruct-output]");
+  const parsed = panel.querySelector("[data-reconstruct-parsed]");
+  const notes = panel.querySelector("[data-reconstruct-notes]");
+  if (!output || !parsed || !notes) return;
+  const inputTokens = result.inputTokens || [];
+
+  if (result.reason === "empty") {
+    output.textContent = "—";
+    parsed.innerHTML = `<span>Type a form to reconstruct.</span>`;
+    notes.innerHTML = "";
+    return;
+  }
+
+  parsed.innerHTML = inputTokens.length
+    ? `<span>Read as</span> ${inputTokens.map((token) => `<code>${esc(token)}</code>`).join(" ")}`
+    : "";
+
+  if (!result.ok) {
+    output.textContent = "—";
+    const message =
+      result.reason === "no-inverse"
+        ? "No exact input produces this form with the current rules. Check the recorded form or the rule environments."
+        : "This form could not be reconstructed.";
+    notes.innerHTML = `<p class="reconstruct-warning">${icon("warning")}<span>${esc(message)}</span></p>`;
+    return;
+  }
+
+  const alternatives = reconstructionAlternatives(result);
+  output.textContent = alternatives.map((text) => `*${text || "∅"}`).join(" / ") || "—";
+  const bits = [];
+  const activeRules = result.language
+    ? result.language.soundChanges.filter((rule) => rule.enabled !== false).length
+    : 0;
+  if (!activeRules) {
+    bits.push("No sound changes to invert; the form passes through unchanged.");
+  } else if (!result.ambiguous && result.unchanged) {
+    bits.push("No rule needs to apply; the form can be inherited unchanged.");
+  }
+  const preferred = result.candidates?.[0];
+  if (preferred?.parentMatch === "gloss") {
+    bits.push(`Matches the parent’s recorded word for “${preferred.parentGloss}”.`);
+  } else if (preferred?.parentMatch === "form") {
+    bits.push("Matches a form recorded in the parent language.");
+  }
+  if (result.ambiguous) {
+    bits.push(`${alternatives.length} possible reconstructions; the rules do not distinguish them.`);
+    if (result.unchanged) {
+      bits.push("One alternative is the daughter form itself, inherited without change.");
+    }
+  }
+  if (result.lossy) {
+    bits.push("At least one alternative restores material deleted by a rule; the lost segment is inferred.");
+  }
+  if (result.truncated) {
+    bits.push("The search stopped early, so some alternatives may be missing.");
+  }
+  const warnings = (result.warnings || []).slice(0, 2);
+  notes.innerHTML = [
+    ...bits.map((bit) => `<p class="reconstruct-note">${icon("info")}<span>${esc(bit)}</span></p>`),
+    ...warnings.map((warning) => `<p class="reconstruct-warning">${icon("warning")}<span>${esc(warning)}</span></p>`),
+  ].join("");
 }
 
 function notationHelpMarkup() {
@@ -305,7 +419,7 @@ function checkRows(ctx, context = null) {
     return {
       word,
       derived: derived.error ? "" : derived.text,
-      surface: surface?.errors.length ? "" : surface?.text || "",
+      surface: surface?.errors.length ? "" : surface?.display || "",
       recorded,
       status,
       error: derived.error,
@@ -326,7 +440,7 @@ function checkRows(ctx, context = null) {
     <div class="check-table-wrap">
       <table class="data-table check-table">
         <thead>
-          <tr><th>Gloss</th><th>${esc(parent.name)}</th><th>Derived /…/</th>${allophonyRules(ctx.language.allophony).length ? "<th>Surface [ … ]</th>" : ""}<th>${esc(ctx.language.name)}</th><th>Status</th><th></th></tr>
+          <tr><th>Gloss</th><th>${esc(parent.name)}</th><th>Derived /…/</th>${hasSurfaceDisplay(ctx.language) ? "<th>Surface [ … ]</th>" : ""}<th>${esc(ctx.language.name)}</th><th>Status</th><th></th></tr>
         </thead>
         <tbody>
           ${rows
@@ -340,7 +454,7 @@ function checkRows(ctx, context = null) {
                   <td class="gloss-cell">${esc(row.word.gloss)}</td>
                   <td><code class="ipa">${esc(formatPhonemic(row.word.form))}</code></td>
                   <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(row.derived)) || "—"}</code></td>
-                  ${allophonyRules(ctx.language.allophony).length ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
+                  ${hasSurfaceDisplay(ctx.language) ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
                   <td>${diff ? `<code class="ipa">${diff.right}</code>` : row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
                   <td>
                     <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
@@ -460,6 +574,7 @@ export function renderChanges(container, ctx) {
         </div>
         <aside class="changes-aside">
           ${testPanelMarkup(ctx)}
+          ${reconstructPanelMarkup(ctx)}
           ${notationHelpMarkup()}
         </aside>
       </div>
@@ -483,7 +598,7 @@ export function renderChanges(container, ctx) {
     const steps = testPanel.querySelector("[data-test-steps]");
     output.textContent = result.fatal ? "—" : formatPhonemic(result.text) || "—";
     if (surface && surfaceRow) {
-      const showSurface = allophonyRules(language.allophony).length > 0;
+      const showSurface = hasSurfaceDisplay(language);
       surfaceRow.hidden = !showSurface;
       surface.textContent = showSurface
         ? result.surfaceError
@@ -553,6 +668,56 @@ export function renderChanges(container, ctx) {
       });
     });
     runTest();
+  }
+
+  const reconstructPanel = container.querySelector("[data-reconstruct-panel]");
+  const reconstructInput = reconstructPanel?.querySelector("[data-reconstruct-input]");
+  if (reconstructPanel && reconstructInput) {
+    const runReconstruction = () => {
+      const remembered = reconstructionMemory.get(language.id);
+      const gloss = remembered?.form === reconstructInput.value ? remembered.gloss : "";
+      let result;
+      try {
+        result = reconstructForm(
+          reconstructInput.value,
+          ctx.project,
+          language.id,
+          gloss ? { gloss } : {}
+        );
+      } catch {
+        result = {
+          ok: false,
+          reason: "error",
+          inputTokens: [],
+          candidates: [],
+          warnings: [],
+        };
+      }
+      reconstructionMemory.set(language.id, {
+        form: reconstructInput.value,
+        gloss: result?.gloss || gloss || "",
+      });
+      renderReconstruction(reconstructPanel, result);
+    };
+    reconstructInput.addEventListener("input", runReconstruction);
+    reconstructInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        runReconstruction();
+      }
+    });
+    reconstructPanel.querySelectorAll("[data-reconstruct-word]").forEach((button) => {
+      button.addEventListener("click", () => {
+        reconstructionMemory.set(language.id, {
+          form: button.dataset.reconstructWord,
+          gloss: button.dataset.reconstructGloss || "",
+        });
+        reconstructInput.value = button.dataset.reconstructWord;
+        runReconstruction();
+        reconstructInput.focus();
+      });
+    });
+    runReconstruction();
   }
 
   refreshCheck();
