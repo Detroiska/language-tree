@@ -1,6 +1,7 @@
 import { contextForInventory, normalizeForm } from "./phonology.js";
 import { compileClasses } from "./categories.js";
 import { classForText, parseClassRef, normalizeLabelKey } from "./naturalclasses.js";
+import { classifyFeatureWords, featureMembers } from "./features.js";
 
 // Categories are shared with the sound-change and allophony engines; the
 // compiler lives in categories.js so both sides can import it without a cycle.
@@ -40,9 +41,28 @@ function classAtomFromRef(ref) {
 // Bracket content reads as a set of words: literal sounds, C or V, category
 // letters, or chart classes, each contributing their members.
 function expandSetValues(inner, context, classes) {
+  const words = String(inner).split(/[\s,;]+/u).filter(Boolean);
+  // Feature bundles are last in the precedence order. If the whole bracket is
+  // feature-shaped, expand it against the current inventory; if it mixes
+  // sounds and features, fail instead of quietly treating one as the other.
+  const feature = classifyFeatureWords(words, {
+    allowBare: true,
+    allowVariables: false,
+    isReserved: (word) =>
+      word === "C" ||
+      word === "V" ||
+      classes.map.has(word) ||
+      Boolean(classForText(word, context.classIndex)),
+  });
+  if (feature.kind === "error") throw new TemplateError(feature.error);
+  if (feature.kind === "feature") {
+    const members = featureMembers(context.featurePhonemes || [], context.features, feature.terms);
+    if (!members.length) throw new TemplateError(`The feature bundle ${feature.source} matches no sounds in the chart.`);
+    return [...new Set(members)];
+  }
+
   const values = [];
-  for (const word of String(inner).split(/[\s,;]+/u)) {
-    if (!word) continue;
+  for (const word of words) {
     if (word === "C") {
       values.push(...context.consonants);
       continue;
@@ -169,7 +189,9 @@ function literalAtomsStrict(chunk, context, classes) {
     }
     const isCompact = /^(?:[CV]|\p{N})+$/u.test(first) || (classes?.names || []).includes(first);
     if (!isCompact) {
-      return { error: `Neither a chart label nor a category is named “${firstKey}” (from “${chunk}”).` };
+      return {
+        error: `Neither a chart label nor a category is named “${firstKey}” (from “${chunk}”). A literal sound before a class needs a space, as in “p velarV”.`,
+      };
     }
     // A compact head is followed by a chart reference: after the first dot,
     // `CV.back.short` or `T.velar` read the tail as one checked reference.
@@ -882,7 +904,7 @@ export function validateWord(form, compiled, context) {
 // One compiled checker can validate many forms: the inventory and
 // phonotactics are fixed until the next render.
 export function createPhonotacticsChecker(language) {
-  const context = contextForInventory(language.inventory);
+  const context = contextForInventory(language.inventory, language.featureOverrides);
   const compiled = compilePhonotactics(language.phonotactics || {}, context);
   return {
     context,

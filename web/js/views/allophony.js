@@ -229,18 +229,23 @@ function notationHelpMarkup() {
           <li><code>∅ &gt; [ʔ] / V _ V</code><span>Insert a glottal stop between adjacent vowels.</span></li>
           <li><code>/N/ &gt; [ŋ] / _ k</code><span>A category from Phonotactics: every nasal becomes ŋ before k.</span></li>
           <li><code>p &gt; pʰ / # _ V</code><span>The slashes and brackets are optional; the section supplies the level.</span></li>
+          <li><code>/t/ &gt; [+voice] / V _ V</code><span>Voice t between vowels. The feature change must resolve to a charted sound.</span></li>
+          <li><code>/n/ &gt; [αplace] / _ [αplace]</code><span>Copy the following place: n becomes ŋ before k, ɲ before c, and so on.</span></li>
+          <li><code>/V/ &gt; [αround] / [αround] _</code><span>Spread rounding from the preceding vowel.</span></li>
         </ul>
         <dl class="help-terms">
-          <div><dt>/…/</dt><dd>A phonemic input: a sound from the language's inventory (or a class, category, or set of them).</dd></div>
-          <div><dt>[…]</dt><dd>A surface allophone. It may be absent from the phoneme chart; that is the point.</dd></div>
+          <div><dt>/…/</dt><dd>A phonemic input: a sound from the language's inventory (or a class, category, feature bundle, or set of them).</dd></div>
+          <div><dt>[…]</dt><dd>A surface allophone. It may be absent from the phoneme chart; that is the point. A bracketed output with signs, like <code>[+voice]</code>, is instead a feature change applied to the matched segment.</dd></div>
           <div><dt>V, C</dt><dd>Any vowel or consonant in the charted ancestry.</dd></div>
+          <div><dt>[+f], [−f]</dt><dd>A feature bundle used to select sounds: <code>[+nasal]</code>, <code>[−voice]</code>, <code>[+syllabic +round]</code>. Features come from IPA symbols, never chart labels, so custom sounds need an override in the Features panel. Bare <code>[back]</code> keeps its chart-class meaning.</dd></div>
+          <div><dt>[αf]</dt><dd>An α-variable that copies a feature value from the environment, as in <code>[αplace]</code>. Use β for a second independent variable.</dd></div>
           <div><dt>N, G, …</dt><dd>A category defined in this language's Phonotactics tab. It stands for its member sounds in the input and environment, including inside sets like <code>[N s]</code>.</dd></div>
-          <div><dt>[…] set</dt><dd>On the input or in the environment, bracketed sets still select sounds. On the output side the outer brackets are read as surface notation.</dd></div>
+          <div><dt>[…] set</dt><dd>On the input or in the environment, bracketed sets still select sounds. On the output side the outer brackets are read as surface notation unless the content is a feature bundle.</dd></div>
           <div><dt>#</dt><dd>Word boundary in an environment.</dd></div>
           <div><dt>_</dt><dd>Marks where the input sits in the environment.</dd></div>
           <div><dt>∅, 0</dt><dd>Zero: deletion on the output side, insertion on the input side.</dd></div>
         </dl>
-        <p class="help-foot">Rules run in list order, each exactly once. Groups are visual only: <strong>Group rules</strong> selects adjacent rules, <strong>Group selected</strong> wraps them in a numbered container (2.1, 2.2, …), and the engine still applies every rule in the same flattened order. A group switch turns off its rules together without changing their individual switches. Allophony is synchronic: it applies to this language's recorded phonemic forms and is not part of the historical derivation or the cognate chain. It is copied to a daughter as a starting grammar, just like the inventory and phonotactics. Categories are read from this language's Phonotactics tab.</p>
+        <p class="help-foot">Precedence inside brackets is literal sound, then category, then chart class, then feature bundle. Feature changes are deltas resolved against the current generation’s chart; if no sound matches, the rule stops and the derivation reports the nearest charted candidates instead of inventing an off-chart symbol. Rules run in list order, each exactly once. Groups are visual only: <strong>Group rules</strong> selects adjacent rules, <strong>Group selected</strong> wraps them in a numbered container (2.1, 2.2, …), and the engine still applies every rule in the same flattened order. A group switch turns off its rules together without changing their individual switches. Allophony is synchronic: it applies to this language's recorded phonemic forms and is not part of the historical derivation or the cognate chain. It is copied to a daughter as a starting grammar, just like the inventory and phonotactics. Categories are read from this language's Phonotactics tab.</p>
       </div>
     </details>`;
 }

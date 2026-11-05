@@ -336,7 +336,7 @@ export function renderPhonotactics(container, ctx) {
               <label class="field">
                 <span class="field-label">Template</span>
                 <input class="input phonotactics-template-input" type="text" data-phonotactics-field="template" value="${esc(phonotactics.template)}" placeholder="(C)V(C)" autocomplete="off" spellcheck="false" aria-label="Syllable template">
-                <span class="field-help">Examples: <code>(C)V(C)</code>, <code>(C)(C)V(C)</code>, <code>CVN</code>, <code>(C)V(G)</code> — letters beyond <code>C</code> and <code>V</code> come from Categories below, and dotted chart labels like <code>plosive.plain</code> are classes read straight from the Phonology charts. Leave it blank to turn phonotactic checks off.</span>
+                <span class="field-help">Examples: <code>(C)V(C)</code>, <code>(C)(C)V(C)</code>, <code>CVN</code>, <code>(C)V(G)</code>, <code>(C)V([+sonorant])</code> — letters beyond <code>C</code> and <code>V</code> come from Categories below, dotted chart labels like <code>plosive.plain</code> are classes read straight from the Phonology charts, and bracketed signs are feature bundles. Leave it blank to turn phonotactic checks off.</span>
               </label>
               <div class="template-presets">
                 <span class="field-label">Presets</span>
@@ -400,7 +400,7 @@ export function renderPhonotactics(container, ctx) {
                   <p class="field-help">Chart classes are written straight from the tables: dotted labels like
                     <code>plosive.plain</code> or <code>V.back</code>. Every listed label must apply to the sound on each axis it appears in. A class also works in the template, forbidden patterns, and sound-change rules.</p>
                 </details>
-                <p class="field-help">A category's sounds list may also contain <code>C</code>, <code>V</code>, or another category's letter — for example list <code>N L G</code> under <code>S</code> for all sonorants.</p>
+                <p class="field-help">A category's sounds list may also contain <code>C</code>, <code>V</code>, another category's letter, or a feature bundle — for example list <code>N L G</code> or <code>[+sonorant]</code> under <code>S</code> for all sonorants. Feature bundles are read from the IPA feature table plus this language's Features panel overrides.</p>
               </div>
             </div>
           </section>
@@ -420,7 +420,7 @@ export function renderPhonotactics(container, ctx) {
               <label class="field">
                 <span class="field-label">Forbidden sequences <span class="field-optional">optional</span></span>
                 <input class="input" type="text" data-phonotactics-field="forbidden" value="${esc(phonotactics.forbidden)}" placeholder="VV, CCC, #CC, CC#" autocomplete="off" spellcheck="false">
-                <span class="field-help">Comma-separated patterns. <code>C</code>, <code>V</code>, categories, chart classes, <code>[ptk]</code>, and <code>#</code> (word edge) are supported; for example <code>VV</code> bans hiatus and <code>#CC</code> bans word-initial clusters.</span>
+                <span class="field-help">Comma-separated patterns. <code>C</code>, <code>V</code>, categories, chart classes, feature bundles, <code>[ptk]</code>, and <code>#</code> (word edge) are supported; for example <code>VV</code> bans hiatus, <code>#CC</code> bans word-initial clusters, and <code>[+nasal][+nasal]</code> bans adjacent nasals.</span>
               </label>
               <label class="field">
                 <span class="field-label">Notes <span class="field-optional">optional</span></span>
@@ -464,6 +464,7 @@ export function renderPhonotactics(container, ctx) {
                 <li><code>(N)</code><span>An optional category slot, like any other optional group.</span></li>
                 <li><code>[ptk]</code><span>One of the listed literal sounds.</span></li>
                 <li><code>[Nt]</code><span>Sets accept categories and chart classes (<code>[back t]</code>), and <code>[^…]</code> matches any sound not listed — vowels included, so use with intention.</span></li>
+                <li><code>[+sonorant]</code><span>A feature bundle. It expands to the charted sounds that carry those features, so <code>([+sonorant])</code> is an optional sonorant coda and <code>[+nasal][+nasal]</code> bans adjacent nasals. Bare <code>[back]</code> keeps its chart-class meaning; write <code>[+back]</code> to force the feature.</span></li>
                 <li><code>(C|CC)</code><span>Optional alternatives inside a group.</span></li>
                 <li><code>C?V</code><span>Optional single slot; equivalent to <code>(C)V</code>.</span></li>
               </ul>
@@ -472,7 +473,8 @@ export function renderPhonotactics(container, ctx) {
                 <div><dt>Subsets</dt><dd>Slots are matched one at a time, so a category can be a subset of another: in <code>NVC</code> the <code>C</code> still admits nasals.</dd></div>
                 <div><dt>Literal category letters</dt><dd>Write <code>\N</code> to use the literal sound “N” after you define N as a category.</dd></div>
                 <div><dt>Onsets and codas</dt><dd>Each list can be switched between <strong>Allowed</strong> and <strong>Forbidden</strong>. An empty allowed list permits anything the template allows; an empty forbidden list rejects nothing. Empty onsets or codas are always allowed. Cluster lists stay literal — categories don’t apply there.</dd></div>
-                <div><dt>Forbidden sequences</dt><dd>Match anywhere in the word and honor categories too: <code>NN</code> bans adjacent nasals, <code>#CC</code> bans word-initial clusters.</dd></div>
+                <div><dt>Forbidden sequences</dt><dd>Match anywhere in the word and honor categories too: <code>NN</code> bans adjacent nasals, <code>#CC</code> bans word-initial clusters, and <code>[+nasal][+nasal]</code> does the same through features.</dd></div>
+                <div><dt>Feature bundles</dt><dd>Written with signs, like <code>[+sonorant]</code> or <code>[−voice]</code>. Inside brackets the order is literal sound, category, chart class, then feature bundle, so <code>[back]</code> stays a chart class. Features come from IPA symbols and this language’s overrides, not from chart labels.</dd></div>
               </dl>
               <p class="help-foot">The template is expanded into a finite set of syllable shapes. Words are syllabified with the maximal onset principle, and every sound must be in the language’s own chart.</p>
             </div>

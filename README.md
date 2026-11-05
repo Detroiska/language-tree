@@ -26,13 +26,16 @@ python3 server.py
 
 The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the browser launch, or `--port 9000` to choose another port.
 
+The repository ships with a demo family, **Pre-Proto-Macro-Meric**, in `data/project.json`, so the first run has a tree, charts, rules, allophony, and vocabulary to explore. It is ordinary project data: edit it in the app, and use git to keep a copy before starting your own family.
+
 ## What is here
 
 - **Editable family tree** — root languages and daughter languages, with add, rename, delete, and reparent actions.
 - **Phonology charts** — separate consonant and vowel charts with editable rows and columns. Any row or column can be subdivided (aspiration, labialization, rounding, and so on). Charts list contrastive **phonemes**; derived surface allophones live in a separate table below them.
-- **Phonotactics** — a per-language syllable template, named sound categories (`N` nasals, `G` glides, and whatever else you define), chart classes derived live from the phonology tables (`plosive.plain`, `V.back`), plus optional allowed/forbidden onset and coda lists and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
-- **Sound changes** — standard-style notation such as `p > f / V _ V`, `[plosive.plain] > ∅ / _ #`, or `N > ∅ / _ #` (a category from Phonotactics), with a live tester against ancestral forms. Top-level rules apply together; dotted child rules run in sequence. These are **diachronic** rules: they derive each language’s phonemic form from its ancestor and feed the cognate chain.
-- **Allophony** — **synchronic** surface rules such as `/p/ > [pʰ] / # _ V` or `p > pʰ / # _ V`, applied in list order to this language’s phonemic forms. Inputs and environments accept the same categories and chart classes as sound changes. A derived allophone table and a surface tester show the mapping; daughters inherit a copy of the rules as a starting grammar, but an ancestor’s allophony is never applied during historical derivation.
+- **Distinctive features** — a curated IPA feature table for roughly 180 common symbols, plus per-language overrides for custom sounds. Features are read from the symbol itself, never from chart labels, and can be queried in rules, categories, templates, and forbidden sequences with `[+nasal]`, `[-voice]`, or `[+syllabic -round]`. α-notation copies feature values between segments, as in `n > [αplace] / _ [αplace]`.
+- **Phonotactics** — a per-language syllable template, named sound categories (`N` nasals, `G` glides, and whatever else you define), chart classes derived live from the phonology tables (`plosive.plain`, `V.back`), feature bundles (`[+sonorant]`), plus optional allowed/forbidden onset and coda lists and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
+- **Sound changes** — standard-style notation such as `p > f / V _ V`, `[plosive.plain] > ∅ / _ #`, `[+nasal] > ∅ / _ #`, or `n > [αplace] / _ [αplace]`, with a live tester against ancestral forms. Top-level rules apply together; dotted child rules run in sequence. These are **diachronic** rules: they derive each language’s phonemic form from its ancestor and feed the cognate chain.
+- **Allophony** — **synchronic** surface rules such as `/p/ > [pʰ] / # _ V`, `p > pʰ / # _ V`, or `/s/ > [+voice] / V _ V`, applied in list order to this language’s phonemic forms. Inputs and environments accept the same categories, chart classes, and features as sound changes. A derived allophone table and a surface tester show the mapping; daughters inherit a copy of the rules as a starting grammar, but an ancestor’s allophony is never applied during historical derivation.
 - **Phonemic / phonetic notation** — forms are stored as bare IPA and displayed as `/…/` when phonemic and `[…]` when surface. Pasting delimiters into word forms, chart cells, or bulk imports strips them safely; all comparison, search, and phonotactics stay level-agnostic.
 - **Basic vocabulary** — gloss + phonemic IPA form, with a live `[…]` surface preview when allophony is defined, an inherited-form check that applies the current language's sound changes to the parent's words, and a phonotactic validity check on every form.
 - **Cognate explorer** — follow any recorded gloss down the family: each daughter's chain-derived phonemic form next to its recorded form, with an optional surface column, a one-click record action, and a whole-lexicon matrix view.
@@ -75,6 +78,14 @@ The consonant chart starts with place columns and manner rows. The vowel chart s
 - When a leaf is subdivided, its existing sounds move into a new **Plain** subdivision so nothing disappears.
 - Chart notes are free-form.
 
+Below the charts, the **Distinctive features** panel lists every charted sound and allophone with its current bundle. The table shows whether a bundle comes from the curated IPA table, a language override, or a derived place feature (labial, coronal, dorsal, radical), and calls out symbols with no bundle yet.
+
+- **Feature bundles are tri-state**: `+`, `−`, or not applicable. Place is categorical (`bilabial`, `alveolar`, `velar`, …); anterior and the place-derived features are recalculated when place changes.
+- **Overrides are per language** and copied to daughters, siblings, and ancestors along with the rest of the grammar. Click **Define** or **Edit** on a row to open the structured editor; custom sounds such as `t͡s`, `kʰ`, or an invented click need an override before feature rules can see them.
+- **Features come from IPA symbols, not chart labels.** Renaming a row never changes a bundle. A symbol the curated table does not know shows as **missing** until you define it.
+- **Precedence inside brackets** is literal sound → category → chart class → feature bundle. That keeps existing `[back]` chart classes working; write `[+back]` to force the feature reading.
+- An override that no longer matches a charted sound or allophone output is kept under **unused overrides** until you remove it, so renaming a sound does not silently discard your work.
+
 ### Phonotactics
 
 The **Phonotactics** tab describes the shapes a syllable may take and the sequences a word may not contain. A new language starts with `(C)V(C)`; daughters inherit their parent's template, categories, and constraints, which you can then adjust.
@@ -95,6 +106,7 @@ Template syntax:
 | `p`, `t͡ʃ`, … | a literal sound (write `\N` to keep a literal after defining N) |
 | `[ptk]` | one of the listed sounds |
 | `[Nt]` | sets may mix literals and categories; `[^N]` matches anything else |
+| `[+sonorant]` | a feature bundle, expanded to the charted sounds that carry those features |
 | `plosive.plain`, `back`, `V.back` | a chart class derived from the phonology tables (see below) |
 | `(C)` | an optional group |
 | `(C|CC)` | optional alternatives inside a group |
@@ -103,7 +115,7 @@ Template syntax:
 **Categories** give the template more letters. Each language keeps its own list (name + members) in the Categories panel: `N` for nasals, `G` for glides, `L` for liquids, `T` for stops, `OBS` for whatever you want. Rules of thumb:
 
 - Names are 1–6 capital letters; `C` and `V` are built in and cannot be redefined. `C` and `V` still match category members in their own slots, so subsets need no extra notation — in `NVC` the final `C` admits nasals.
-- A category's sound list may also name `C`, `V`, a chart class (below), or another category's letter, so classes compose: `S = N L G` collects all sonorants, `T = plosive.plain l` collects the plain stops plus l. Browse "Insert from the chart" to pull the sounds of a chart row without typing IPA.
+- A category's sound list may also name `C`, `V`, a chart class (below), a feature bundle, or another category's letter, so classes compose: `S = N L G` or `S = [+sonorant]` collects all sonorants, `T = plosive.plain l` collects the plain stops plus l. Browse "Insert from the chart" to pull the sounds of a chart row without typing IPA.
 - A shape needs at least one nucleus-capable slot: `V`, a literal vowel, or a category whose members are all vowels. Mixed sets (glides+vowels) can fill onset and coda slots but cannot carry the nucleus alone.
 - Categories work in **forbidden sequences** too: `NN` bans adjacent nasals. Onset and coda lists (allowed or forbidden) stay literal.
 
@@ -112,14 +124,14 @@ Template syntax:
 - A sound belongs to a class when **every** listed label applies to it, on whichever axis (row or column) that label occurs in that chart. Labels present on both axes constrain both — that is why `plosive.plain` picks out p, t and k but not the aspirated pʰ/tʰ/kʰ or the prenasal m͜b/n͜d, and why `back` is exactly the back vowels {u, o, uː, oː}.
 - `V.` / `C.` pin the reference to the vowel or consonant chart (`V.back`, `C.plosive.plain`). Without a pin, a class covers every chart that mentions the labels.
 - A bare word counts as a class when it matches a chart label (case, spaces, slashes and dashes all fold: `Dental/Alveolar` ↔ `dental-alveolar`). Single letters stay phonemes; write `\X` to force a literal sound when a name collides with a label.
-- A class that names no label **fails loudly** ("No chart row or column is labelled …"), so a typo never silently matches nothing. Outputs of sound changes must still be concrete sounds.
+- A dotted class reference that names no label **fails loudly** ("No chart row or column is labelled …"). A bare word matching no label falls back to literal sounds; when that word is also a plausible sound sequence, the rule gets an informational warning naming the letters it reads, so a mistyped class cannot pass unnoticed. Write the sounds with spaces (`b a c k`) or a leading backslash (`\back`) when the literal reading is intended. A chart class on the output side still expands to concrete sounds; a bracketed feature bundle is a delta instead (see below).
 - Inside compact template runs the class comes after the leading atoms: `CV.back` is a consonant plus a back vowel, `T.velar` is a T sound followed by a velar sound.
 - Classes work in sets and forbidden sequences too: `[back t]`, `[^back]`, `[plosive.plain]#` (bans a final plain stop), `[back][plosive.plain]` (a back vowel before a plain stop).
 
 Constraints are optional lists:
 
 - **Onsets** and **codas** each have an **Allowed** / **Forbidden** switch. An allowed list restricts the clusters the template permits; an empty allowed list allows everything. A forbidden list rejects the clusters listed; an empty forbidden list forbids nothing. Empty onsets or codas are always allowed, and the switch is per list, so allowed onsets can combine with forbidden codas. Switching keeps both lists, so you can flip back without retyping.
-- **Forbidden sequences** match anywhere in the word. `VV` bans adjacent vowels, `CCC` bans three-consonant runs, `#CC` bans word-initial clusters, and `CC#` bans word-final clusters. `C`, `V`, categories, chart classes, `[ptk]`, literals, and `#` are supported; examples: `NN` (nasal+nasal), `[plosive.plain]#` (final plain stop), `[back][plosive.plain]` (back vowel before a plain stop).
+- **Forbidden sequences** match anywhere in the word. `VV` bans adjacent vowels, `CCC` bans three-consonant runs, `#CC` bans word-initial clusters, and `CC#` bans word-final clusters. `C`, `V`, categories, chart classes, feature bundles, `[ptk]`, literals, and `#` are supported; examples: `NN` (nasal+nasal), `[+nasal][+nasal]` (the same through features), `[plosive.plain]#` (final plain stop), `[back][plosive.plain]` (back vowel before a plain stop).
 
 The template is expanded into a finite set of syllable shapes. Words are syllabified with the maximal onset principle, and every sound must be in the language's own chart. The **Try a form** panel validates an arbitrary word, while **Vocabulary check** lists every recorded form with its syllable break and any problems. The same check appears in the Vocabulary tab.
 
@@ -143,9 +155,13 @@ V > ∅ / _ #         word-final vowels are lost
 k > tʃ / _ i        k palatalizes before i
 [td] > ∅ / _ #      word-final t or d is lost
 [plosive.plain] > ∅ / _ #   word-final plain stops are lost
+[+nasal] > ∅ / _ #  word-final nasals are lost through their features
 N > ∅ / _ #         word-final members of the N category are lost
 t > tʰ / _ back     t aspirates before a back vowel
 C > ∅ / _ C         a consonant is lost before another consonant
+t > [+voice] / V _ V    t voices between vowels (the result must be charted)
+n > [αplace] / _ [αplace]  n takes the place of the following consonant
+V > [αround] / [αround] _  rounding spreads from the preceding vowel
 ```
 
 Supported notation:
@@ -160,20 +176,32 @@ Supported notation:
 | `[aeiou]` | set of sounds |
 | `[^aeiou]` | negated set |
 | `[plosive.plain]`, `back`, `V.back` | chart class — labels dotted together, read from the phonology tables |
+| `[+nasal]`, `[-voice]`, `[+syllabic +round]` | feature bundle — exact signs; bare `[back]` stays a chart class |
+| `[αplace]`, `[βvoice]` | α-variable — binds to the matching feature in the input or environment and copies it on output |
 | `N`, `G`, `OBS`, … | category defined in Phonotactics — expands to its member sounds |
 | `∅` / `0` | deletion on the output side; insertion on the input side |
 
-Chart classes work on the input side and in environments, alone or inside a set: `[plosive.plain] > ∅ / _ #`, `t > tʰ / _ back`, `u > ∅ / [plosive.plain] _`. A class expands to the concrete sounds the charts currently list, so outputs stay ordinary sounds and a renamed row immediately changes which sounds a rule touches. A broken class name is reported in the rule's status instead of silently matching nothing.
+Chart classes work on the input side and in environments, alone or inside a set: `[plosive.plain] > ∅ / _ #`, `t > tʰ / _ back`, `u > ∅ / [plosive.plain] _`. A class expands to the concrete sounds the charts currently list, so a renamed row immediately changes which sounds a rule touches. A broken class name is reported in the rule's status instead of silently matching nothing.
 
-Custom categories (`N` nasals, `G` glides, `OBS` obstruents, …) are the same named groups you define in the **Phonotactics** tab. They work on the input side and in environments, alone or in sets (`N > ∅ / _ #`, `a > e / _ N`, `[N s] > z`). The compiler reads the current language's category definitions and expands them against the charted ancestry, so a rule can still name an ancestral sound. Outputs must be concrete sounds — a category cannot stand on the right of `>`.
+Feature bundles work wherever chart classes do: `[+nasal] > ∅ / _ #`, `s > ∅ / _ [+voice]`, `[+syllabic -back] > ∅ / _ #`. Bundle members are the charted sounds whose IPA-derived bundles satisfy every term, so a custom symbol needs a **Features** override first. Feature bundles are checked last inside brackets, after literal sounds, categories, and chart classes; that is why `[back]` keeps its chart meaning and `[+back]` forces the feature. Mixing a sound and a feature in one bracket (`[+nasal p]`) is an error rather than a guess.
 
-Top-level rules are applied together to the ancestral form. Within one rule, matching is left-to-right and non-overlapping; each rule runs exactly once per application and does not re-feed its own output. Sequential rules then run in order on the result, so they can see segments and environments created by earlier changes. A conflict between top-level rules is reported in the rule tester, the inherited check, and the cognate explorer.
+A **feature output** is a change, not a symbol: `t > [+voice] / V _ V` voices the matched segment, and `[+nasal] > [-voice]` devoices nasals. The engine applies the signs as a delta to the segment's existing bundle, then looks for the charted sound with that exact bundle. If none exists, the rule fails loudly with the nearest charted candidates and the features that differ; it never invents an off-chart symbol. Feature outputs must apply to exactly one matched segment, so multi-segment and insertion outputs still use concrete sounds.
+
+**α-notation** ties two segments together. A variable such as `α` or `β` binds to a feature value on a segment in the input or the environment, then copies it into the output: `n > [αplace] / _ [αplace]` produces `ŋ` before `k`, `ɲ` before `c`, and so on. The same variable must have the same value everywhere it appears; a variable that is never bound is a compile error. Only one Greek letter prefixes a feature name (`αplace`, `βvoice`), and α-variables are not allowed in categories or phonotactic templates in this version.
+
+Custom categories (`N` nasals, `G` glides, `OBS` obstruents, …) are the same named groups you define in the **Phonotactics** tab. They work on the input side and in environments, alone or in sets (`N > ∅ / _ #`, `a > e / _ N`, `[N s] > z`). The compiler reads the current language's category definitions and expands them against the charted ancestry, so a rule can still name an ancestral sound. Outputs must be concrete sounds or a feature delta — a category or α-variable cannot stand on the right of `>` without brackets.
+
+Top-level rules are applied together to the ancestral form. Within one rule, matching is left-to-right and non-overlapping; each rule runs exactly once per application and does not re-feed its own output. Sequential rules then run in order on the result, so they can see segments and environments created by earlier changes. A conflict between top-level rules is reported in the rule tester, the inherited check, and the cognate explorer. Disabling a top-level rule also disables its sequential children (marked **Parent disabled**).
+
+Insertions are zero-width, so two top-level insertion rules at the same boundary do not conflict: both apply, in list order. A replacement at that boundary still conflicts with either insertion. Use a sequential child when one insertion must feed another rule.
 
 The **Rule tester** applies the current language’s rules to a form from its immediate ancestor and shows the ancestral pass and every sequential step. Its output is **phonemic** (`/…/`); when the language has allophony, a **Surface** line applies it to show `[…]`. The **Inherited vocabulary check** compares the derived output with the current language’s recorded glosses, shows the surface form alongside it, and can record the derived phonemic form. Derivations with a rule error cannot be recorded.
 
 Sound changes are strictly **diachronic**: an ancestor’s allophony is not part of the chain and is never applied while deriving a daughter. Allophony is edited in its own tab (below) and applies only to the language whose rules it belongs to.
 
-Limitations of the current engine: no feature bundles (chart classes are derived from the table's own row and column labels, not from a feature system; categories are explicit sound lists), stress, syllable-boundary notation, optional elements, phonological exceptions, or allomorphy. That is deliberate for this first version; the parser is isolated in `web/js/phonology.js` so it can grow. Phonotactics deliberately uses a finite expansion of optional groups rather than full regex repetition, and checks phonemic lexical forms only; it does not yet model resyllabification across morpheme boundaries, surface-only repair, or lexical exceptions. Allophony rules are ordered, unconditional single-pass rewrite rules — no iterative spreading, cyclicity, or prosodic domains.
+Feature bundles are intentionally a lean layer: each feature is `+`, `−`, or not applicable, place is a single categorical value, and there are no feature geometries, multivalued features, or rules that rewrite several segments from one feature output. Feature changes are deltas on one matched segment, and they only resolve to sounds already present in the current generation’s chart; add the sound or an override rather than expecting an off-chart symbol. α-variables are not accepted in category definitions or phonotactic templates yet.
+
+Other limitations of the current engine: stress, syllable-boundary notation, optional elements, phonological exceptions, and allomorphy are not modelled. That is deliberate for this first version; the parser is isolated in `web/js/phonology.js` so it can grow. Phonotactics deliberately uses a finite expansion of optional groups rather than full regex repetition, and checks phonemic lexical forms only; it does not yet model resyllabification across morpheme boundaries, surface-only repair, or lexical exceptions. Allophony rules are ordered, unconditional single-pass rewrite rules — no iterative spreading, cyclicity, or prosodic domains.
 
 ### Allophony
 
@@ -186,10 +214,14 @@ The **Allophony** tab is the synchronic surface layer, separate from the diachro
 /N/ > [ŋ] / _ k        every nasal in the N category does
 ∅ > [ʔ] / V _ V        a glottal stop is inserted between vowels
 p > pʰ / # _ V         slashes and brackets are optional
+/s/ > [+voice] / V _ V s voices between vowels (z must be charted)
+/n/ > [αplace] / _ [αplace]  n copies the following place
+/V/ > [αround] / [αround] _  rounding spreads rightward
 ```
 
 - Rules run **in list order**, each exactly once, on the output of the previous rule. Reorder them with the arrow buttons or disable one with its switch.
-- Inputs may be concrete sounds, `V` / `C`, chart classes, Phonotactics categories (`N`, `G`, …), or bracketed sets, using the same matcher as sound changes. Outputs are surface forms; an allophone does **not** need to appear on the phonology chart. The tokenizer learns the outputs (`kʰ`, `t͡s`, …) so they remain one segment.
+- Inputs may be concrete sounds, `V` / `C`, chart classes, Phonotactics categories (`N`, `G`, …), feature bundles, or bracketed sets, using the same matcher as sound changes. Outputs are surface forms; an allophone does **not** need to appear on the phonology chart. The tokenizer learns the outputs (`kʰ`, `t͡s`, …) so they remain one segment.
+- A bracketed output with signs is a **feature change**, not a surface symbol: `/s/ > [+voice] / V _ V` voices the matched segment and resolves the new bundle against the current chart. If no charted sound matches, the rule stops, the surface test names the nearest candidates, and the allophone table shows the unresolved bundle instead of a bogus symbol. The table expands feature inputs such as `[+nasal]` into their charted members; α-variable targets show the written bundle because their result depends on context.
 - **Groups** keep related rules together without changing how they run. Choose **Group rules**, tick the rules, then **Group selected**. The group takes the next top-level number and its rules become `2.1`, `2.2`, `2.3`; the following standalone rule continues at `3`. Only adjacent rules can be grouped, so the flattened order — and the output — never changes. A group header has an optional name, a collapse control, and a switch that turns off every rule inside while preserving each rule's own switch. **Add rule** in the header appends to the group; **Ungroup** removes the container and keeps the rules; the trash button deletes the group together with its rules. Groups are organizational only: the engine, the **Allophones** table, search, and reports all use the same flattened order and rule numbers.
 - The **Allophones** table is derived from the active rules: phoneme, surface allophone, environment, and the rule number. It is a view of the rules, not separate data.
 - The **Surface tester** runs the current language’s allophony on any phonemic form and shows both `/…/` and `[…]`, with numbered steps for changed rules.
@@ -204,7 +236,7 @@ The lexicon is intentionally small: gloss, phonemic IPA form, optional note. For
 The **Cognate explorer** follows one recorded word down the whole family. Open it from the sidebar, or press the trace button on any vocabulary row.
 
 - **Pick a source language**, then either trace a single gloss or browse **all glosses** as a matrix with one chip per descended language.
-- Each chip compares the recorded form with the output of that language's **chain of rules**: every language applies its own staged rules to what it receives from the ancestor, starting strictly below the source. A language's own rules never re-apply to its recorded forms.
+- Each chip compares the recorded form with the output of that language's **chain of rules**: every language applies its own staged rules to what it receives from the ancestor, starting strictly below the source. A language's own rules never re-apply to its recorded forms. Each stage is compiled with that generation's own charts and categories, so redefining `N` in a daughter does not change what an ancestor's `N > ∅ / _ #` meant.
 - Status chips reuse the vocabulary conventions: **Matches** agrees with the derivation, **Differs** has a recorded form that does not (the tooltip shows what the rules predict), and a dash means the gloss is not recorded in that language. A **Rule error** chip means a rule on the chain fails to compile.
 - Derived and recorded columns are **phonemic** (`/…/`). When a language has allophony, an extra **Surface** column shows its `[…]` form. Surface forms are applied after the historical chain and never feed it.
 - Expand a row with the chevron to see the derivation step by step. **Record** (or **Use derived**) writes the derived phonemic form into that language's lexicon when a reflex is correct.
@@ -241,6 +273,8 @@ The report writes lexical forms as `/…/` and surface examples as `[…]`. The 
 
 Everything is saved to `data/project.json` automatically after a short debounce. The file is deliberately human-readable and stable enough for line-based diffs. Each language keeps its diachronic `soundChanges` and its ordered synchronic `allophony` list as separate arrays, and word/chart forms are stored as bare IPA. The allophony array holds rule objects and optional one-level group containers (`{ "type": "group", "name", "collapsed", "enabled", "rules": [...] }`); groups are flattened in display order whenever rules are applied or counted.
 
+Each language also keeps `featureOverrides`, keyed by normalized IPA symbol. An override stores a complete bundle (`place` as a string or `null`, every other feature as `true`, `false`, or `null`); sounds without an override fall back to the curated table in `web/js/features.js`. Overrides are copied when a daughter, sibling, or ancestor is created, and they travel with the language in the JSON backup.
+
 ```powershell
 # Recommended documentation checkpoint
 git add data/project.json
@@ -258,7 +292,7 @@ The parser and derivation engines are plain ES modules without DOM dependencies,
 node tests/engine.test.mjs
 ```
 
-The suite covers rule compilation and application, chart-derived classes, the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, notation delimiter stripping, allophony parsing/order/surface forms, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration, and the Markdown/HTML report builders.
+The suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, notation delimiter stripping, allophony parsing/order/surface forms, feature allophones, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration, and the Markdown/HTML report builders.
 
 ## Project layout
 
@@ -278,6 +312,7 @@ language-tree/
       ├─ model.js          # data model, defaults, tree/chart helpers
       ├─ notation.js       # /…/ and […] display helpers; strips level marks
       ├─ naturalclasses.js # chart-derived natural classes (plosive.plain, V.back)
+      ├─ features.js       # IPA feature table, overrides, bundles, α-notation
       ├─ phonology.js      # sound-change parser, allophony engine, derivation
       ├─ phonotactics.js   # syllable template parser and word checker
       ├─ search.js         # Ctrl+K quick search palette

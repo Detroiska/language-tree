@@ -6,6 +6,7 @@ import {
 } from "./model.js";
 import { store } from "./store.js";
 import { esc, icon, toast } from "./ui.js";
+import { decodeHashPart } from "./routes.js";
 
 // A small virtual keyboard for IPA: while any phoneme-typing field is focused,
 // Ctrl+Alt+K (Cmd+Option+K on macOS) opens a palette of the sounds in that
@@ -41,7 +42,7 @@ const REFERENCE = {
 };
 
 // Rule notation needs its own grammar symbols next to the sounds it mentions.
-const RULE_SYNTAX = [">", "/", "_", "#", "∅", "[", "]", "^", ".", "V", "C", "ː"];
+const RULE_SYNTAX = [">", "/", "_", "#", "∅", "[", "]", "^", ".", "V", "C", "ː", "+", "−", "=", "α", "β"];
 
 const state = {
   open: false,
@@ -67,7 +68,7 @@ function isTarget(element) {
 function routeLanguageId() {
   const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   if (parts[0] !== "language" || !parts[1]) return null;
-  return decodeURIComponent(parts[1]);
+  return decodeHashPart(parts[1]);
 }
 
 function targetLabel(input) {

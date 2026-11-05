@@ -1,14 +1,37 @@
 import { classForText } from "./naturalclasses.js";
+import { classifyFeatureWords, featureMembers } from "./features.js";
 
 // Custom sound categories are named sound groups defined per language:
 // N = nasals, G = glides, OBS = obstruents, … They are authored in the
 // Phonotactics tab and shared by phonotactics templates, sound changes, and
 // allophony. Keeping the compiler here (rather than in phonotactics.js) lets
 // the two engines use the same definitions without a circular import.
+//
+// A bracket groups a feature bundle across spaces, so
+// `S = [+sonorant -syllabic]` is one item, not two broken ones.
 export function splitClassSounds(text) {
-  return String(text || "")
-    .split(/[\s,;]+/u)
-    .filter(Boolean);
+  const source = String(text || "");
+  const items = [];
+  let current = "";
+  let depth = 0;
+  for (const char of source) {
+    if (char === "[") depth += 1;
+    if (char === "]" && depth > 0) depth -= 1;
+    if (depth === 0 && /[\s,;]/u.test(char)) {
+      if (current.trim()) items.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) items.push(current.trim());
+  return items;
+}
+
+function featureWords(item) {
+  const source = String(item || "").trim();
+  const inner = source.startsWith("[") && source.endsWith("]") ? source.slice(1, -1) : source;
+  return inner.split(/[\s,;]+/u).filter(Boolean);
 }
 
 export function compileClasses(rawEntries, context) {
@@ -81,6 +104,31 @@ export function compileClasses(rawEntries, context) {
         // A chart-derived reference: its members come straight from the
         // phonology table and update with it.
         values.push(...classRef.members);
+        continue;
+      }
+      // Feature bundles come last in the documented precedence. Bare words
+      // that name a category or chart class were already handled above, so
+      // `[back]` keeps its chart meaning and `[+back]` forces the feature.
+      const feature = classifyFeatureWords(featureWords(item), {
+        allowBare: true,
+        allowVariables: false,
+        isReserved: (word) =>
+          word === "C" ||
+          word === "V" ||
+          byName.has(word) ||
+          Boolean(classForText(word, context.classIndex)),
+      });
+      if (feature.kind === "error") {
+        entry.errors.push(feature.error);
+        continue;
+      }
+      if (feature.kind === "feature") {
+        const members = featureMembers(context.featurePhonemes || [], context.features, feature.terms);
+        if (!members.length) {
+          entry.errors.push(`The feature bundle ${feature.source} matches no sounds in the charted ancestry.`);
+          continue;
+        }
+        values.push(...members);
         continue;
       }
       if (/^[A-Z]{1,6}$/u.test(item)) {

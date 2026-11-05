@@ -4006,6 +4006,201 @@ th:hover > .axis-menu,
   font-size: 12.5px;
 }
 
+/* Distinctive features: a reference layer over IPA symbols, with per-language
+   overrides. The panel is a compact table; the editor is a tri-state form. */
+.feature-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.feature-panel-body > .table-scroll,
+.feature-unused .table-scroll {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.feature-table .ipa {
+  font-size: 14px;
+}
+
+.feature-bundle {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.6;
+}
+
+.feature-source {
+  display: inline-flex;
+  padding: 1px 7px;
+  color: var(--muted);
+  background: var(--surface-tint);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  font-size: 8.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.feature-source.is-ipa {
+  color: var(--accent-strong);
+  background: var(--accent-faint);
+  border-color: #d7e7df;
+}
+
+.feature-source.is-override {
+  color: var(--gold);
+  background: var(--gold-soft);
+  border-color: #e4d6b5;
+}
+
+.feature-source.is-missing,
+.feature-source.is-unused {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: #ecd3cd;
+}
+
+.feature-row.is-missing .feature-bundle {
+  color: var(--danger);
+}
+
+.feature-row-actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.feature-row-actions .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.feature-missing {
+  margin: 0;
+}
+
+.feature-unused summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.feature-unused[open] summary {
+  margin-bottom: 7px;
+}
+
+.feature-unused .field-help {
+  margin-bottom: 8px;
+}
+
+.feature-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding-bottom: 2px;
+}
+
+.feature-editor-sound {
+  display: grid;
+  min-width: 52px;
+  height: 52px;
+  padding: 0 12px;
+  place-items: center;
+  color: var(--accent-strong);
+  background: var(--accent-faint);
+  border: 1px solid #d7e7df;
+  border-radius: 10px;
+  font-size: 27px;
+  line-height: 1;
+}
+
+.feature-group {
+  min-width: 0;
+  margin: 0;
+  padding: 9px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.feature-group legend {
+  padding: 0 5px;
+  color: var(--faint);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 8px;
+}
+
+.feature-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.feature-field-label {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-place-field {
+  max-width: 250px;
+}
+
+.feature-derived-block,
+.feature-preview-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 11px;
+}
+
+.feature-derived-block [data-feature-derived] {
+  min-height: 20px;
+}
+
+.feature-pill {
+  display: inline-flex;
+  margin: 0 4px 0 0;
+  padding: 1px 7px;
+  color: var(--accent-strong);
+  background: var(--accent-faint);
+  border: 1px solid #d7e7df;
+  border-radius: 20px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.feature-preview {
+  display: block;
+  min-height: 34px;
+  padding: 8px 11px;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .rule-inline {
   padding: 1px 5px;
   color: var(--muted);

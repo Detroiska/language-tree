@@ -128,7 +128,8 @@ async function addChild(ctx, language) {
     language.id,
     language.inventory,
     language.phonotactics,
-    language.allophony
+    language.allophony,
+    language.featureOverrides
   );
   ctx.project.languages.push(child);
   ctx.touch({ label: `Add language ${child.name}` });

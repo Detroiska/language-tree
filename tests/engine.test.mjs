@@ -9,7 +9,9 @@
 import {
   allophonyEntries,
   allophonyRules,
+  createAncestor,
   createLanguage,
+  createSibling,
   defaultInventory,
   ensureProject,
   groupAllophonyRules,
@@ -23,13 +25,28 @@ import {
   contextForLanguage,
   compileRule,
   applyRule,
+  compileChainFrom,
   deriveForm,
+  deriveStages,
   normalizeAllophonyNotation,
   surfaceForForm,
 } from "../web/js/phonology.js";
 import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../web/js/notation.js";
-import { createPhonotacticsChecker } from "../web/js/phonotactics.js";
+import { compileClasses } from "../web/js/categories.js";
+import {
+  IPA_FEATURES,
+  applyFeatureTerms,
+  classifyFeatureWords,
+  createFeatureResolver,
+  defaultBundle,
+  derivedFeatures,
+  featureDistance,
+  featureMembers,
+  resolveFeatureBundle,
+} from "../web/js/features.js";
+import { compilePhonotactics, createPhonotacticsChecker } from "../web/js/phonotactics.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
+import { decodeHashPart } from "../web/js/routes.js";
 
 let passed = 0;
 const failures = [];
@@ -93,6 +110,11 @@ const apply = (notation, form) => {
   return { out: applyRule(tokens, compiled.rule, ctx).tokens.join("") };
 };
 
+/* ---- hash routing ------------------------------------------------------- */
+
+equal("valid hash segments decode", decodeHashPart("Proto%20North"), "Proto North");
+equal("malformed hash escapes survive as text", decodeHashPart("%zz"), "%zz");
+
 /* ---- rule engine -------------------------------------------------------- */
 
 equal("lenition between vowels", apply("p > f / V _ V", "apa"), { out: "afa" });
@@ -126,6 +148,31 @@ truthy(
   "bare unknown label warns about uncharted sounds",
   bareUnknown.ok && bareUnknown.warnings?.length > 0,
 );
+const typoConsonants = makeChart(
+  ["Plosive"],
+  ["Bilabial", "Velar"],
+  [
+    ["Plosive", "Bilabial", ["b", "t"]],
+    ["Plosive", "Velar", ["c", "k"]],
+  ]
+);
+const typoVowels = makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]);
+const typoCtx = contextForInventory({ consonants: typoConsonants, vowels: typoVowels });
+const chartedTypo = compileRule("t > k / _ back", typoCtx);
+truthy(
+  "a bare word made only of charted sounds still warns when it is not a class",
+  chartedTypo.ok && chartedTypo.warnings?.some((warning) => warning.includes("back") && warning.includes("literal"))
+);
+equal(
+  "the warning does not hide the literal fallback",
+  chartedTypo.rule.right.map((atom) => atom.value),
+  ["b", "a", "c", "k"]
+);
+const literalCluster = compileRule("t > k / _ bk", typoCtx);
+truthy(
+  "a consonant cluster is not mistaken for a mistyped class",
+  literalCluster.ok && !literalCluster.warnings?.length
+);
 
 /* ---- tokenizer ---------------------------------------------------------- */
 
@@ -142,6 +189,28 @@ const affricateChart = makeChart(
 const affricateVowels = makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]);
 const affricateCtx = contextForInventory({ consonants: affricateChart, vowels: affricateVowels });
 equal("tie-bar affricate is one token", affricateCtx.tokenize("at͡ʃa"), ["a", "t͡ʃ", "a"]);
+
+const looseTieChart = makeChart(
+  ["Plosive", "Nasal", "Fricative"],
+  ["Bilabial", "Alveolar", "Postalveolar"],
+  [
+    ["Plosive", "Bilabial", ["b"]],
+    ["Plosive", "Alveolar", ["t"]],
+    ["Nasal", "Bilabial", ["m"]],
+    ["Fricative", "Postalveolar", ["ʃ"]],
+  ]
+);
+const looseTieCtx = contextForInventory({ consonants: looseTieChart, vowels: affricateVowels });
+equal(
+  "uncharted tie-bar affricate keeps its charted first base",
+  looseTieCtx.tokenize("at͡ʃa"),
+  ["a", "t͡ʃ", "a"]
+);
+equal(
+  "uncharted prenasalized tie-bar keeps its charted first base",
+  looseTieCtx.tokenize("am͜ba"),
+  ["a", "m͜b", "a"]
+);
 
 /* ---- inert-rule warnings ------------------------------------------------ */
 
@@ -336,6 +405,63 @@ equal(
   "each generation applies its rules to the previous generation's output",
   deriveForm("pata", depthProject, "grandchild").text,
   "vata"
+);
+
+const chainConsonants = makeChart(
+  ["Plosive", "Nasal"],
+  ["Bilabial", "Alveolar", "Velar"],
+  [
+    ["Plosive", "Bilabial", ["p"]],
+    ["Plosive", "Alveolar", ["t"]],
+    ["Plosive", "Velar", ["k"]],
+    ["Nasal", "Bilabial", ["m"]],
+    ["Nasal", "Alveolar", ["n"]],
+    ["Nasal", "Velar", ["ŋ"]],
+  ]
+);
+const chainBase = {
+  inventory: { consonants: chainConsonants, vowels },
+  phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+};
+const chainCategoryProject = {
+  title: "Chain categories",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...chainBase, soundChanges: [], vocabulary: [] },
+    {
+      id: "mid",
+      name: "Mid",
+      parentId: "root",
+      ...chainBase,
+      phonotactics: { ...chainBase.phonotactics, classes: [{ name: "N", sounds: "m n ŋ" }] },
+      soundChanges: [{ id: "r1", notation: "N > ∅ / _ #", note: "", enabled: true }],
+      vocabulary: [],
+    },
+    {
+      id: "leaf",
+      name: "Leaf",
+      parentId: "mid",
+      ...chainBase,
+      phonotactics: { ...chainBase.phonotactics, classes: [{ name: "N", sounds: "m n" }] },
+      soundChanges: [],
+      vocabulary: [],
+    },
+  ],
+};
+equal(
+  "a chain stage compiles its rules with that stage's categories",
+  deriveForm("maŋ", chainCategoryProject, "leaf").text,
+  "ma"
+);
+const categoryChain = compileChainFrom(chainCategoryProject, "root", "leaf");
+const categoryChainResult = deriveStages(
+  categoryChain.context.tokenize("maŋ"),
+  categoryChain.stages,
+  categoryChain.context
+);
+equal(
+  "the cognate chain keeps each generation's category meaning",
+  categoryChainResult.tokens.join(""),
+  "ma"
 );
 
 /* ---- phonotactics ------------------------------------------------------- */
@@ -910,6 +1036,317 @@ const brokenCategoryProject = ensureProject({
 const brokenCategory = compileRule("Q > x", contextForLanguage(brokenCategoryProject, "only"));
 truthy("a broken category keeps its error", !brokenCategory.ok && /no sounds/.test(brokenCategory.error));
 
+/* ---- distinctive features ----------------------------------------------- */
+
+const featureConsonants = makeChart(
+  ["Plosive", "Nasal", "Fricative", "Approximant"],
+  ["Bilabial", "Alveolar", "Postalveolar", "Palatal", "Velar", "Glottal"],
+  [
+    ["Plosive", "Bilabial", ["p", "b"]],
+    ["Plosive", "Alveolar", ["t", "d"]],
+    ["Plosive", "Velar", ["k", "g"]],
+    ["Nasal", "Bilabial", ["m"]],
+    ["Nasal", "Alveolar", ["n"]],
+    ["Nasal", "Palatal", ["ɲ"]],
+    ["Nasal", "Velar", ["ŋ"]],
+    ["Fricative", "Alveolar", ["s", "z"]],
+    ["Fricative", "Postalveolar", ["ʃ", "ʒ"]],
+    ["Fricative", "Velar", ["x"]],
+    ["Fricative", "Glottal", ["h"]],
+    ["Approximant", "Palatal", ["j"]],
+    ["Approximant", "Velar", ["w"]],
+  ]
+);
+const featureVowels = makeChart(
+  ["Close", "Mid", "Open"],
+  ["Front", "Central", "Back"],
+  [
+    ["Close", "Front", ["i", "y"]],
+    ["Close", "Central", ["ɨ"]],
+    ["Close", "Back", ["u"]],
+    ["Mid", "Front", ["e", "ø"]],
+    ["Mid", "Central", ["ə"]],
+    ["Mid", "Back", ["o"]],
+    ["Open", "Front", ["a"]],
+    ["Open", "Central", ["ɐ"]],
+    ["Open", "Back", ["ɑ"]],
+  ]
+);
+const featureInventory = { consonants: featureConsonants, vowels: featureVowels };
+const featureCtx = contextForInventory(featureInventory);
+const featureApply = (notation, form) => {
+  const compiled = compileRule(notation, featureCtx);
+  if (!compiled.ok) return { error: compiled.error };
+  const result = applyRule(featureCtx.tokenize(form), compiled.rule, featureCtx);
+  return result.error ? { error: result.error } : { out: result.tokens.join("") };
+};
+
+truthy("the curated IPA table covers common symbols", Object.keys(IPA_FEATURES).length >= 180);
+const resolver = createFeatureResolver();
+const nasalBundle = resolver.bundleFor("n");
+equal(
+  "a curated IPA bundle is complete",
+  [nasalBundle.nasal, nasalBundle.voice, nasalBundle.place],
+  [true, true, "alveolar"]
+);
+equal("place derives the coronal feature", derivedFeatures(nasalBundle), ["coronal"]);
+equal(
+  "tie-bar variants resolve to the same bundle",
+  featureDistance(resolver.bundleFor("t͡ʃ"), resolver.bundleFor("t͜ʃ")),
+  0
+);
+equal(
+  "a derived affricate keeps aspiration from its release",
+  resolver.bundleFor("t͡sʰ").spread_glottis,
+  true
+);
+equal(
+  "feature members enumerate the charted nasals",
+  featureMembers(["m", "n", "s", "p"], resolver, [{ kind: "bool", feature: "nasal", value: true }]),
+  ["m", "n"]
+);
+const voicedDelta = applyFeatureTerms(resolver.bundleFor("t"), [
+  { kind: "bool", feature: "voice", value: true },
+]);
+equal("a feature delta changes the bundle", voicedDelta.bundle.voice, true);
+equal(
+  "a bundle resolves back to its charted symbol",
+  resolveFeatureBundle(resolver.bundleFor("d"), featureCtx.chart, resolver).sound,
+  "d"
+);
+
+const customSymbol = "☺";
+const customBundle = {
+  ...defaultBundle(),
+  consonantal: true,
+  sonorant: false,
+  continuant: false,
+  voice: false,
+  click: true,
+  place: "bilabial",
+};
+const customResolver = createFeatureResolver({ [customSymbol]: customBundle });
+equal(
+  "a per-language override supplies features for a custom symbol",
+  [customResolver.bundleFor(customSymbol).click, customResolver.bundleFor(customSymbol).place],
+  [true, "bilabial"]
+);
+equal(
+  "an override wins over the curated table",
+  createFeatureResolver({ t: { ...defaultBundle(), voice: true, place: "alveolar" } }).bundleFor("t").voice,
+  true
+);
+
+const customConsonants = makeChart(
+  ["Plosive"],
+  ["Bilabial"],
+  [["Plosive", "Bilabial", [customSymbol]]]
+);
+const customVowels = makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]);
+const customCtx = contextForInventory(
+  { consonants: customConsonants, vowels: customVowels },
+  { [customSymbol]: customBundle }
+);
+const customRule = compileRule("[+click] > ∅ / _ #", customCtx);
+truthy("a custom sound with an override can be queried", customRule.ok);
+equal(
+  "the override drives feature matching",
+  applyRule(customCtx.tokenize(`a${customSymbol}`), customRule.rule, customCtx).tokens.join(""),
+  "a"
+);
+
+equal("a feature query selects nasals", featureApply("[+nasal] > ∅ / _ #", "kan"), { out: "ka" });
+equal("a feature query works in an environment", featureApply("a > e / _ [+voice]", "ada"), { out: "eda" });
+equal("a feature delta voices a stop", featureApply("t > [+voice] / V _ V", "ata"), { out: "ada" });
+equal("a feature delta devoices a fricative", featureApply("z > [-voice] / _ #", "az"), { out: "as" });
+equal("a categorical place mutation resolves", featureApply("n > [place=velar]", "an"), { out: "aŋ" });
+equal(
+  "alpha place copies the following place",
+  featureApply("n > [αplace] / _ [αplace]", "anka"),
+  { out: "aŋka" }
+);
+equal(
+  "alpha place copies a palatal place",
+  featureApply("n > [αplace] / _ [αplace]", "anɲa"),
+  { out: "aɲɲa" }
+);
+equal(
+  "alpha round spreads from the left",
+  featureApply("V > [αround] / [αround] _", "øe"),
+  { out: "øø" }
+);
+equal(
+  "alpha round can copy an unrounded value",
+  featureApply("V > [αround] / [αround] _", "ee"),
+  { out: "ee" }
+);
+const alphaOffChart = featureApply("n > [αplace] / _ [αplace]", "anha");
+truthy(
+  "an alpha result that lands off the chart fails loudly",
+  /No charted sound/.test(alphaOffChart.error) && /Nearest charted/.test(alphaOffChart.error)
+);
+
+const unboundAlpha = compileRule("n > [αplace]", featureCtx);
+truthy("an unbound alpha variable is rejected", !unboundAlpha.ok && /not bound/.test(unboundAlpha.error));
+const mixedFeature = compileRule("[+nasal p] > a", featureCtx);
+truthy(
+  "a bracket cannot mix sounds and features",
+  !mixedFeature.ok && /mix sounds and features/.test(mixedFeature.error)
+);
+const multiFeature = compileRule("n > [+voice]s", featureCtx);
+truthy(
+  "a feature change must be the whole output",
+  !multiFeature.ok && /whole output/.test(multiFeature.error)
+);
+const insertionFeature = compileRule("∅ > [+voice] / V _ V", featureCtx);
+truthy(
+  "an insertion cannot be a feature change",
+  !insertionFeature.ok && /needs a segment/.test(insertionFeature.error)
+);
+const offChartFeature = compileRule("t > [+voice]", ctx);
+truthy(
+  "a static feature change with no charted result fails",
+  !offChartFeature.ok && /Nearest charted sounds/.test(offChartFeature.error)
+);
+
+equal(
+  "a reserved bare word stays a chart class",
+  classifyFeatureWords(["back"], { isReserved: () => true }).kind,
+  "none"
+);
+equal(
+  "a signed word is a feature bundle even when reserved",
+  classifyFeatureWords(["+back"], { isReserved: () => true }).kind,
+  "feature"
+);
+equal("a bare chart class still works in a rule", apply("[back] > a / _ #", "ku"), { out: "ka" });
+equal("a signed feature bundle works in the same rule", featureApply("[+back] > a / _ #", "ku"), {
+  out: "ka",
+});
+
+const featureClasses = compileClasses([{ name: "S", sounds: "[+sonorant]" }], featureCtx);
+const sonorants = featureClasses.map.get("S");
+truthy(
+  "a category can be a feature bundle",
+  sonorants && sonorants.values.includes("m") && sonorants.values.includes("i") && !sonorants.values.includes("t")
+);
+const featureAlphaClass = compileClasses([{ name: "S", sounds: "[αplace]" }], featureCtx);
+truthy(
+  "alpha variables are rejected in categories",
+  featureAlphaClass.entries[0].errors.some((error) => /α-variables/.test(error))
+);
+
+const featureTemplate = compilePhonotactics(
+  { template: "(C)V([+sonorant])", classes: [] },
+  featureCtx
+);
+truthy("a phonotactic template accepts a feature bundle", featureTemplate.ok);
+const featureLanguage = createLanguage("Feature grammar", null, featureInventory, {
+  template: "(C)V([+sonorant])",
+  classes: [],
+  forbidden: "",
+});
+const featureChecker = createPhonotacticsChecker(featureLanguage);
+equal("a feature template admits a sonorant coda", featureChecker.validate("kan").ok, true);
+equal("a feature template rejects an obstruent coda", featureChecker.validate("kat").ok, false);
+const nasalBan = createPhonotacticsChecker({
+  ...featureLanguage,
+  phonotactics: {
+    ...featureLanguage.phonotactics,
+    template: "(C)V(C)",
+    forbidden: "[+nasal][+nasal]",
+  },
+});
+truthy(
+  "a feature bundle works in a forbidden sequence",
+  nasalBan.validate("anma").issues.some((issue) => issue.type === "forbidden")
+);
+equal("a clean cluster passes the feature constraint", nasalBan.validate("asta").issues.length, 0);
+
+const featureProject = ensureProject({
+  title: "Feature grammar",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory: featureInventory,
+      phonotactics: {
+        template: "(C)V(C)",
+        classes: [{ name: "S", sounds: "[+sonorant]" }],
+      },
+      featureOverrides: { [customSymbol]: customBundle },
+      soundChanges: [{ id: "r1", notation: "S > ∅ / _ #", note: "", enabled: true }],
+      allophony: [
+        { id: "a1", notation: "/s/ → [+voice] / V _ V", note: "", enabled: true },
+        { id: "a2", notation: "/n/ → [αplace] / _ [αplace]", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const featureContext = contextForLanguage(featureProject, "only");
+const featureCategoryRule = compileRule("S > ∅ / _ #", featureContext);
+truthy("a feature category compiles inside a language", featureCategoryRule.ok);
+equal(
+  "a feature category matches its expanded members",
+  applyRule(featureContext.tokenize("kan"), featureCategoryRule.rule, featureContext).tokens.join(""),
+  "ka"
+);
+equal("a feature category feeds derivation", deriveForm("kan", featureProject, "only").text, "ka");
+equal("a feature allophone is applied", surfaceForForm("asa", featureProject, "only").text, "aza");
+equal(
+  "an alpha allophone copies the following place",
+  surfaceForForm("anka", featureProject, "only").text,
+  "aŋka"
+);
+const featureRows = allophoneTable(featureProject, "only").rows;
+truthy(
+  "the allophone table resolves a feature output",
+  featureRows.some((row) => row.phoneme === "s" && row.allophone === "z")
+);
+truthy(
+  "the allophone table keeps an alpha output symbolic",
+  featureRows.some((row) => row.phoneme === "n" && row.allophone === "[αplace]")
+);
+
+const overrideProject = ensureProject({
+  title: "Overrides",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory: featureInventory,
+      featureOverrides: {
+        "t͜ʃ": {
+          ...defaultBundle(),
+          consonantal: true,
+          delayed_release: true,
+          continuant: false,
+          voice: false,
+          place: "postalveolar",
+        },
+      },
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+const overrideLanguage = overrideProject.languages[0];
+equal("override keys normalize tie bars on load", Object.keys(overrideLanguage.featureOverrides), ["t͡ʃ"]);
+const overrideSibling = createSibling(overrideProject, "root", "Sibling");
+const overrideAncestor = createAncestor(overrideProject, "root", "Ancestor");
+truthy(
+  "a sibling inherits feature overrides",
+  overrideSibling.featureOverrides["t͡ʃ"]?.delayed_release === true
+);
+truthy(
+  "an ancestor inherits feature overrides",
+  overrideAncestor.featureOverrides["t͡ʃ"]?.delayed_release === true
+);
+
 /* ---- report builder ------------------------------------------------------ */
 
 const markdown = buildMarkdown(project);
@@ -918,6 +1355,26 @@ truthy(
   markdown.includes("### Child") && markdown.includes("#### Phonology"),
 );
 truthy("report includes the family sketch", markdown.includes("```") && markdown.includes("Root"));
+
+const noteProject = {
+  title: "Notes",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      ...language,
+      notes: "# heading\n| table |\n`code`",
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+};
+const noteMarkdown = buildMarkdown(noteProject);
+truthy("markdown notes keep line-start syntax inside the blockquote", noteMarkdown.includes("> \\# heading"));
+truthy("markdown notes escape a leading table pipe", noteMarkdown.includes("> \\| table \\|"));
+truthy("markdown notes escape a leading code span", noteMarkdown.includes("> \\`code\\`"));
 
 const allophonyMarkdown = buildMarkdown(allophonyProject);
 truthy("report formats lexical forms as phonemic", allophonyMarkdown.includes("/kasa/"));

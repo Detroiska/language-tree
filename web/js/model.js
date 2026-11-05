@@ -1,4 +1,5 @@
 import { stripLevelMarks } from "./notation.js";
+import { normalizeFeatureOverrides } from "./features.js";
 
 let fallbackCounter = 0;
 
@@ -100,7 +101,14 @@ export function defaultPhonotactics() {
   };
 }
 
-export function createLanguage(name, parentId = null, template = null, phonotactics = null, allophony = null) {
+export function createLanguage(
+  name,
+  parentId = null,
+  template = null,
+  phonotactics = null,
+  allophony = null,
+  featureOverrides = null
+) {
   return {
     id: uid("lang"),
     name: name.trim() || "Untitled language",
@@ -112,6 +120,10 @@ export function createLanguage(name, parentId = null, template = null, phonotact
     // Allophony is synchronic grammar, not a historical change: it is copied
     // to daughters like phonotactics, but it never enters the cognate chain.
     allophony: allophony ? deepClone(allophony) : [],
+    // Curated IPA features cover common symbols; overrides describe custom
+    // symbols. They are inherited with the chart so a daughter keeps the same
+    // feature semantics until someone edits its panel.
+    featureOverrides: normalizeFeatureOverrides(featureOverrides),
     vocabulary: [],
     createdAt: new Date().toISOString(),
   };
@@ -421,6 +433,7 @@ export function ensureProject(raw) {
     }
     language.soundChanges = normalizeRuleOrder(language.soundChanges);
     language.allophony = ensureAllophony(language.allophony);
+    language.featureOverrides = normalizeFeatureOverrides(language.featureOverrides);
     language.vocabulary = Array.isArray(language.vocabulary)
       ? language.vocabulary
           .filter((entry) => entry && typeof entry === "object")
@@ -539,7 +552,8 @@ export function createAncestor(project, languageId, name) {
     language.parentId,
     language.inventory,
     language.phonotactics,
-    language.allophony
+    language.allophony,
+    language.featureOverrides
   );
   const index = project.languages.indexOf(language);
   project.languages.splice(index, 0, ancestor);
@@ -557,7 +571,8 @@ export function createSibling(project, languageId, name) {
     language.parentId,
     language.inventory,
     language.phonotactics,
-    language.allophony
+    language.allophony,
+    language.featureOverrides
   );
   const index = project.languages.indexOf(language);
   project.languages.splice(index + 1, 0, sibling);

@@ -1,6 +1,7 @@
 import {
   addAxisChild,
   addAxisSibling,
+  allophonyRules,
   cellKey,
   chartMaxDepth,
   chartLeaves,
@@ -14,9 +15,19 @@ import {
   splitCellKey,
   uid,
 } from "../model.js";
-import { allophoneTable } from "../phonology.js";
+import { allophoneCandidates, allophoneTable } from "../phonology.js";
+import {
+  FEATURE_DEFINITIONS,
+  IPA_FEATURES,
+  createFeatureResolver,
+  defaultBundle,
+  derivedFeatures,
+  describeBundle,
+  normalizeBundle,
+  soundKey,
+} from "../features.js";
 import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
-import { confirmDialog, esc, icon, openMenu, promptDialog, toast } from "../ui.js";
+import { confirmDialog, esc, icon, openMenu, openModal, promptDialog, toast } from "../ui.js";
 
 function plural(value, singular, pluralForm = `${singular}s`) {
   return value === 1 ? singular : pluralForm;
@@ -530,6 +541,269 @@ function allophonePanelMarkup(ctx) {
     </section>`;
 }
 
+const FEATURE_GROUPS = [
+  {
+    title: "Major class and manner",
+    names: [
+      "syllabic",
+      "consonantal",
+      "sonorant",
+      "continuant",
+      "nasal",
+      "lateral",
+      "trill",
+      "tap",
+      "delayed_release",
+      "prenasalized",
+      "click",
+      "implosive",
+    ],
+  },
+  {
+    title: "Laryngeal",
+    names: ["voice", "spread_glottis", "constricted_glottis"],
+  },
+  {
+    title: "Vowel",
+    names: ["high", "low", "back", "central", "round", "atr", "long"],
+  },
+  {
+    title: "Secondary articulation",
+    names: ["rhotic", "labialized", "palatalized", "velarized", "pharyngealized"],
+  },
+];
+
+function featureSounds(language) {
+  const charted = [
+    ...chartPhonemeList(language.inventory.consonants),
+    ...chartPhonemeList(language.inventory.vowels),
+  ];
+  const allophones = allophoneCandidates(allophonyRules(language.allophony || []));
+  const active = [...new Set([...charted, ...allophones])];
+  const overrideKeys = Object.keys(language.featureOverrides || {});
+  return {
+    active,
+    unused: overrideKeys.filter((sound) => !active.some((item) => soundKey(item) === soundKey(sound))),
+  };
+}
+
+function featureSource(sound, resolver) {
+  if (resolver.hasOverride(sound)) return { id: "override", label: "override" };
+  if (IPA_FEATURES[soundKey(sound)]) return { id: "ipa", label: "IPA table" };
+  if (resolver.bundleFor(sound)) return { id: "derived", label: "derived" };
+  return { id: "missing", label: "missing" };
+}
+
+function bundleText(bundle) {
+  if (!bundle) return "Not defined";
+  const pieces = describeBundle(bundle);
+  const derived = derivedFeatures(bundle).map((name) => `+${name}`);
+  return [...pieces, ...derived].join(" ");
+}
+
+function featureRowsMarkup(sounds, resolver, { unused = false } = {}) {
+  return sounds
+    .map((sound) => {
+      const bundle = resolver.bundleFor(sound);
+      const source = unused ? { id: "unused", label: "unused override" } : featureSource(sound, resolver);
+      return `
+        <tr class="feature-row ${bundle ? "" : "is-missing"}" data-feature-sound="${esc(sound)}">
+          <td><code class="ipa">${esc(sound)}</code></td>
+          <td><span class="feature-bundle">${esc(bundleText(bundle))}</span></td>
+          <td><span class="feature-source is-${source.id}">${esc(source.label)}</span></td>
+          <td class="feature-row-actions">
+            <button class="button button-quiet button-small" type="button" data-feature-edit="${esc(sound)}">${icon("edit")}${bundle ? "Edit" : "Define"}</button>
+          </td>
+        </tr>`;
+    })
+    .join("");
+}
+
+function featurePanelMarkup(ctx) {
+  const resolver = createFeatureResolver(ctx.language.featureOverrides);
+  const { active, unused } = featureSounds(ctx.language);
+  const missing = active.filter((sound) => !resolver.bundleFor(sound));
+  const resolved = active.length - missing.length;
+  const countLabel = `${resolved} of ${active.length} ${active.length === 1 ? "symbol" : "symbols"} resolved`;
+  return `
+    <section class="panel feature-panel">
+      <header class="panel-head">
+        <div class="panel-title">
+          <h2>Distinctive features</h2>
+          <p>Features come from IPA symbols, never from chart labels. Overrides describe custom sounds; rules can query features with [+nasal] or [αplace].</p>
+        </div>
+        <span class="count-pill ${missing.length ? "is-warning" : ""}" data-feature-count>${esc(countLabel)}</span>
+      </header>
+      <div class="panel-body feature-panel-body">
+        ${
+          missing.length
+            ? `<div class="notice notice-quiet feature-missing">
+                ${icon("info")}
+                <p><strong>${missing.length === 1 ? "One symbol has" : `${missing.length} symbols have`} no feature bundle yet:</strong> ${missing
+                  .map((sound) => `<code class="ipa">${esc(sound)}</code>`)
+                  .join(", ")}. Define them here so feature rules can see ${missing.length === 1 ? "it" : "them"}.</p>
+                <button class="button button-quiet button-small" type="button" data-feature-define-missing="${esc(missing[0])}">Define ${esc(missing[0])}</button>
+              </div>`
+            : ""
+        }
+        <div class="table-scroll">
+          <table class="data-table feature-table">
+            <thead><tr><th>Sound</th><th>Feature bundle</th><th>Source</th><th></th></tr></thead>
+            <tbody>${featureRowsMarkup(active, resolver)}</tbody>
+          </table>
+        </div>
+        ${
+          unused.length
+            ? `<details class="feature-unused">
+                <summary>${unused.length} unused ${unused.length === 1 ? "override" : "overrides"}</summary>
+                <p class="field-help">These overrides no longer correspond to a charted sound or an allophone output. They are kept until you remove them.</p>
+                <div class="table-scroll">
+                  <table class="data-table feature-table">
+                    <tbody>${featureRowsMarkup(unused, resolver, { unused: true })}</tbody>
+                  </table>
+                </div>
+              </details>`
+            : ""
+        }
+        <p class="table-foot">A feature bundle is tri-state: +, −, or not applicable. Place is categorical; coronal, dorsal, labial, and radical are derived from it. Feature changes resolve back to the current chart, so a mutation that lands off-chart fails loudly.</p>
+      </div>
+    </section>`;
+}
+
+function selectValue(value) {
+  if (value === true) return "+";
+  if (value === false) return "-";
+  return "";
+}
+
+function derivedFeatureMarkup(bundle) {
+  const pieces = [];
+  if (bundle.anterior === true) pieces.push("+anterior");
+  else if (bundle.anterior === false) pieces.push("−anterior");
+  for (const name of derivedFeatures(bundle)) pieces.push(`+${name}`);
+  return pieces.length ? pieces.map((piece) => `<span class="feature-pill">${esc(piece)}</span>`).join("") : `<span class="muted">none</span>`;
+}
+
+function featureEditorMarkup(sound, bundle) {
+  const groupMarkup = FEATURE_GROUPS.map(
+    (group) => `
+      <fieldset class="feature-group">
+        <legend>${esc(group.title)}</legend>
+        <div class="feature-grid">
+          ${group.names
+            .map((name) => {
+              const def = FEATURE_DEFINITIONS[name];
+              return `
+                <label class="feature-field">
+                  <span class="feature-field-label">${esc(def.label)}</span>
+                  <select class="select select-small" data-feature="${name}" aria-label="${esc(def.label)}">
+                    <option value="+" ${selectValue(bundle[name]) === "+" ? "selected" : ""}>+</option>
+                    <option value="-" ${selectValue(bundle[name]) === "-" ? "selected" : ""}>−</option>
+                    <option value="" ${selectValue(bundle[name]) === "" ? "selected" : ""}>n/a</option>
+                  </select>
+                </label>`;
+            })
+            .join("")}
+        </div>
+      </fieldset>`
+  ).join("");
+  return `
+    <form class="form-stack feature-editor" onsubmit="return false">
+      <div class="feature-editor-head">
+        <code class="ipa feature-editor-sound">${esc(sound)}</code>
+        <p class="field-help">Changes are saved as a complete override for this language.</p>
+      </div>
+      <fieldset class="feature-group">
+        <legend>Place</legend>
+        <label class="feature-field feature-place-field">
+          <span class="feature-field-label">place</span>
+          <select class="select" data-feature="place" aria-label="Place">
+            <option value="" ${bundle.place === null ? "selected" : ""}>not applicable</option>
+            ${FEATURE_DEFINITIONS.place.values
+              .map((value) => `<option value="${esc(value)}" ${bundle.place === value ? "selected" : ""}>${esc(value)}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <div class="feature-derived-block">
+          <span class="field-label">Derived features</span>
+          <div data-feature-derived>${derivedFeatureMarkup(bundle)}</div>
+        </div>
+      </fieldset>
+      ${groupMarkup}
+      <div class="feature-preview-block">
+        <span class="field-label">Preview</span>
+        <code class="feature-preview" data-feature-preview>[${esc(describeBundle(bundle).join(" "))}]</code>
+      </div>
+    </form>`;
+}
+
+function openFeatureEditor(ctx, sound) {
+  const resolver = createFeatureResolver(ctx.language.featureOverrides);
+  const source = resolver.bundleFor(sound);
+  const bundle = normalizeBundle(source || defaultBundle());
+  const hasOverride = resolver.hasOverride(sound);
+  openModal({
+    title: `Features for “${sound}”`,
+    width: "wide",
+    body: featureEditorMarkup(sound, bundle),
+    footer: `
+      ${hasOverride ? `<button class="button button-quiet button-danger" type="button" data-feature-remove>Remove override</button>` : ""}
+      <button class="button button-quiet" type="button" data-feature-cancel>Cancel</button>
+      <button class="button button-primary" type="button" data-feature-save>Save features</button>
+    `,
+    onMount({ root, close }) {
+      const readBundle = () => {
+        const raw = defaultBundle();
+        for (const select of root.querySelectorAll("[data-feature]")) {
+          const name = select.dataset.feature;
+          if (name === "place") raw.place = select.value || null;
+          else raw[name] = select.value === "" ? null : select.value === "+";
+        }
+        return normalizeBundle(raw);
+      };
+      const refreshPreview = () => {
+        const current = readBundle();
+        const preview = root.querySelector("[data-feature-preview]");
+        if (preview) preview.textContent = `[${describeBundle(current).join(" ")}]`;
+        const derived = root.querySelector("[data-feature-derived]");
+        if (derived) derived.innerHTML = derivedFeatureMarkup(current);
+      };
+      root.querySelector(".feature-editor")?.addEventListener("change", refreshPreview);
+      root.querySelector("[data-feature-cancel]")?.addEventListener("click", close);
+      root.querySelector("[data-feature-save]")?.addEventListener("click", () => {
+        const current = readBundle();
+        ctx.language.featureOverrides = {
+          ...(ctx.language.featureOverrides || {}),
+          [soundKey(sound)]: current,
+        };
+        ctx.touch({ label: `Edit features for ${sound}` });
+        ctx.refresh();
+        close();
+        toast(`Saved features for ${sound}.`, { type: "success" });
+      });
+      root.querySelector("[data-feature-remove]")?.addEventListener("click", () => {
+        const next = { ...(ctx.language.featureOverrides || {}) };
+        delete next[soundKey(sound)];
+        ctx.language.featureOverrides = next;
+        ctx.touch({ label: `Remove feature override for ${sound}` });
+        ctx.refresh();
+        close();
+        toast(`Removed the feature override for ${sound}.`, { type: "success" });
+      });
+    },
+  });
+}
+
+function bindFeaturePanel(container, ctx) {
+  container.querySelectorAll("[data-feature-edit]").forEach((button) => {
+    button.addEventListener("click", () => openFeatureEditor(ctx, button.dataset.featureEdit));
+  });
+  const missing = container.querySelector("[data-feature-define-missing]");
+  if (missing) {
+    missing.addEventListener("click", () => openFeatureEditor(ctx, missing.dataset.featureDefineMissing));
+  }
+}
+
 export function renderInventory(container, ctx) {
   const { language } = ctx;
   const consonants = language.inventory.consonants;
@@ -550,6 +824,7 @@ export function renderInventory(container, ctx) {
       </section>
       ${chartPanel(ctx, consonants, "consonants", "Consonants", "Manner of articulation × place of articulation")}
       ${chartPanel(ctx, vowels, "vowels", "Vowels", "Height × backness, with rounding as subcolumns")}
+      ${featurePanelMarkup(ctx)}
       ${allophonePanelMarkup(ctx)}
     </div>
   `;
@@ -571,4 +846,5 @@ export function renderInventory(container, ctx) {
     bindCellEditing(panel, ctx, chart, kind);
     bindNotes(panel, ctx, chart, kind);
   });
+  bindFeaturePanel(container, ctx);
 }

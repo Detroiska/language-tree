@@ -220,20 +220,26 @@ function notationHelpMarkup() {
           <li><code>k &gt; tʃ / _ i</code><span>Palatalize k before i.</span></li>
           <li><code>[td] &gt; ∅ / _ #</code><span>Delete t or d word-finally.</span></li>
           <li><code>[back] &gt; ∅ / _ #</code><span>Delete final back vowels — a chart class instead of a sound list.</span></li>
+          <li><code>[+nasal] &gt; ∅ / _ #</code><span>Delete final nasals — a feature bundle read from the IPA feature table.</span></li>
           <li><code>N &gt; ∅ / _ #</code><span>Delete a final member of the N category — categories come from Phonotactics.</span></li>
           <li><code>C &gt; ∅ / _ C</code><span>Delete a consonant before another consonant.</span></li>
           <li><code>∅ &gt; ʔ / V _ V</code><span>Insert a glottal stop between vowels.</span></li>
+          <li><code>t &gt; [+voice] / V _ V</code><span>Voice t between vowels. The result must exist in this generation’s chart.</span></li>
+          <li><code>n &gt; [αplace] / _ [αplace]</code><span>Copy the following consonant’s place: n becomes ŋ before k, ɲ before c, and so on.</span></li>
+          <li><code>V &gt; [αround] / [αround] _</code><span>Spread rounding rightward; α is bound by the segment on the left.</span></li>
         </ul>
         <dl class="help-terms">
           <div><dt>V, C</dt><dd>Any vowel or consonant in the language’s inventory.</dd></div>
-          <div><dt>[…]</dt><dd>A set of sounds; <code>[^…]</code> negates it. Items may be sounds, categories, or chart classes as separate words.</dd></div>
+          <div><dt>[…]</dt><dd>A set of sounds; <code>[^…]</code> negates it. Items may be sounds, categories, chart classes, or a feature bundle as separate words.</dd></div>
+          <div><dt>[+f], [−f]</dt><dd>A feature bundle: <code>[+nasal]</code>, <code>[−voice]</code>, <code>[+syllabic +round]</code>. Features come from IPA symbols, not chart labels. Bare <code>[back]</code> keeps its chart-class meaning; write <code>[+back]</code> to force the feature.</dd></div>
+          <div><dt>[αf]</dt><dd>An α-variable. It binds to the matching feature of a segment in the input or environment, then copies that value into the output, as in <code>n &gt; [αplace] / _ [αplace]</code>. Use β for a second independent variable.</dd></div>
           <div><dt>N, G, …</dt><dd>A category defined in this language’s Phonotactics tab, such as <code>N</code> for nasals. It stands for its member sounds in the input and environment, including inside sets like <code>[N s]</code>.</dd></div>
           <div><dt>plosive.plain</dt><dd>A chart class: dotted labels read straight from the Phonology charts, on their own or inside sets. A sound belongs when every label applies on each axis that has it — write <code>back</code>, <code>V.back</code>, or dotted paths like <code>plosive.velar</code>; pin via <code>V.</code> / <code>C.</code>.</dd></div>
           <div><dt>#</dt><dd>Word boundary in an environment.</dd></div>
           <div><dt>_</dt><dd>Marks where the input sits in the environment.</dd></div>
           <div><dt>∅, 0</dt><dd>Zero: deletion on the output side, insertion on the input side.</dd></div>
         </dl>
-        <p class="help-foot">Top-level rules are all checked against the form inherited from the parent, so their order does not change whether they apply. Dotted rules run after that pass, in order, against the changed form. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry. Categories are read from this language’s Phonotactics tab.</p>
+        <p class="help-foot">Precedence inside brackets is literal sound, then category, then chart class, then feature bundle. A bracketed output that contains signs is a feature change, not a surface symbol: it is applied as a delta to the matched segment and must resolve to a sound in the current chart, or the rule stops with a suggestion. Multi-segment and insertion outputs still use concrete sounds. Top-level rules are all checked against the form inherited from the parent, so their order does not change whether they apply. Dotted rules run after that pass, in order, against the changed form. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry. Categories are read from this language’s Phonotactics tab.</p>
       </div>
     </details>`;
 }
