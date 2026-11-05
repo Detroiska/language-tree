@@ -15,6 +15,7 @@ import {
 } from "./ui.js";
 import { createQuickSearch } from "./search.js";
 import { initPhonemeKeyboard } from "./keyboard.js";
+import { decodeHashPart } from "./routes.js";
 import { renderCognates } from "./views/cognates.js";
 import { renderLanguage } from "./views/language.js";
 import { renderTree } from "./views/tree.js";
@@ -45,15 +46,15 @@ function parseRoute() {
   if (parts[0] === "language" && parts[1]) {
     return {
       view: "language",
-      id: decodeURIComponent(parts[1]),
+      id: decodeHashPart(parts[1]),
       tab: TAB_IDS.has(parts[2]) ? parts[2] : "overview",
     };
   }
   if (parts[0] === "cognates") {
     return {
       view: "cognates",
-      id: parts[1] ? decodeURIComponent(parts[1]) : null,
-      wordId: parts[2] ? decodeURIComponent(parts[2]) : null,
+      id: parts[1] ? decodeHashPart(parts[1]) : null,
+      wordId: parts[2] ? decodeHashPart(parts[2]) : null,
     };
   }
   return { view: "tree" };

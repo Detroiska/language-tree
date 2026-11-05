@@ -173,6 +173,13 @@ function mdCell(value) {
     .trim();
 }
 
+// Notes are emitted inside a blockquote. Escaping the line's first character
+// keeps a line such as "# heading", "| table |", or "- item" from starting a
+// heading, table, or list inside the quote and breaking the report's outline.
+function mdQuoteLine(value) {
+  return mdCell(value).replace(/^([>#+=~-]|\d+[.)])/u, "\\$1");
+}
+
 function mdTable(headers, rows) {
   const line = (cells) => `| ${cells.map(mdCell).join(" | ")} |`;
   const divider = `| ${headers.map(() => "---").join(" | ")} |`;
@@ -205,7 +212,7 @@ function mdLanguageSection(project, language) {
       String(language.notes)
         .split(/\r?\n/)
         .filter((line) => line.trim())
-        .map((line) => `> ${line}`)
+        .map((line) => `> ${mdQuoteLine(line)}`)
         .join("\n")
     );
   }

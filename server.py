@@ -175,6 +175,16 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             return
         self.send_json({"ok": True, "savedAt": project["updatedAt"]})
 
+    def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
+        # SimpleHTTPRequestHandler has no do_POST, so without this the API
+        # would answer with the stdlib's HTML 501 page instead of JSON.
+        if not self.host_allowed():
+            return
+        self.send_json(
+            {"error": "Method not allowed. Save the project with PUT /api/project."},
+            HTTPStatus.METHOD_NOT_ALLOWED,
+        )
+
 
 def ensure_data_file() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
