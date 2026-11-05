@@ -1,4 +1,5 @@
 import {
+  allophonyRules,
   chartLeaves,
   childrenOf,
   formatDate,
@@ -8,6 +9,8 @@ import {
   rootLanguages,
   ruleNumberMap,
 } from "./model.js";
+import { allophoneTable, surfaceForForm } from "./phonology.js";
+import { formatPhonemic, formatPhonetic } from "./notation.js";
 import { esc, openMenu, toast } from "./ui.js";
 
 // Family report & backup: a shareable snapshot of the whole tree as Markdown
@@ -133,6 +136,33 @@ function phonotacticsRows(language) {
   return rows;
 }
 
+function surfaceOf(project, language, form) {
+  const result = surfaceForForm(form, project, language.id);
+  return result.errors.length ? "" : result.text;
+}
+
+function allophonyRows(project, language) {
+  return allophoneTable(project, language.id).rows.map((row) => [
+    formatPhonemic(row.phoneme),
+    formatPhonetic(row.allophone),
+    row.environment,
+    row.notation,
+  ]);
+}
+
+function vocabularyTable(project, language) {
+  const hasSurface = allophonyRules(language.allophony).length > 0;
+  return {
+    headers: hasSurface ? ["Gloss", "Form", "Surface", "Note"] : ["Gloss", "Form", "Note"],
+    rows: language.vocabulary.map((word) => {
+      const row = [word.gloss, formatPhonemic(word.form)];
+      if (hasSurface) row.push(formatPhonetic(surfaceOf(project, language, word.form)));
+      row.push(word.note);
+      return row;
+    }),
+  };
+}
+
 /* ---- Markdown ------------------------------------------------------------ */
 
 function mdCell(value) {
@@ -167,7 +197,7 @@ function mdLanguageSection(project, language) {
   const parts = [];
 
   parts.push(
-    `${heading} ${mdCell(language.name)}\n\n_${chain.join(" → ")} · ${stats.consonants} consonants · ${stats.vowels} vowels · ${stats.changes} ${plural(stats.changes, "rule")} · ${stats.words} ${plural(stats.words, "word")}_`
+    `${heading} ${mdCell(language.name)}\n\n_${chain.join(" → ")} · ${stats.consonants} consonants · ${stats.vowels} vowels · ${stats.changes} ${plural(stats.changes, "rule")} · ${stats.allophony} allophony ${plural(stats.allophony, "rule")} · ${stats.words} ${plural(stats.words, "word")}_`
   );
 
   if (String(language.notes || "").trim()) {
@@ -201,18 +231,27 @@ function mdLanguageSection(project, language) {
       rule.note,
     ]);
     const disabledCount = language.soundChanges.filter((rule) => rule.enabled === false).length;
-    parts.push(`${section} Sound changes\n\n${mdTable(["#", "Rule", "Note"], rows)}`);
+    parts.push(`${section} Sound changes\n\n_Diachronic rules from the ancestor’s phonemic form to this language’s phonemic form._\n\n${mdTable(["#", "Rule", "Note"], rows)}`);
     if (disabledCount) {
       parts.push(`_${disabledCount} of ${language.soundChanges.length} rule${language.soundChanges.length === 1 ? "" : "s"} disabled._`);
     }
   }
 
+  if (allophonyRules(language.allophony).length) {
+    const rows = allophonyRows(project, language);
+    if (rows.length) {
+      parts.push(
+        `${section} Allophony\n\n_Synchronic rules from this language’s phonemic forms to surface allophones. They do not feed the historical derivation._\n\n${mdTable(["Phoneme", "Allophone", "Environment", "Rule"], rows)}`
+      );
+    } else {
+      parts.push(`${section} Allophony\n\n_The allophony rules currently produce no allophones (empty, disabled, or invalid)._`);
+    }
+  }
+
   if (language.vocabulary.length) {
+    const vocab = vocabularyTable(project, language);
     parts.push(
-      `${section} Vocabulary\n\n${mdTable(
-        ["Gloss", "Form", "Note"],
-        language.vocabulary.map((word) => [word.gloss, word.form, word.note])
-      )}`
+      `${section} Vocabulary\n\n${mdTable(vocab.headers, vocab.rows)}`
     );
   } else {
     parts.push(`${section} Vocabulary\n\n_No words recorded._`);
@@ -228,18 +267,18 @@ function cognateMarkdown(project) {
   }
   const rows = sets.map((set) => [
     set.gloss,
-    ...columns.map((language) => set.byLang.get(language.id) || EMPTY_CELL),
+    ...columns.map((language) => formatPhonemic(set.byLang.get(language.id)) || EMPTY_CELL),
   ]);
   return [
     `## Cognate sets`,
-    `_Words sharing a gloss across the family (matched case-insensitively; first form per gloss wins)._`,
+    `_Words sharing a gloss across the family (matched case-insensitively; first form per gloss wins). Forms are phonemic._`,
     mdTable(["Gloss", ...columns.map((language) => language.name)], rows),
   ].join("\n\n");
 }
 
 export function buildMarkdown(project) {
   const stats = projectStats(project);
-  const generated = `*Language Tree report — generated ${formatDate(new Date().toISOString())} · ${stats.languages} language${stats.languages === 1 ? "" : "s"} · ${stats.words} word${stats.words === 1 ? "" : "s"} · ${stats.changes} sound-change rule${stats.changes === 1 ? "" : "s"}*`;
+  const generated = `*Language Tree report — generated ${formatDate(new Date().toISOString())} · ${stats.languages} language${stats.languages === 1 ? "" : "s"} · ${stats.words} word${stats.words === 1 ? "" : "s"} · ${stats.changes} sound-change rule${stats.changes === 1 ? "" : "s"} · ${stats.allophony} allophony rule${stats.allophony === 1 ? "" : "s"}*`;
   const sketch = familyTreeLines(project);
   const fence = backtickFence(sketch);
   const parts = [
@@ -299,7 +338,7 @@ function htmlLanguageSection(project, language, index) {
 
   const ruleNumbers = ruleNumberMap(language.soundChanges);
   const rulesHtml = language.soundChanges.length
-    ? htmlTable(
+    ? `<p class="chart-note">Diachronic rules from the ancestor’s phonemic form to this language’s phonemic form.</p>${htmlTable(
         ["#", "Rule", "Note"],
         language.soundChanges.map((rule) => [
           ruleNumbers.get(rule.id) || "",
@@ -307,12 +346,22 @@ function htmlLanguageSection(project, language, index) {
           rule.note,
         ]),
         { formColumns: [1] }
-      )
+      )}`
     : "";
 
+  const allophonyRowsData = allophonyRules(language.allophony).length ? allophonyRows(project, language) : [];
+  const allophonyHtml = allophonyRowsData.length
+    ? `<p class="chart-note">Synchronic rules from this language’s phonemic forms to surface allophones. They do not feed the historical derivation.</p>${htmlTable(
+        ["Phoneme", "Allophone", "Environment", "Rule"],
+        allophonyRowsData,
+        { formColumns: [0, 1, 2, 3] }
+      )}`
+    : "";
+
+  const vocab = vocabularyTable(project, language);
   const vocabHtml = language.vocabulary.length
-    ? htmlTable(["Gloss", "Form", "Note"], language.vocabulary.map((word) => [word.gloss, word.form, word.note]), {
-        formColumns: [1],
+    ? htmlTable(vocab.headers, vocab.rows, {
+        formColumns: vocab.headers.map((header, index) => (header === "Gloss" || header === "Note" ? -1 : index)).filter((index) => index >= 0),
       })
     : `<p class="report-empty">No words recorded.</p>`;
 
@@ -320,11 +369,12 @@ function htmlLanguageSection(project, language, index) {
     <section class="report-language" id="lang-${index}" style="--depth:${depth}">
       <p class="report-kicker">${depth === 0 ? "Root language" : `Generation ${depth + 1}`}</p>
       <h2>${esc(language.name)}</h2>
-      <p class="report-lineage">${lineage} <span class="report-stats">· ${stats.consonants} C · ${stats.vowels} V · ${stats.changes} ${plural(stats.changes, "rule")} · ${stats.words} ${plural(stats.words, "word")}</span></p>
+      <p class="report-lineage">${lineage} <span class="report-stats">· ${stats.consonants} C · ${stats.vowels} V · ${stats.changes} ${plural(stats.changes, "rule")} · ${stats.allophony} allophony ${plural(stats.allophony, "rule")} · ${stats.words} ${plural(stats.words, "word")}</span></p>
       ${String(language.notes || "").trim() ? `<blockquote>${esc(language.notes).replace(/\r?\n/g, "<br>")}</blockquote>` : ""}
       <div class="report-block"><h3 class="block-title">Phonology</h3>${charts}</div>
       ${phonotacticsHtml ? `<div class="report-block"><h3 class="block-title">Phonotactics</h3>${phonotacticsHtml}</div>` : ""}
       ${rulesHtml ? `<div class="report-block"><h3 class="block-title">Sound changes</h3>${rulesHtml}</div>` : ""}
+      ${allophonyHtml ? `<div class="report-block"><h3 class="block-title">Allophony</h3>${allophonyHtml}</div>` : ""}
       <div class="report-block"><h3 class="block-title">Vocabulary</h3>${vocabHtml}</div>
     </section>`;
 }
@@ -335,7 +385,7 @@ function cognateHtml(project) {
     sets.length && columns.length
       ? htmlTable(
           ["Gloss", ...columns.map((language) => language.name)],
-          sets.map((set) => [set.gloss, ...columns.map((language) => set.byLang.get(language.id) || EMPTY_CELL)])
+          sets.map((set) => [set.gloss, ...columns.map((language) => formatPhonemic(set.byLang.get(language.id)) || EMPTY_CELL)])
         )
       : `<p class="report-empty">No gloss shared by two or more languages with a recorded form.</p>`;
   return `
@@ -412,7 +462,7 @@ ${REPORT_CSS}
   <header class="report-head">
     <p class="report-kicker">Language Tree report</p>
     <h1>${esc(project.title)}</h1>
-    <p class="report-meta">Generated ${esc(generated)} · ${stats.languages} language${stats.languages === 1 ? "" : "s"} · ${stats.words} word${stats.words === 1 ? "" : "s"} · ${stats.changes} sound-change rule${stats.changes === 1 ? "" : "s"}</p>
+    <p class="report-meta">Generated ${esc(generated)} · ${stats.languages} language${stats.languages === 1 ? "" : "s"} · ${stats.words} word${stats.words === 1 ? "" : "s"} · ${stats.changes} sound-change rule${stats.changes === 1 ? "" : "s"} · ${stats.allophony} allophony rule${stats.allophony === 1 ? "" : "s"}</p>
   </header>
   <nav class="report-toc">
     <strong>Contents</strong>

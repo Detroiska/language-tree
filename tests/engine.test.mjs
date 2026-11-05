@@ -6,15 +6,30 @@
 // report builder are DOM-free ES modules, so they import and run directly.
 // Every assertion prints a line; the process exits non-zero on any failure.
 
-import { defaultInventory, ensureProject, ruleNumberMap } from "../web/js/model.js";
 import {
+  allophonyEntries,
+  allophonyRules,
+  createLanguage,
+  defaultInventory,
+  ensureProject,
+  groupAllophonyRules,
+  ruleNumberMap,
+} from "../web/js/model.js";
+import {
+  allophoneCandidates,
+  allophoneTable,
+  contextForAllophony,
   contextForInventory,
+  contextForLanguage,
   compileRule,
   applyRule,
   deriveForm,
+  normalizeAllophonyNotation,
+  surfaceForForm,
 } from "../web/js/phonology.js";
+import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../web/js/notation.js";
 import { createPhonotacticsChecker } from "../web/js/phonotactics.js";
-import { buildMarkdown } from "../web/js/report.js";
+import { buildHtml, buildMarkdown } from "../web/js/report.js";
 
 let passed = 0;
 const failures = [];
@@ -95,6 +110,9 @@ equal("negated set", apply("[^a] > ∅ / _ #", "kamas"), { out: "kama" });
 equal("boundaries on both sides", apply("a > b / # _ #", "a"), { out: "b" });
 equal("boundaries reject longer words", apply("a > b / # _ #", "ka"), { out: "ka" });
 equal("unconditional deletion", apply("a > ∅", "kasa"), { out: "ks" });
+equal("insertion between vowels", apply("∅ > ʔ / V _ V", "aa"), { out: "aʔa" });
+equal("insertion at every matching boundary", apply("∅ > ʔ / V _ V", "aaa"), { out: "aʔaʔa" });
+equal("insertion respects its environment", apply("∅ > ʔ / V _ V", "apa"), { out: "apa" });
 
 /* ---- chart-derived classes ---------------------------------------------- */
 
@@ -192,6 +210,15 @@ equal(
   "top-level rule order does not change matching",
   deriveForm("pai", reversed, "child", { directOnly: true }).text,
   "pe"
+);
+
+const insertionStage = stagedProject([
+  { id: "r1", notation: "∅ > ʔ / V _ V", note: "", enabled: true, parentId: null },
+]);
+equal(
+  "top-level insertion applies to the ancestral form",
+  deriveForm("aa", insertionStage, "child", { directOnly: true }).text,
+  "aʔa"
 );
 
 const sequential = stagedProject([
@@ -463,6 +490,426 @@ truthy(
   brokenForbiddenSet.validate("kasa").ok,
 );
 
+/* ---- notation ----------------------------------------------------------- */
+
+equal("strip phonemic slashes", stripLevelMarks("/kasa/"), "kasa");
+equal("strip phonetic brackets", stripLevelMarks("[kʰasa]"), "kʰasa");
+equal("strip trims surrounding whitespace", stripLevelMarks("  /kasa/  "), "kasa");
+equal("plain form is unchanged", stripLevelMarks("kasa"), "kasa");
+equal("a lone slash is not a delimiter", stripLevelMarks("/"), "/");
+equal("format phonemic", formatPhonemic("kasa"), "/kasa/");
+equal("format phonetic replaces existing level marks", formatPhonetic("/kʰasa/"), "[kʰasa]");
+equal("format empty form", formatPhonemic("  "), "");
+
+/* ---- allophony ---------------------------------------------------------- */
+
+equal(
+  "normalizes standard allophony notation",
+  normalizeAllophonyNotation("/p/ > [pʰ] / # _ V"),
+  "p > pʰ / # _ V"
+);
+equal(
+  "normalizes compact allophony notation",
+  normalizeAllophonyNotation("p > pʰ / # _ V"),
+  "p > pʰ / # _ V"
+);
+equal("normalizes the arrow variant", normalizeAllophonyNotation("/t/ → [t͡s] / _ i"), "t → t͡s / _ i");
+equal(
+  "allophone candidates keep affricates whole",
+  allophoneCandidates([{ notation: "/t/ > [t͡s] / _ i" }]),
+  ["t͡s"]
+);
+
+const allophonyProject = ensureProject({
+  title: "Allophony",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      vocabulary: [
+        { id: "rw", gloss: "water", form: "kasa" },
+        { id: "rs", gloss: "stone", form: "pata" },
+      ],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      inventory,
+      soundChanges: [{ id: "r1", notation: "t > d / V _ V", note: "", enabled: true }],
+      allophony: [
+        { id: "a1", notation: "/k/ > [kʰ] / # _", note: "", enabled: true },
+        { id: "a2", notation: "/s/ > [z] / V _ V", note: "", enabled: true },
+        { id: "a3", notation: "/p/ > [f]", note: "", enabled: false },
+      ],
+      vocabulary: [{ id: "cw", gloss: "water", form: "kasa" }],
+    },
+  ],
+});
+
+const childSurface = surfaceForForm("/kasa/", allophonyProject, "child");
+equal("allophony applies in list order", childSurface.text, "kʰaza");
+equal("an uncharted allophone stays one token", childSurface.tokens, ["kʰ", "a", "z", "a"]);
+equal("surface input accepts level delimiters", childSurface.input.join(""), "kasa");
+equal("a disabled allophony rule is skipped", surfaceForForm("pata", allophonyProject, "child").text, "pata");
+
+const orderProject = ensureProject({
+  title: "Order",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [
+        { id: "o1", notation: "/a/ > [e]", note: "", enabled: true },
+        { id: "o2", notation: "/e/ > [i]", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal("allophony rules chain", surfaceForForm("a", orderProject, "only").text, "i");
+orderProject.languages[0].allophony.reverse();
+equal("reversing allophony order changes the surface", surfaceForForm("a", orderProject, "only").text, "e");
+
+const insertionProject = ensureProject({
+  title: "Insertion",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [{ id: "i1", notation: "∅ -> [ʔ] / V_V", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "allophony inserts a glottal stop between adjacent vowels",
+  surfaceForForm("aa", insertionProject, "only").text,
+  "aʔa"
+);
+equal("allophony insertion leaves other forms alone", surfaceForForm("apa", insertionProject, "only").text, "apa");
+
+const groupedProject = ensureProject({
+  title: "Groups",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [
+        {
+          id: "grp1",
+          type: "group",
+          name: "Intervocalic voicing",
+          collapsed: false,
+          enabled: true,
+          rules: [
+            { id: "g1", notation: "/p/ -> [b] / V_V", note: "", enabled: true },
+            { id: "g2", notation: "/t/ -> [d] / V_V", note: "", enabled: true },
+          ],
+        },
+        { id: "g3", notation: "/k/ -> [g] / V_V", note: "", enabled: true },
+        {
+          id: "grp2",
+          type: "group",
+          name: "Final lowering",
+          collapsed: false,
+          enabled: true,
+          rules: [{ id: "g4", notation: "/a/ -> [ɑ] / _#", note: "", enabled: true }],
+        },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const groupedLanguage = groupedProject.languages[0];
+equal(
+  "grouped allophony gets dotted rule numbers",
+  allophonyEntries(groupedLanguage.allophony).map((entry) => entry.number),
+  ["1.1", "1.2", "2", "3.1"]
+);
+equal(
+  "groups flatten back into their application order",
+  allophonyRules(groupedLanguage.allophony).map((rule) => rule.id),
+  ["g1", "g2", "g3", "g4"]
+);
+equal("grouped allophony applies in order", surfaceForForm("apata", groupedProject, "only").text, "abadɑ");
+groupedLanguage.allophony[0].enabled = false;
+equal("a disabled group is skipped by the engine", surfaceForForm("apata", groupedProject, "only").text, "apatɑ");
+groupedLanguage.allophony[0].enabled = true;
+const groupedTable = allophoneTable(groupedProject, "only");
+equal(
+  "the allophone table uses group-aware rule numbers",
+  groupedTable.rows.map((row) => [row.phoneme, row.label]),
+  [["p", "1.1"], ["t", "1.2"], ["k", "2"], ["a", "3.1"]]
+);
+const groupedCopy = createLanguage(
+  "Copy",
+  "only",
+  groupedLanguage.inventory,
+  groupedLanguage.phonotactics,
+  groupedLanguage.allophony
+);
+equal(
+  "a daughter copies grouped allophony",
+  allophonyEntries(groupedCopy.allophony).map((entry) => [entry.number, entry.rule.id]),
+  [["1.1", "g1"], ["1.2", "g2"], ["2", "g3"], ["3.1", "g4"]]
+);
+groupedCopy.allophony[0].rules[0].notation = "/p/ -> [v] / V_V";
+equal("copied groups are independent", groupedLanguage.allophony[0].rules[0].notation, "/p/ -> [b] / V_V");
+
+const groupRule = (id) => ({ id, notation: `/${id}/ -> [${id}]`, note: "", enabled: true });
+const flatGrouping = {
+  allophony: [groupRule("a"), groupRule("b"), groupRule("c"), groupRule("d")],
+};
+equal("grouping adjacent rules succeeds", groupAllophonyRules(flatGrouping, ["b", "c"]), "ok");
+equal(
+  "grouping names the new group after the selected rules",
+  allophonyEntries(flatGrouping.allophony).map((entry) => [entry.number, entry.rule.id]),
+  [["1", "a"], ["2.1", "b"], ["2.2", "c"], ["3", "d"]]
+);
+equal(
+  "grouping keeps the flattened order",
+  allophonyRules(flatGrouping.allophony).map((rule) => rule.id),
+  ["a", "b", "c", "d"]
+);
+
+const splitGrouping = {
+  allophony: [groupRule("a"), groupRule("b"), groupRule("c")],
+};
+equal("a non-contiguous selection is refused", groupAllophonyRules(splitGrouping, ["a", "c"]), "noncontiguous");
+equal(
+  "a refused selection leaves the rules alone",
+  allophonyRules(splitGrouping.allophony).map((rule) => rule.id),
+  ["a", "b", "c"]
+);
+
+const existingGroup = {
+  allophony: [
+    {
+      id: "g",
+      type: "group",
+      name: "G",
+      collapsed: false,
+      enabled: true,
+      rules: [groupRule("a"), groupRule("b"), groupRule("c")],
+    },
+    groupRule("d"),
+  ],
+};
+equal("a selection from a group's middle is refused", groupAllophonyRules(existingGroup, ["b"]), "inside");
+equal(
+  "the refused middle selection leaves the group alone",
+  allophonyRules(existingGroup.allophony).map((rule) => rule.id),
+  ["a", "b", "c", "d"]
+);
+equal("a prefix of a group can move out", groupAllophonyRules(existingGroup, ["a", "b"]), "ok");
+equal(
+  "a prefix group stays in flattened order",
+  allophonyEntries(existingGroup.allophony).map((entry) => [entry.number, entry.rule.id]),
+  [["1.1", "a"], ["1.2", "b"], ["2.1", "c"], ["3", "d"]]
+);
+
+const suffixGrouping = {
+  allophony: [
+    {
+      id: "g1",
+      type: "group",
+      name: "First",
+      collapsed: false,
+      enabled: true,
+      rules: [groupRule("a"), groupRule("b")],
+    },
+    {
+      id: "g2",
+      type: "group",
+      name: "Second",
+      collapsed: false,
+      enabled: true,
+      rules: [groupRule("c"), groupRule("d")],
+    },
+  ],
+};
+equal("a suffix and the next group's prefix can be grouped", groupAllophonyRules(suffixGrouping, ["b", "c"]), "ok");
+equal(
+  "grouping across two groups preserves order and numbers",
+  allophonyEntries(suffixGrouping.allophony).map((entry) => [entry.number, entry.rule.id]),
+  [["1.1", "a"], ["2.1", "b"], ["2.2", "c"], ["3.1", "d"]]
+);
+
+const table = allophoneTable(allophonyProject, "child");
+equal(
+  "allophone table derives phoneme → surface rows",
+  table.rows.map((row) => [row.phoneme, row.allophone]),
+  [["k", "kʰ"], ["s", "z"]]
+);
+
+const parentOnlyProject = ensureProject({
+  title: "Parent allophony",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [{ id: "p1", notation: "/p/ > [f]", note: "", enabled: true }],
+      vocabulary: [],
+    },
+    { id: "child", name: "Child", parentId: "root", inventory, soundChanges: [], allophony: [], vocabulary: [] },
+  ],
+});
+equal("ancestor allophony affects its own surface", surfaceForForm("pata", parentOnlyProject, "root").text, "fata");
+equal(
+  "ancestor allophony never feeds historical derivation",
+  deriveForm("pata", parentOnlyProject, "child").text,
+  "pata"
+);
+equal(
+  "ancestor allophony never applies to a daughter's surface",
+  surfaceForForm("pata", parentOnlyProject, "child").text,
+  "pata"
+);
+
+const rootLanguage = parentOnlyProject.languages.find((item) => item.id === "root");
+const copied = createLanguage("Copy", "root", rootLanguage.inventory, rootLanguage.phonotactics, rootLanguage.allophony);
+equal("a daughter starts with a copy of the allophony list", copied.allophony.map((rule) => rule.notation), ["/p/ > [f]"]);
+copied.allophony[0].notation = "/p/ > [v]";
+equal("copied allophony rules are independent", rootLanguage.allophony[0].notation, "/p/ > [f]");
+
+const migratedNotation = ensureProject({
+  title: "Notation migration",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory: {
+        consonants: makeChart(["Plosive"], ["Bilabial"], [["Plosive", "Bilabial", ["/p/", "[b]"]]]),
+        vowels: makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]),
+      },
+      soundChanges: [],
+      allophony: [{ notation: "/p/ > [pʰ] / # _ V" }],
+      vocabulary: [
+        { gloss: "word", form: "/kasa/" },
+        { gloss: "phone", form: "[kʰasa]" },
+      ],
+    },
+  ],
+});
+equal(
+  "chart cell delimiters are stripped on load",
+  migratedNotation.languages[0].inventory.consonants.cells["r_Plosive|c_Bilabial"],
+  ["p", "b"]
+);
+equal(
+  "word form delimiters are stripped on load",
+  migratedNotation.languages[0].vocabulary.map((word) => word.form),
+  ["kasa", "kʰasa"]
+);
+equal(
+  "missing allophony fields are normalized",
+  migratedNotation.languages[0].allophony.map((rule) => ({
+    notation: rule.notation,
+    note: rule.note,
+    enabled: rule.enabled,
+  })),
+  [{ notation: "/p/ > [pʰ] / # _ V", note: "", enabled: true }]
+);
+truthy("migrated allophony rules receive an id", Boolean(migratedNotation.languages[0].allophony[0].id));
+
+/* ---- custom categories in rules ----------------------------------------- */
+
+const categoryProject = ensureProject({
+  title: "Categories",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      inventory,
+      phonotactics: {
+        classes: [{ name: "N", sounds: "m n" }],
+      },
+      soundChanges: [{ id: "n1", notation: "N > ∅ / _ #", note: "", enabled: true }],
+      allophony: [
+        { id: "c1", notation: "/N/ > [ɲ] / _ i", note: "", enabled: true },
+        { id: "c2", notation: "/a/ > [e] / _ N", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+
+const categoryContext = contextForLanguage(categoryProject, "child");
+const categoryInput = compileRule("N > ∅ / _ #", categoryContext);
+equal(
+  "a Phonotactics category matches its members in a sound change",
+  applyRule(categoryContext.tokenize("man"), categoryInput.rule, categoryContext).tokens.join(""),
+  "ma"
+);
+const categoryEnv = compileRule("a > e / _ N", categoryContext);
+equal(
+  "a category works in a sound-change environment",
+  applyRule(categoryContext.tokenize("an"), categoryEnv.rule, categoryContext).tokens.join(""),
+  "en"
+);
+const categorySet = compileRule("[N s] > z", categoryContext);
+equal(
+  "a category works inside a rule set",
+  applyRule(categoryContext.tokenize("mas"), categorySet.rule, categoryContext).tokens.join(""),
+  "zaz"
+);
+const escapedCategory = compileRule("\\N > x", categoryContext);
+equal(
+  "an escaped category name stays a literal sound",
+  applyRule(categoryContext.tokenize("N"), escapedCategory.rule, categoryContext).tokens.join(""),
+  "x"
+);
+const categoryOutput = compileRule("a > N", categoryContext);
+truthy("a category is rejected in the output", !categoryOutput.ok && /is a category/.test(categoryOutput.error));
+equal("a category works in allophony input", surfaceForForm("mi", categoryProject, "child").text, "ɲi");
+equal("a category works in an allophony environment", surfaceForForm("an", categoryProject, "child").text, "en");
+equal("category sound changes still feed derivation", deriveForm("man", categoryProject, "child").text, "ma");
+
+const brokenCategoryProject = ensureProject({
+  title: "Broken category",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      phonotactics: { classes: [{ name: "Q", sounds: "" }] },
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+const brokenCategory = compileRule("Q > x", contextForLanguage(brokenCategoryProject, "only"));
+truthy("a broken category keeps its error", !brokenCategory.ok && /no sounds/.test(brokenCategory.error));
+
 /* ---- report builder ------------------------------------------------------ */
 
 const markdown = buildMarkdown(project);
@@ -471,6 +918,21 @@ truthy(
   markdown.includes("### Child") && markdown.includes("#### Phonology"),
 );
 truthy("report includes the family sketch", markdown.includes("```") && markdown.includes("Root"));
+
+const allophonyMarkdown = buildMarkdown(allophonyProject);
+truthy("report formats lexical forms as phonemic", allophonyMarkdown.includes("/kasa/"));
+truthy(
+  "report includes an allophony section with surface forms",
+  allophonyMarkdown.includes("Allophony") && allophonyMarkdown.includes("Synchronic rules") && allophonyMarkdown.includes("kʰ")
+);
+truthy("report labels sound changes as diachronic", allophonyMarkdown.includes("Diachronic rules"));
+
+const allophonyHtml = buildHtml(allophonyProject);
+truthy(
+  "HTML report includes the allophony table",
+  allophonyHtml.includes("Allophony") && allophonyHtml.includes("[kʰ]")
+);
+truthy("HTML report formats lexical forms as phonemic", allophonyHtml.includes("/kasa/"));
 
 /* ---- summary ------------------------------------------------------------- */
 

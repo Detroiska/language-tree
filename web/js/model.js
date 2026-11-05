@@ -1,3 +1,5 @@
+import { stripLevelMarks } from "./notation.js";
+
 let fallbackCounter = 0;
 
 export function uid(prefix = "id") {
@@ -98,7 +100,7 @@ export function defaultPhonotactics() {
   };
 }
 
-export function createLanguage(name, parentId = null, template = null, phonotactics = null) {
+export function createLanguage(name, parentId = null, template = null, phonotactics = null, allophony = null) {
   return {
     id: uid("lang"),
     name: name.trim() || "Untitled language",
@@ -107,6 +109,9 @@ export function createLanguage(name, parentId = null, template = null, phonotact
     inventory: template ? deepClone(template) : defaultInventory(),
     phonotactics: phonotactics ? ensurePhonotactics(deepClone(phonotactics)) : defaultPhonotactics(),
     soundChanges: [],
+    // Allophony is synchronic grammar, not a historical change: it is copied
+    // to daughters like phonotactics, but it never enters the cognate chain.
+    allophony: allophony ? deepClone(allophony) : [],
     vocabulary: [],
     createdAt: new Date().toISOString(),
   };
@@ -171,7 +176,14 @@ function ensureChart(chart, fallbackFactory, kind) {
       delete base.cells[key];
       continue;
     }
-    const values = [...new Set(value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))];
+    const values = [
+      ...new Set(
+        value
+          .filter((item) => typeof item === "string" && item.trim())
+          .map((item) => stripLevelMarks(item))
+          .filter(Boolean)
+      ),
+    ];
     if (!values.length) {
       delete base.cells[key];
       continue;
@@ -187,6 +199,149 @@ function ensureChart(chart, fallbackFactory, kind) {
     if (merged.length) base.cells[targetKey] = merged;
   }
   return base;
+}
+
+export function isAllophonyGroup(item) {
+  return Boolean(item && typeof item === "object" && !Array.isArray(item) && item.type === "group");
+}
+
+function ensureAllophony(value) {
+  if (!Array.isArray(value)) return [];
+  const items = [];
+  const seen = new Set();
+  const uniqueId = (id, prefix) => {
+    let next = typeof id === "string" && id && !seen.has(id) ? id : uid(prefix);
+    while (seen.has(next)) next = uid(prefix);
+    seen.add(next);
+    return next;
+  };
+  const normalizeRule = (rule) => {
+    if (!rule || typeof rule !== "object" || Array.isArray(rule) || isAllophonyGroup(rule)) return null;
+    return {
+      id: uniqueId(rule.id, "allo"),
+      notation: typeof rule.notation === "string" ? rule.notation : "",
+      note: typeof rule.note === "string" ? rule.note : "",
+      enabled: rule.enabled !== false,
+    };
+  };
+  // Groups are one level deep. A malformed nested group is flattened into its
+  // parent rather than hiding its rules.
+  const collectRules = (entries, rules) => {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (isAllophonyGroup(entry)) {
+        collectRules(entry.rules, rules);
+        continue;
+      }
+      const rule = normalizeRule(entry);
+      if (rule) rules.push(rule);
+    }
+  };
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    if (!isAllophonyGroup(entry)) {
+      const rule = normalizeRule(entry);
+      if (rule) items.push(rule);
+      continue;
+    }
+    const rules = [];
+    collectRules(entry.rules, rules);
+    items.push({
+      id: uniqueId(entry.id, "allogroup"),
+      type: "group",
+      name: typeof entry.name === "string" ? entry.name : "",
+      collapsed: entry.collapsed === true,
+      enabled: entry.enabled !== false,
+      rules,
+    });
+  }
+  return items;
+}
+
+// Allophony is stored as an ordered list of rules and group containers. Groups
+// are visual organization only: entries() flattens them back into the exact
+// order the engine applies, while keeping the display number (2.1, 2.2, …).
+export function allophonyEntries(items) {
+  const entries = [];
+  let topIndex = 0;
+  for (const item of items || []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    topIndex += 1;
+    if (isAllophonyGroup(item)) {
+      const rules = Array.isArray(item.rules) ? item.rules : [];
+      let childIndex = 0;
+      for (const rule of rules) {
+        if (!rule || typeof rule !== "object" || Array.isArray(rule) || isAllophonyGroup(rule)) continue;
+        childIndex += 1;
+        entries.push({ rule, group: item, number: `${topIndex}.${childIndex}` });
+      }
+      continue;
+    }
+    entries.push({ rule: item, group: null, number: String(topIndex) });
+  }
+  return entries;
+}
+
+export function allophonyRules(items) {
+  return allophonyEntries(items).map((entry) => entry.rule);
+}
+
+// Move a consecutive run of rules into a new group. Returning a status instead
+// of a boolean lets the view explain why a selection cannot be grouped. A group
+// is a single container, so a run that starts or ends in the middle of an
+// existing group cannot be extracted without reordering the rules around it.
+export function groupAllophonyRules(language, selectedIds) {
+  const selected = new Set(selectedIds || []);
+  const items = language?.allophony || [];
+  const entries = allophonyEntries(items);
+  const positions = [];
+  entries.forEach((entry, index) => {
+    if (selected.has(entry.rule.id)) positions.push(index);
+  });
+  if (!positions.length) return "empty";
+  for (let index = 1; index < positions.length; index += 1) {
+    if (positions[index] !== positions[index - 1] + 1) return "noncontiguous";
+  }
+  const start = positions[0];
+  const selectedRules = positions.map((index) => entries[index].rule);
+
+  const remaining = [];
+  for (const item of items) {
+    if (isAllophonyGroup(item)) {
+      const rules = item.rules.filter((rule) => !selected.has(rule.id));
+      if (!rules.length) continue;
+      remaining.push(rules.length === item.rules.length ? item : { ...item, rules });
+    } else if (!selected.has(item.id)) {
+      remaining.push(item);
+    }
+  }
+
+  // Insert after as many remaining rules as came before the selected run. If
+  // that point falls inside a group, the run was taken from that group's
+  // middle: splitting the leftovers would be more surprising than refusing.
+  let insertAt = remaining.length;
+  let before = 0;
+  for (let index = 0; index < remaining.length; index += 1) {
+    if (before === start) {
+      insertAt = index;
+      break;
+    }
+    const item = remaining[index];
+    const count = isAllophonyGroup(item) ? item.rules.length : 1;
+    if (before + count > start) return "inside";
+    before += count;
+  }
+  if (insertAt === remaining.length && before < start) return "inside";
+
+  remaining.splice(insertAt, 0, {
+    id: uid("allogroup"),
+    type: "group",
+    name: "",
+    collapsed: false,
+    enabled: true,
+    rules: selectedRules,
+  });
+  language.allophony = remaining;
+  return "ok";
 }
 
 function ensurePhonotactics(value) {
@@ -265,13 +420,17 @@ export function ensureProject(raw) {
       if (rule.parentId && !topLevelRuleIds.has(rule.parentId)) rule.parentId = null;
     }
     language.soundChanges = normalizeRuleOrder(language.soundChanges);
+    language.allophony = ensureAllophony(language.allophony);
     language.vocabulary = Array.isArray(language.vocabulary)
       ? language.vocabulary
           .filter((entry) => entry && typeof entry === "object")
           .map((entry) => ({
             id: entry.id || uid("word"),
             gloss: typeof entry.gloss === "string" ? entry.gloss : "",
-            form: typeof entry.form === "string" ? entry.form : "",
+            // A form pasted as /kasa/ or [kʰasa] is still one lexical form.
+            // Keep the stored value bare so tokenizing and comparison stay
+            // level-agnostic; the UI adds the marks back for display.
+            form: typeof entry.form === "string" ? stripLevelMarks(entry.form) : "",
             note: typeof entry.note === "string" ? entry.note : "",
           }))
       : [];
@@ -375,7 +534,13 @@ export function setParent(project, languageId, parentId) {
 export function createAncestor(project, languageId, name) {
   const language = findLanguage(project, languageId);
   if (!language) return null;
-  const ancestor = createLanguage(name, language.parentId, language.inventory, language.phonotactics);
+  const ancestor = createLanguage(
+    name,
+    language.parentId,
+    language.inventory,
+    language.phonotactics,
+    language.allophony
+  );
   const index = project.languages.indexOf(language);
   project.languages.splice(index, 0, ancestor);
   language.parentId = ancestor.id;
@@ -387,7 +552,13 @@ export function createAncestor(project, languageId, name) {
 export function createSibling(project, languageId, name) {
   const language = findLanguage(project, languageId);
   if (!language) return null;
-  const sibling = createLanguage(name, language.parentId, language.inventory, language.phonotactics);
+  const sibling = createLanguage(
+    name,
+    language.parentId,
+    language.inventory,
+    language.phonotactics,
+    language.allophony
+  );
   const index = project.languages.indexOf(language);
   project.languages.splice(index + 1, 0, sibling);
   return sibling;
@@ -521,6 +692,7 @@ export function languageStats(language) {
     consonants: new Set(chartPhonemeList(language.inventory.consonants)).size,
     vowels: new Set(chartPhonemeList(language.inventory.vowels)).size,
     changes: language.soundChanges.length,
+    allophony: allophonyRules(language.allophony).length,
     words: language.vocabulary.length,
   };
 }
@@ -532,10 +704,11 @@ export function projectStats(project) {
       stats.consonants += item.consonants;
       stats.vowels += item.vowels;
       stats.changes += item.changes;
+      stats.allophony += item.allophony;
       stats.words += item.words;
       return stats;
     },
-    { languages: project.languages.length, consonants: 0, vowels: 0, changes: 0, words: 0 }
+    { languages: project.languages.length, consonants: 0, vowels: 0, changes: 0, allophony: 0, words: 0 }
   );
 }
 

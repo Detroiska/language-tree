@@ -1,5 +1,6 @@
-import { findLanguage, getLineage, uid } from "../model.js";
-import { compileChainFrom, deriveStages, ruleCompileErrors } from "../phonology.js";
+import { allophonyRules, findLanguage, getLineage, uid } from "../model.js";
+import { compileChainFrom, deriveStages, ruleCompileErrors, surfaceForForm } from "../phonology.js";
+import { formatPhonemic, formatPhonetic } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
 import { esc, icon, toast } from "../ui.js";
 
@@ -73,19 +74,26 @@ function buildRows(project, source) {
   return rows;
 }
 
-function deriveFor(row, sourceWord) {
+function deriveFor(row, sourceWord, project) {
   if (!row.descended || row.isSource || !row.chain.ok) {
+    const recorded = recordedFor(row.language, sourceWord.gloss);
+    const sourceForm = row.isSource ? sourceWord.form : recorded?.form || "";
+    const surface = sourceForm ? surfaceForForm(sourceForm, project, row.language.id) : null;
     return {
       derived: row.isSource ? sourceWord.form : "",
+      surface: surface?.errors.length ? "" : surface?.text || "",
       steps: [],
       error: "",
-      recorded: recordedFor(row.language, sourceWord.gloss),
+      recorded,
     };
   }
   const tokens = row.chain.context.tokenize(sourceWord.form);
   const result = deriveStages(tokens, row.chain.stages, row.chain.context);
+  const derived = result.tokens.join("");
+  const surface = result.errors.length ? null : surfaceForForm(derived, project, row.language.id);
   return {
-    derived: result.tokens.join(""),
+    derived,
+    surface: surface?.errors.length ? "" : surface?.text || "",
     steps: result.steps,
     error: row.errors[0] || result.errors[0] || "",
     recorded: recordedFor(row.language, sourceWord.gloss),
@@ -105,13 +113,18 @@ function statusFor(sourceWord, row, cell) {
     };
   }
   if (sameForm(cell.recorded.form, cell.derived)) {
-    return { kind: "match", label: "Matches", icon: "check", detail: `Rules predict ${cell.derived || "∅"}.` };
+    return {
+      kind: "match",
+      label: "Matches",
+      icon: "check",
+      detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"}.`,
+    };
   }
   return {
     kind: "differs",
     label: "Differs",
     icon: "warning",
-    detail: `Rules predict ${cell.derived || "∅"} · recorded ${cell.recorded.form || "∅"}.`,
+    detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"} · recorded ${formatPhonemic(cell.recorded.form) || "∅"}.`,
   };
 }
 
@@ -144,7 +157,7 @@ function languageOptionsMarkup(project, ordered, selectedId) {
 
 function wordOptionsMarkup(words, selectedId) {
   return words
-    .map((word) => `<option value="${esc(word.id)}" ${word.id === selectedId ? "selected" : ""}>${esc(word.gloss)} — ${esc(word.form)}</option>`)
+    .map((word) => `<option value="${esc(word.id)}" ${word.id === selectedId ? "selected" : ""}>${esc(word.gloss)} — ${esc(formatPhonemic(word.form))}</option>`)
     .join("");
 }
 
@@ -217,7 +230,7 @@ function matrixMarkup(source, words, targetRows, matrixCells) {
       return `
         <tr data-matrix-word="${esc(word.id)}">
           <td class="cognate-sticky matrix-gloss">${esc(word.gloss)}</td>
-          <td class="matrix-form-cell"><code class="ipa">${esc(word.form)}</code></td>
+          <td class="matrix-form-cell"><code class="ipa">${esc(formatPhonemic(word.form))}</code></td>
           ${cellStatuses
             .map((item) => `<td class="cognate-cell">${chipMarkup(item.status, { compact: true })}</td>`)
             .join("")}
@@ -257,13 +270,14 @@ function matrixMarkup(source, words, targetRows, matrixCells) {
     <p class="check-foot">Each chip compares the recorded form with the output of that language’s chain of rules from ${esc(source.name)}. Click a row to see the derivation step by step.${words.length ? "" : " No glosses are recorded in the source language yet."}</p>`;
 }
 
-function traceMarkup(source, word, rows) {
+function traceMarkup(project, source, word, rows) {
   const usable = rows.filter((row) => row.descended);
   const outside = rows.length - usable.length;
+  const showSurface = usable.some((row) => allophonyRules(row.language.allophony).length);
 
   const rowsMarkup = usable
     .map((row) => {
-      const cell = deriveFor(row, word);
+      const cell = deriveFor(row, word, project);
       const status = statusFor(word, row, cell);
       const disabled =
         row.isSource || status.kind === "match" || status.kind === "source" || status.kind === "error"
@@ -274,16 +288,17 @@ function traceMarkup(source, word, rows) {
         <tr${row.isSource ? ' class="is-source-row"' : ""}>
           <td class="cognate-lang"><span class="cognate-lang-name" style="--cognate-depth:${row.depth}">${esc(row.language.name)}</span></td>
           <td>${pathMarkup(row)}</td>
-          <td><code class="ipa derived-form">${esc(cell.derived) || "—"}</code></td>
-          <td>${cell.recorded && cell.recorded.form.trim() ? `<code class="ipa">${esc(cell.recorded.form)}</code>` : `<span class="muted">not recorded</span>`}</td>
+          <td><code class="ipa derived-form">${esc(formatPhonemic(cell.derived)) || "—"}</code></td>
+          ${showSurface ? `<td><code class="ipa surface-form">${esc(formatPhonetic(cell.surface)) || "—"}</code></td>` : ""}
+          <td>${cell.recorded && cell.recorded.form.trim() ? `<code class="ipa">${esc(formatPhonemic(cell.recorded.form))}</code>` : `<span class="muted">not recorded</span>`}</td>
           <td>${chipMarkup(status)}</td>
           <td class="row-actions">
             <button class="icon-button icon-button-small" type="button" data-toggle-steps="${esc(row.language.id)}" title="Show derivation steps" aria-label="Show derivation steps">${icon("chevronRight")}</button>
-            <button class="button button-quiet button-tiny" type="button" data-record-for="${esc(row.language.id)}" ${disabled} title="${row.isSource ? "Recorded in the source language" : `Record the derived form in ${esc(row.language.name)}`}">${recordLabel}</button>
+            <button class="button button-quiet button-tiny" type="button" data-record-for="${esc(row.language.id)}" ${disabled} title="${row.isSource ? "Recorded in the source language" : `Record the derived phonemic form in ${esc(row.language.name)}`}">${recordLabel}</button>
           </td>
         </tr>
         <tr class="cognate-detail" data-detail-row="${esc(row.language.id)}" hidden>
-          <td colspan="6">${stepsMarkup(cell)}</td>
+          <td colspan="${showSurface ? 7 : 6}">${stepsMarkup(cell)}</td>
         </tr>`;
     })
     .join("");
@@ -295,8 +310,9 @@ function traceMarkup(source, word, rows) {
           <tr>
             <th class="cognate-language-col">Language</th>
             <th>Chain</th>
-            <th>Derived</th>
-            <th>Recorded</th>
+            <th>Derived /…/</th>
+            ${showSurface ? "<th>Surface [ … ]</th>" : ""}
+            <th>Recorded /…/</th>
             <th>Status</th>
             <th class="row-actions-head"></th>
           </tr>
@@ -305,7 +321,7 @@ function traceMarkup(source, word, rows) {
       </table>
     </div>
     <p class="check-foot">
-      The derived form applies every language’s staged rules along the path below ${esc(source.name)}; a language’s own rules never apply again to its recorded forms.
+      The derived form applies every language’s staged sound changes along the path below ${esc(source.name)}; a language’s own rules never apply again to its recorded forms. Surface forms apply this language’s synchronic allophony afterwards, not as part of the chain.
       ${outside ? `${outside} language${outside === 1 ? "" : "s"} outside this line of descent ${outside === 1 ? "is" : "are"} not compared.` : ""}
       Record the derived form when a reflex is correct.
     </p>`;
@@ -341,7 +357,7 @@ export function renderCognates(container, ctx) {
     const traced = singleMode ? [word] : words;
     cellsByLanguage.set(
       row.language.id,
-      traced.map((entry) => ({ word: entry, ...deriveFor(row, entry) }))
+      traced.map((entry) => ({ word: entry, ...deriveFor(row, entry, project) }))
     );
   }
 
@@ -387,7 +403,7 @@ export function renderCognates(container, ctx) {
         </header>
         ${
           singleMode
-            ? traceMarkup(source, word, rows)
+            ? traceMarkup(project, source, word, rows)
             : words.length
               ? matrixMarkup(source, words, targetRows, matrixCells)
               : emptyWordsPanel(source)
@@ -455,7 +471,7 @@ export function renderCognates(container, ctx) {
       }
       ctx.touch({ label: "Record word" });
       ctx.refresh();
-      toast(`Recorded “${word.gloss}” as ${cell.derived || "∅"} in ${target.name}.`, { type: "success" });
+      toast(`Recorded “${word.gloss}” as ${formatPhonemic(cell.derived) || "∅"} in ${target.name}.`, { type: "success" });
     });
   });
 }

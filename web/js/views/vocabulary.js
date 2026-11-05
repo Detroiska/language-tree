@@ -1,6 +1,7 @@
-import { ancestorsOf, uid } from "../model.js";
+import { allophonyRules, ancestorsOf, uid } from "../model.js";
 import { applyWordList, copyWords, downloadWords, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
-import { deriveForm } from "../phonology.js";
+import { deriveForm, surfaceForForm } from "../phonology.js";
+import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
 import { createPhonotacticsChecker } from "../phonotactics.js";
 import { esc, icon, openModal, toast } from "../ui.js";
 
@@ -42,9 +43,18 @@ function checkCellMarkup(word, expected) {
   }
   if (!word.form.trim()) return `<span class="status-chip status-missing">${icon("info")}No form</span>`;
   if (sameForm(word.form, expected.derived)) {
-    return `<span class="status-chip status-match" title="Matches the derived form">${icon("check")}Matches</span>`;
+    return `<span class="status-chip status-match" title="Matches the derived phonemic form ${esc(formatPhonemic(expected.derived))}">${icon("check")}Matches</span>`;
   }
-  return `<span class="status-chip status-differs" title="Expected ${esc(expected.derived)}">${icon("warning")}Expected ${esc(expected.derived) || "∅"}</span>`;
+  return `<span class="status-chip status-differs" title="Expected ${esc(formatPhonemic(expected.derived))}">${icon("warning")}Expected ${esc(formatPhonemic(expected.derived)) || "∅"}</span>`;
+}
+
+function surfaceMarkup(form, ctx) {
+  if (!allophonyRules(ctx.language.allophony).length || !String(form || "").trim()) return "";
+  const result = surfaceForForm(form, ctx.project, ctx.language.id);
+  if (result.errors.length) {
+    return `<span class="surface-preview surface-error" title="${esc(result.errors[0])}">${icon("warning")}surface error</span>`;
+  }
+  return `<span class="surface-preview" title="Surface form after allophony">${esc(formatPhonetic(result.text))}</span>`;
 }
 
 function updateRowCheck(row, ctx, word, parent) {
@@ -129,7 +139,7 @@ function bulkPreviewMarkup(rows, language, mode) {
         <div class="bulk-row">
           <span class="status-chip ${meta.cls}">${meta.label}</span>
           <span class="bulk-row-gloss">${esc(row.gloss || "(no gloss)")}</span>
-          <code class="ipa bulk-row-form">${esc(row.form) || "∅"}</code>
+          <code class="ipa bulk-row-form">${esc(formatPhonemic(row.form)) || "∅"}</code>
           ${row.note ? `<span class="bulk-row-note">${esc(row.note)}</span>` : ""}
           <span class="bulk-row-reason" title="${esc(verdict.reason)}">${esc(verdict.reason)}</span>
         </div>`;
@@ -306,7 +316,12 @@ export function renderVocabulary(container, ctx) {
         <tr data-word-id="${esc(word.id)}">
           <td class="word-gloss"><input class="table-input gloss-input" data-word-field="gloss" value="${esc(word.gloss)}" placeholder="meaning" autocomplete="off" aria-label="Gloss"></td>
           <td class="word-form">
-            <input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form">
+            <span class="level-input-wrap">
+              <span class="level-mark" aria-hidden="true">/</span>
+              <input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form (phonemic)">
+              <span class="level-mark" aria-hidden="true">/</span>
+            </span>
+            <div class="surface-preview-wrap" data-surface-preview>${surfaceMarkup(word.form, ctx)}</div>
             <div class="word-issue-wrap" data-word-issue>${phonotacticIssueMarkup(result)}</div>
           </td>
           <td class="word-phonotactics" data-word-phonotactics>${phonotacticCellMarkup(result)}</td>
@@ -326,7 +341,7 @@ export function renderVocabulary(container, ctx) {
         <div>
           <p class="eyebrow">Lexicon</p>
           <h2>Vocabulary</h2>
-          <p class="section-copy">A small working list in IPA. ${hasParent ? `Forms are compared with the output of this language’s rules applied to ${esc(parent.name)} words with the same gloss.` : "Add words here; daughter languages can use them to test inherited forms."} Each form is also checked against the inventory and <a href="#/language/${language.id}/phonotactics">phonotactics</a>.</p>
+          <p class="section-copy">Lexical forms are phonemic, written <code>/…/</code>. ${hasParent ? `They are compared with the phonemic output of this language’s sound changes applied to ${esc(parent.name)} words with the same gloss.` : "Add words here; daughter languages can use them to test inherited forms."} Each form is checked against the inventory and <a href="#/language/${language.id}/phonotactics">phonotactics</a>; any surface allophones appear in <code>[ … ]</code> below the form.${allophonyRules(language.allophony).length ? "" : " Add synchronic rules in <a href=\"#/language/" + language.id + "/allophony\">Allophony</a> to see surface forms."}</p>
         </div>
         <div class="inventory-summary">
           <span><strong>${words.length}</strong> ${words.length === 1 ? "word" : "words"}</span>
@@ -365,7 +380,7 @@ export function renderVocabulary(container, ctx) {
                   <thead>
                     <tr>
                       <th class="gloss-col">Gloss</th>
-                      <th class="form-col">Form <span class="th-note">IPA</span></th>
+                      <th class="form-col">Form <span class="th-note">/phonemic/</span></th>
                       <th class="phonotactics-col">Phonotactics</th>
                       ${hasParent ? `<th class="check-col">Inherited check</th>` : ""}
                       <th>Note</th>
@@ -479,17 +494,25 @@ export function renderVocabulary(container, ctx) {
     row.querySelectorAll("[data-word-field]").forEach((input) => {
       input.addEventListener("input", () => {
         const field = input.dataset.wordField;
-        word[field] = input.value;
+        word[field] = field === "form" ? stripLevelMarks(input.value) : input.value;
         ctx.touch({ label: "Edit word" });
         if (field === "gloss" || field === "form") updateRowCheck(row, ctx, word, parent);
         if (field === "form") {
           const result = checker.validate(word.form);
           updateRowPhonotactics(row, result);
+          const surface = row.querySelector("[data-surface-preview]");
+          if (surface) surface.innerHTML = surfaceMarkup(word.form, ctx);
           const summary = container.querySelector("[data-phonotactics-summary]");
           if (summary) summary.textContent = validitySummary(words, checker);
         }
         applyFilters();
       });
+      if (input.dataset.wordField === "form") {
+        input.addEventListener("blur", () => {
+          const clean = stripLevelMarks(input.value);
+          if (clean !== input.value) input.value = clean;
+        });
+      }
       if (input.dataset.wordField === "gloss") {
         input.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {

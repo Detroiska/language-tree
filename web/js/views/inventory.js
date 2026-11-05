@@ -14,6 +14,8 @@ import {
   splitCellKey,
   uid,
 } from "../model.js";
+import { allophoneTable } from "../phonology.js";
+import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
 import { confirmDialog, esc, icon, openMenu, promptDialog, toast } from "../ui.js";
 
 function plural(value, singular, pluralForm = `${singular}s`) {
@@ -145,14 +147,22 @@ function tableMarkup(chart, kind) {
 }
 
 function splitPhonemes(value) {
-  return [...new Set(String(value || "").normalize("NFC").split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))];
+  return [
+    ...new Set(
+      String(value || "")
+        .normalize("NFC")
+        .split(/[\s,]+/)
+        .map((item) => stripLevelMarks(item))
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function updateChartCount(container, chart, kind) {
   const target = container.querySelector(`[data-chart-count="${kind}"]`);
   if (!target) return;
   const count = new Set(chartPhonemeList(chart)).size;
-  target.textContent = `${count} ${count === 1 ? "sound" : "sounds"}`;
+  target.textContent = `${count} ${count === 1 ? "phoneme" : "phonemes"}`;
 }
 
 function refreshCell(td, chart, values, container, kind) {
@@ -458,7 +468,7 @@ function chartPanel(ctx, chart, kind, title, subtitle) {
           <p>${subtitle}</p>
         </div>
         <div class="panel-actions">
-          <span class="count-pill" data-chart-count="${kind}">${count} ${count === 1 ? "sound" : "sounds"}</span>
+          <span class="count-pill" data-chart-count="${kind}">${count} ${count === 1 ? "phoneme" : "phonemes"}</span>
           <button class="button button-quiet button-small" type="button" data-add-axis="rows">${icon("plus")}Row</button>
           <button class="button button-quiet button-small" type="button" data-add-axis="columns">${icon("plus")}Column</button>
         </div>
@@ -467,9 +477,56 @@ function chartPanel(ctx, chart, kind, title, subtitle) {
       <div class="chart-notes">
         <label class="field">
           <span class="field-label">Chart notes <span class="field-optional">optional</span></span>
-          <textarea class="textarea textarea-small" rows="2" data-chart-notes="${kind}" placeholder="Allophony, marginal phonemes, orthographic notes…">${esc(chart.notes || "")}</textarea>
+          <textarea class="textarea textarea-small" rows="2" data-chart-notes="${kind}" placeholder="Marginal phonemes, orthographic notes, open questions…">${esc(chart.notes || "")}</textarea>
         </label>
       </div>
+    </section>`;
+}
+
+function allophonePanelMarkup(ctx) {
+  const table = allophoneTable(ctx.project, ctx.language.id);
+  if (!table.rows.length) {
+    return `
+      <section class="panel allophone-panel">
+        <header class="panel-head">
+          <div class="panel-title">
+            <h2>Allophones</h2>
+            <p>Surface variants that are not phonemes live here, not on the charts.</p>
+          </div>
+          <a class="button button-quiet button-small" href="#/language/${ctx.language.id}/allophony">${icon("sound")}Allophony rules</a>
+        </header>
+        <div class="panel-body">
+          <div class="inline-empty">${icon("info")}<span>No surface allophones are active yet. Add a synchronic rule in Allophony.</span><a class="text-button" href="#/language/${ctx.language.id}/allophony">Open Allophony</a></div>
+        </div>
+      </section>`;
+  }
+  const rows = table.rows
+    .map(
+      (row) => `
+        <tr>
+          <td><code class="ipa">${esc(formatPhonemic(row.phoneme))}</code></td>
+          <td><code class="ipa">${esc(formatPhonetic(row.allophone))}</code></td>
+          <td><code class="ipa">${esc(row.environment || "—")}</code></td>
+          <td><span class="muted">${esc(row.label)}</span> <code class="rule-inline">${esc(row.notation)}</code></td>
+        </tr>`
+    )
+    .join("");
+  return `
+    <section class="panel allophone-panel">
+      <header class="panel-head">
+        <div class="panel-title">
+          <h2>Allophones</h2>
+          <p>Surface variants produced by this language's allophony rules.</p>
+        </div>
+        <a class="button button-quiet button-small" href="#/language/${ctx.language.id}/allophony">${icon("sound")}Allophony rules</a>
+      </header>
+      <div class="table-scroll">
+        <table class="data-table allophone-table">
+          <thead><tr><th>Phoneme</th><th>Allophone</th><th>Environment</th><th>Rule</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="table-foot">The table is derived from the Allophony rules. The charts above list phonemes; these are the surface variants they produce.</p>
     </section>`;
 }
 
@@ -493,6 +550,7 @@ export function renderInventory(container, ctx) {
       </section>
       ${chartPanel(ctx, consonants, "consonants", "Consonants", "Manner of articulation × place of articulation")}
       ${chartPanel(ctx, vowels, "vowels", "Vowels", "Height × backness, with rounding as subcolumns")}
+      ${allophonePanelMarkup(ctx)}
     </div>
   `;
 

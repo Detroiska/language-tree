@@ -2,7 +2,7 @@
   "version": 1,
   "title": "Untitled language family",
   "createdAt": "2026-11-02T06:15:57Z",
-  "updatedAt": "2026-11-03T14:45:09Z",
+  "updatedAt": "2026-11-04T20:19:32Z",
   "languages": [
     {
       "id": "lang_4a601696-4ce1-4096-b253-1900abaaa860",
@@ -170,9 +170,6 @@
             "row_af542271-3d49-494e-8456-9519cc989b48|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
               "n"
             ],
-            "row_c1085234-7b16-402f-9b61-5ff7557f53fe|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
-              "l"
-            ],
             "row_d6e40dcf-d90b-4aca-8d8a-a1d86ac41e6c|col_e41e3adb-69e8-4548-aeb0-5954b2e9c3c5": [
               "t͡ʃ"
             ],
@@ -184,6 +181,9 @@
             ],
             "row_b1720754-e143-442f-b39f-42d9c063bf82|col_1a328d0e-52cc-4ba7-960a-32f518c726cf": [
               "ŋ͡g"
+            ],
+            "row_c1085234-7b16-402f-9b61-5ff7557f53fe|col_4b5f8678-9384-462b-b012-e4d9d9a23979": [
+              "l"
             ]
           },
           "notes": ""
@@ -294,14 +294,19 @@
       "phonotactics": {
         "template": "(C)V(C)",
         "onsets": "",
-        "codas": "",
+        "codas": "p, t, k, r, l, s, m, n, ŋ",
         "onsetsMode": "allowed",
-        "codasMode": "forbidden",
+        "codasMode": "allowed",
         "forbiddenOnsets": "",
-        "forbiddenCodas": "aspirated, h",
+        "forbiddenCodas": "",
         "forbidden": "",
         "notes": "",
-        "classes": []
+        "classes": [
+          {
+            "name": "PT",
+            "sounds": ""
+          }
+        ]
       },
       "soundChanges": [],
       "vocabulary": [
@@ -310,9 +315,104 @@
           "gloss": "blackberry",
           "form": "soŋ͡go",
           "note": ""
+        },
+        {
+          "id": "word_43063ed9-2966-46fd-83ba-69dcce385604",
+          "gloss": "axe",
+          "form": "t͡siːwer",
+          "note": ""
+        },
+        {
+          "id": "word_15d2dd92-0d2b-4fa4-9cc6-b58313d1b6a4",
+          "gloss": "",
+          "form": "akʰoːt",
+          "note": ""
+        },
+        {
+          "id": "word_c1357902-57c3-490d-b20c-6eb845ed220c",
+          "gloss": "",
+          "form": "apa",
+          "note": ""
+        },
+        {
+          "id": "word_d29c5541-f89d-49cf-9cfe-1f0561f44767",
+          "gloss": "I",
+          "form": "lia",
+          "note": ""
+        },
+        {
+          "id": "word_82bfe6b2-9d98-4b75-9c2a-1284cd3de872",
+          "gloss": "horse",
+          "form": "sakʰe",
+          "note": ""
         }
       ],
-      "createdAt": "2026-11-03T10:26:29.618Z"
+      "createdAt": "2026-11-03T10:26:29.618Z",
+      "allophony": [
+        {
+          "id": "allo_a0833d18-c410-477b-a251-9e7d9d26b2cb",
+          "notation": "∅ -> [ʔ] / V_V",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "allogroup_cfe1aba6-e2e1-40d5-972a-475c6f64aaa0",
+          "type": "group",
+          "name": "Intervocalic voicing",
+          "collapsed": true,
+          "enabled": true,
+          "rules": [
+            {
+              "id": "allo_341f965b-f500-4df3-9e1a-f7548ee156d5",
+              "notation": "/p/ -> [b] / V_V",
+              "note": "",
+              "enabled": true
+            },
+            {
+              "id": "allo_10d2b363-67f3-492c-a467-ff213e03b7c2",
+              "notation": "/t/ -> [d] / V_V",
+              "note": "",
+              "enabled": true
+            },
+            {
+              "id": "allo_0fd0bc97-1a17-4fde-a88a-e6248cccc63f",
+              "notation": "/k/ -> [g] / V_V",
+              "note": "",
+              "enabled": true
+            }
+          ]
+        },
+        {
+          "id": "allo_0cb92379-5090-4594-b51c-9e7f697fc2bc",
+          "notation": "/eː/ -> [eɪ̯] / _#",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "allo_2a191e64-e56f-4efd-af74-9237a23196f4",
+          "notation": "/oː/ -> [oʊ̯] / _#",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "allo_d193d5cc-e43a-46ea-9ad0-01f588955c17",
+          "notation": "/e/ -> [ɛ] / aspirated, h _",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "allo_cf7d5bb6-2746-45eb-88eb-6706d525f11d",
+          "notation": "/o/ -> [ɔ] / aspirated, h _",
+          "note": "",
+          "enabled": true
+        },
+        {
+          "id": "allo_c6ef7410-7e26-4b8e-b879-9d97509bcb14",
+          "notation": "/a/ -> [ɑ] / aspirated, h _",
+          "note": "",
+          "enabled": true
+        }
+      ]
     },
     {
       "id": "lang_ae5c0ecc-f672-47a8-90f3-7b7bef5302e7",
@@ -661,6 +761,18 @@
           "gloss": "blackberry",
           "form": "som͜bo",
           "note": "Derived from Pre-Proto-Macro-Meric."
+        },
+        {
+          "id": "word_728b6949-b6c7-4db9-bd30-eaf74e213d3b",
+          "gloss": "axe",
+          "form": "t͡siːwer",
+          "note": "Derived from Pre-Proto-Macro-Meric."
+        },
+        {
+          "id": "word_b2f6ee54-7ba3-4268-9a80-be9b5c0fe52e",
+          "gloss": "",
+          "form": "aːkʰot",
+          "note": ""
         }
       ],
       "createdAt": "2026-11-02T06:16:09.190Z",
@@ -675,7 +787,8 @@
         "forbidden": "",
         "notes": "",
         "classes": []
-      }
+      },
+      "allophony": []
     }
   ]
 }

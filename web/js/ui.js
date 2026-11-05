@@ -34,6 +34,7 @@ const paths = {
   external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5H5V5h5"/>',
   refresh: '<path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M18.4 9A7.5 7.5 0 0 0 5.8 6.2L4 8M5.6 15A7.5 7.5 0 0 0 18.2 17.8L20 16"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
+  keyboard: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 10.5h.01M10 10.5h.01M13 10.5h.01M16 10.5h.01M8.5 13.5h7"/>',
 };
 
 export function icon(name, className = "") {

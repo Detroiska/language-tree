@@ -14,6 +14,7 @@ import {
   toast,
 } from "./ui.js";
 import { createQuickSearch } from "./search.js";
+import { initPhonemeKeyboard } from "./keyboard.js";
 import { renderCognates } from "./views/cognates.js";
 import { renderLanguage } from "./views/language.js";
 import { renderTree } from "./views/tree.js";
@@ -30,7 +31,7 @@ const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
 const undoButton = document.getElementById("undo-button");
 const redoButton = document.getElementById("redo-button");
-const TAB_IDS = new Set(["overview", "phonology", "phonotactics", "changes", "vocabulary"]);
+const TAB_IDS = new Set(["overview", "phonology", "phonotactics", "changes", "allophony", "vocabulary"]);
 
 let currentRoute = null;
 let booted = false;
@@ -243,6 +244,12 @@ function applySearchFocus() {
   } else if (kind === "rule") {
     highlight = viewRoot.querySelector(`[data-rule-id="${CSS.escape(id)}"]`);
     element = highlight?.querySelector(".rule-input") || highlight;
+  } else if (kind === "allophony") {
+    highlight = viewRoot.querySelector(`[data-allo-rule-id="${CSS.escape(id)}"]`);
+    element = highlight?.querySelector(".rule-input") || highlight;
+  } else if (kind === "allophonyGroup") {
+    highlight = viewRoot.querySelector(`[data-allo-group-id="${CSS.escape(id)}"]`);
+    element = highlight?.querySelector("[data-allo-group-collapse]") || highlight;
   } else if (kind === "language") {
     highlight = viewRoot.querySelector(".language-title-row h1") || viewRoot.querySelector("h1");
     element = highlight;
@@ -398,6 +405,10 @@ async function init() {
 
   undoButton?.addEventListener("click", () => runHistoryStep(() => store.undo()));
   redoButton?.addEventListener("click", () => runHistoryStep(() => store.redo()));
+
+  // The phoneme keyboard wires its own global listeners (combo, focus
+  // tracking, floating affordance) and needs no per-view setup.
+  initPhonemeKeyboard();
 
   quickSearch = createQuickSearch({
     getProject: () => store.project,

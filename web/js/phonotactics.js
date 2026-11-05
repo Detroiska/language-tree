@@ -1,5 +1,10 @@
 import { contextForInventory, normalizeForm } from "./phonology.js";
+import { compileClasses } from "./categories.js";
 import { classForText, parseClassRef, normalizeLabelKey } from "./naturalclasses.js";
+
+// Categories are shared with the sound-change and allophony engines; the
+// compiler lives in categories.js so both sides can import it without a cycle.
+export { compileClasses, splitClassSounds } from "./categories.js";
 
 // A syllable template is a small regular expression over sounds:
 //   C, V        any charted consonant or vowel
@@ -18,120 +23,6 @@ const TEMPLATE_SYNTAX = new Set(["(", ")", "|", "?", "[", "]", "#", "*", "+"]);
 const REPEAT_QUANTIFIERS = new Set(["*", "+"]);
 
 class TemplateError extends Error {}
-
-/* ---- Custom sound categories ---------------------------------------------- */
-
-// Categories are named sound groups defined per language: N = nasals,
-// G = glides, OBS = obstruents, … Inside the template and forbidden
-// patterns a category letter matches one sound from its member list, so
-// subset relations come for free — C still matches a nasal in another
-// slot. A category's sound list may contain literal sounds, C or V (all
-// charted consonants or vowels), or another category's letter, so sets
-// can be composed (S = N L G).
-export function splitClassSounds(text) {
-  return String(text || "")
-    .split(/[\s,;]+/u)
-    .filter(Boolean);
-}
-
-export function compileClasses(rawEntries, context) {
-  const entries = (Array.isArray(rawEntries) ? rawEntries : []).map((entry) => {
-    const compiled = {
-      name: typeof entry?.name === "string" ? entry.name.trim() : "",
-      sounds: typeof entry?.sounds === "string" ? entry.sounds : "",
-      values: [],
-      notCharted: new Set(),
-      allVowels: false,
-      errors: [],
-      warnings: [],
-      resolved: false,
-    };
-    if (!compiled.name) compiled.errors.push("The category has no name yet.");
-    else if (!/^[A-Z]{1,6}$/u.test(compiled.name)) {
-      compiled.errors.push("Category names are 1–6 capital letters (like N, LIQ or OBS).");
-    } else if (compiled.name === "C" || compiled.name === "V") {
-      compiled.errors.push("C and V are built in: C is any charted consonant, V any charted vowel.");
-    }
-    return compiled;
-  });
-
-  const byName = new Map();
-  for (const entry of entries) {
-    if (entry.errors.length || !entry.name) continue;
-    if (byName.has(entry.name)) {
-      // A duplicate row is inert: it may not override the definition above
-      // it, and references resolve to the first occurrence.
-      entry.errors.push(`The name “${entry.name}” is already used by another category.`);
-      continue;
-    }
-    byName.set(entry.name, entry);
-  }
-
-  const resolve = (entry, visiting) => {
-    if (visiting.has(entry.name)) {
-      entry.errors.push("A category cannot include itself, directly or indirectly.");
-      entry.resolved = true;
-      entry.values = [];
-      return;
-    }
-    if (entry.resolved) return;
-    entry.resolved = true;
-    const next = new Set(visiting);
-    next.add(entry.name);
-    const values = [];
-    const notCharted = new Set();
-    for (const item of splitClassSounds(entry.sounds)) {
-      if (item === "C") {
-        values.push(...context.consonants);
-        continue;
-      }
-      if (item === "V") {
-        values.push(...context.vowels);
-        continue;
-      }
-      const other = byName.get(item);
-      if (other) {
-        resolve(other, next);
-        values.push(...other.values);
-        continue;
-      }
-      const classRef = classForText(item, context.classIndex);
-      if (classRef && !classRef.ok) {
-        entry.errors.push(classRef.error);
-        continue;
-      }
-      if (classRef) {
-        // A chart-derived reference: its members come straight from the
-        // phonology table and update with it.
-        values.push(...classRef.members);
-        continue;
-      }
-      if (/^[A-Z]{1,6}$/u.test(item)) {
-        entry.warnings.push(`“${item}” is not a defined category letter here; it is read as a literal sound.`);
-      }
-      for (const token of context.tokenize(item)) {
-        values.push(token);
-        if (!context.vowels.has(token) && !context.consonants.has(token)) notCharted.add(token);
-      }
-    }
-    entry.values = [...new Set(values)];
-    entry.notCharted = notCharted;
-    entry.allVowels = entry.values.length > 0 && entry.values.every((value) => context.isVowel(value));
-    if (!entry.values.length && !entry.errors.length) entry.errors.push("The category has no sounds yet.");
-    if (notCharted.size) {
-      entry.warnings.push(`Not in the chart: ${[...notCharted].map((sound) => `“${sound}”`).join(", ")}.`);
-    }
-  };
-
-  for (const entry of byName.values()) resolve(entry, new Set());
-
-  const map = new Map();
-  for (const entry of byName.values()) {
-    if (!entry.errors.length) map.set(entry.name, entry);
-  }
-  const names = [...map.keys()].sort((a, b) => b.length - a.length || a.localeCompare(b));
-  return { entries, map, names };
-}
 
 // A category used inside a pattern becomes a set atom so every matcher can
 // treat categories, brackets, and sets uniformly.

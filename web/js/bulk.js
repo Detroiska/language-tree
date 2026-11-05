@@ -1,4 +1,5 @@
 import { uid } from "./model.js";
+import { formatPhonemic, stripLevelMarks } from "./notation.js";
 import { toast } from "./ui.js";
 
 // Bulk word import/export: the paste-and-go side door for spreadsheets and
@@ -60,7 +61,7 @@ function detectDelimiter(text) {
 
 function rowFromJsonEntry(entry, index) {
   const gloss = String(entry.gloss ?? entry.meaning ?? "").trim();
-  const form = String(entry.form ?? entry.ipa ?? "").trim();
+  const form = stripLevelMarks(entry.form ?? entry.ipa ?? "");
   const note = String(entry.note ?? "").trim();
   return { gloss, form, note, index, warning: "" };
 }
@@ -118,7 +119,7 @@ export function parseWordList(text) {
     if (!line.trim()) return;
     const cells = splitDelimited(line, delimiter);
     const gloss = cells[0] || "";
-    const form = cells[1] || "";
+    const form = stripLevelMarks(cells[1] || "");
     const note = cells.slice(2).join(" ");
     if (!gloss && !form) return; // stray separators
     rows.push({

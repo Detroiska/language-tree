@@ -21,6 +21,7 @@ import {
   promptDialog,
   toast,
 } from "../ui.js";
+import { renderAllophony } from "./allophony.js";
 import { renderInventory } from "./inventory.js";
 import { renderPhonotactics } from "./phonotactics.js";
 import { renderChanges } from "./soundchanges.js";
@@ -29,6 +30,7 @@ import { renderVocabulary } from "./vocabulary.js";
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "phonology", label: "Phonology" },
+  { id: "allophony", label: "Allophony" },
   { id: "phonotactics", label: "Phonotactics" },
   { id: "changes", label: "Sound changes" },
   { id: "vocabulary", label: "Vocabulary" },
@@ -63,7 +65,13 @@ async function addDaughter(ctx) {
     help: "Its chart is copied from this language. Sound changes and vocabulary start empty.",
   });
   if (!name) return;
-  const child = createLanguage(name, ctx.language.id, ctx.language.inventory, ctx.language.phonotactics);
+  const child = createLanguage(
+    name,
+    ctx.language.id,
+    ctx.language.inventory,
+    ctx.language.phonotactics,
+    ctx.language.allophony
+  );
   ctx.project.languages.push(child);
   ctx.touch({ label: `Add language ${child.name}` });
   ctx.refresh();
@@ -197,7 +205,9 @@ function languageHeader(ctx, activeTab) {
                 ? `<span class="tab-count">${stats.consonants + stats.vowels}</span>`
                 : tab.id === "changes"
                   ? `<span class="tab-count">${stats.changes}</span>`
-                  : tab.id === "vocabulary"
+                  : tab.id === "allophony"
+                    ? `<span class="tab-count">${stats.allophony}</span>`
+                    : tab.id === "vocabulary"
                     ? `<span class="tab-count">${stats.words}</span>`
                     : ""
             }
@@ -404,6 +414,7 @@ export function renderLanguage(container, ctx, tabValue) {
   if (activeTab === "phonology") renderInventory(content, ctx);
   else if (activeTab === "phonotactics") renderPhonotactics(content, ctx);
   else if (activeTab === "changes") renderChanges(content, ctx);
+  else if (activeTab === "allophony") renderAllophony(content, ctx);
   else if (activeTab === "vocabulary") renderVocabulary(content, ctx);
   else renderOverview(content, ctx);
 }

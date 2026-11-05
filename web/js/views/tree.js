@@ -123,7 +123,13 @@ async function addChild(ctx, language) {
     help: "Its chart and syllable template start as a copy of the ancestor’s. Sound changes and words start empty.",
   });
   if (!name) return;
-  const child = createLanguage(name, language.id, language.inventory, language.phonotactics);
+  const child = createLanguage(
+    name,
+    language.id,
+    language.inventory,
+    language.phonotactics,
+    language.allophony
+  );
   ctx.project.languages.push(child);
   ctx.touch({ label: `Add language ${child.name}` });
   ctx.refresh();

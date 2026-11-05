@@ -1,4 +1,5 @@
 import {
+  allophonyRules,
   ancestorsOf,
   getLineage,
   languageStats,
@@ -11,7 +12,9 @@ import {
   contextForLanguage,
   deriveForm,
   deriveStages,
+  surfaceForForm,
 } from "../phonology.js";
+import { formatPhonemic, formatPhonetic } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
 import { esc, icon, toast } from "../ui.js";
 
@@ -24,11 +27,15 @@ function directDerivation(ctx, form) {
   const { context, groups } = compileDirect(ctx);
   const tokens = context.tokenize(form);
   const result = deriveStages(tokens, [{ language: ctx.language, groups }], context);
+  const phonemic = result.tokens.join("");
+  const surface = result.errors.length ? null : surfaceForForm(phonemic, ctx.project, ctx.language.id);
   return {
     inputTokens: tokens,
     outputTokens: result.tokens,
     steps: result.steps,
-    text: result.tokens.join(""),
+    text: phonemic,
+    surface: surface?.errors.length ? null : surface?.text || "",
+    surfaceError: surface?.errors[0] || "",
     errors: result.errors,
     fatal: result.fatal,
   };
@@ -172,8 +179,12 @@ function testPanelMarkup(ctx) {
             </div>
             <div class="derivation" data-derivation>
               <div class="derivation-output-row">
-                <span class="derivation-label">Output</span>
+                <span class="derivation-label">Phonemic</span>
                 <output class="derivation-output ipa" data-test-output>—</output>
+              </div>
+              <div class="derivation-output-row" data-test-surface-row ${allophonyRules(ctx.language.allophony).length ? "" : "hidden"}>
+                <span class="derivation-label">Surface</span>
+                <output class="derivation-output ipa allo-surface-output" data-test-surface>—</output>
               </div>
               <div class="derivation-parsed" data-test-parsed></div>
               <div class="derivation-steps" data-test-steps></div>
@@ -209,17 +220,20 @@ function notationHelpMarkup() {
           <li><code>k &gt; tʃ / _ i</code><span>Palatalize k before i.</span></li>
           <li><code>[td] &gt; ∅ / _ #</code><span>Delete t or d word-finally.</span></li>
           <li><code>[back] &gt; ∅ / _ #</code><span>Delete final back vowels — a chart class instead of a sound list.</span></li>
+          <li><code>N &gt; ∅ / _ #</code><span>Delete a final member of the N category — categories come from Phonotactics.</span></li>
           <li><code>C &gt; ∅ / _ C</code><span>Delete a consonant before another consonant.</span></li>
+          <li><code>∅ &gt; ʔ / V _ V</code><span>Insert a glottal stop between vowels.</span></li>
         </ul>
         <dl class="help-terms">
           <div><dt>V, C</dt><dd>Any vowel or consonant in the language’s inventory.</dd></div>
           <div><dt>[…]</dt><dd>A set of sounds; <code>[^…]</code> negates it. Items may be sounds, categories, or chart classes as separate words.</dd></div>
+          <div><dt>N, G, …</dt><dd>A category defined in this language’s Phonotactics tab, such as <code>N</code> for nasals. It stands for its member sounds in the input and environment, including inside sets like <code>[N s]</code>.</dd></div>
           <div><dt>plosive.plain</dt><dd>A chart class: dotted labels read straight from the Phonology charts, on their own or inside sets. A sound belongs when every label applies on each axis that has it — write <code>back</code>, <code>V.back</code>, or dotted paths like <code>plosive.velar</code>; pin via <code>V.</code> / <code>C.</code>.</dd></div>
           <div><dt>#</dt><dd>Word boundary in an environment.</dd></div>
           <div><dt>_</dt><dd>Marks where the input sits in the environment.</dd></div>
-          <div><dt>∅, 0</dt><dd>Deletion.</dd></div>
+          <div><dt>∅, 0</dt><dd>Zero: deletion on the output side, insertion on the input side.</dd></div>
         </dl>
-        <p class="help-foot">Top-level rules are all checked against the form inherited from the parent, so their order does not change whether they apply. Dotted rules run after that pass, in order, against the changed form. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry.</p>
+        <p class="help-foot">Top-level rules are all checked against the form inherited from the parent, so their order does not change whether they apply. Dotted rules run after that pass, in order, against the changed form. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry. Categories are read from this language’s Phonotactics tab.</p>
       </div>
     </details>`;
 }
@@ -272,9 +286,11 @@ function checkRows(ctx) {
         : sameForm(recorded.form, derived.text)
           ? "match"
           : "differs";
+    const surface = derived.error ? null : surfaceForForm(derived.text, ctx.project, ctx.language.id);
     return {
       word,
       derived: derived.error ? "" : derived.text,
+      surface: surface?.errors.length ? "" : surface?.text || "",
       recorded,
       status,
       error: derived.error,
@@ -295,7 +311,7 @@ function checkRows(ctx) {
     <div class="check-table-wrap">
       <table class="data-table check-table">
         <thead>
-          <tr><th>Gloss</th><th>${esc(parent.name)}</th><th>Derived here</th><th>${esc(ctx.language.name)}</th><th>Status</th><th></th></tr>
+          <tr><th>Gloss</th><th>${esc(parent.name)}</th><th>Derived /…/</th>${allophonyRules(ctx.language.allophony).length ? "<th>Surface [ … ]</th>" : ""}<th>${esc(ctx.language.name)}</th><th>Status</th><th></th></tr>
         </thead>
         <tbody>
           ${rows
@@ -303,9 +319,10 @@ function checkRows(ctx) {
               (row) => `
                 <tr>
                   <td class="gloss-cell">${esc(row.word.gloss)}</td>
-                  <td><code class="ipa">${esc(row.word.form)}</code></td>
-                  <td><code class="ipa derived-form">${esc(row.derived) || "—"}</code></td>
-                  <td>${row.recorded ? `<code class="ipa">${esc(row.recorded.form) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
+                  <td><code class="ipa">${esc(formatPhonemic(row.word.form))}</code></td>
+                  <td><code class="ipa derived-form">${esc(formatPhonemic(row.derived)) || "—"}</code></td>
+                  ${allophonyRules(ctx.language.allophony).length ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
+                  <td>${row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
                   <td>
                     <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
                       ${row.status === "match" ? icon("check") : row.status === "differs" || row.status === "error" ? icon("warning") : icon("info")}
@@ -393,9 +410,20 @@ export function renderChanges(container, ctx) {
     if (!testPanel || !testInput) return;
     const result = directDerivation(ctx, testInput.value);
     const output = testPanel.querySelector("[data-test-output]");
+    const surface = testPanel.querySelector("[data-test-surface]");
+    const surfaceRow = testPanel.querySelector("[data-test-surface-row]");
     const parsed = testPanel.querySelector("[data-test-parsed]");
     const steps = testPanel.querySelector("[data-test-steps]");
-    output.textContent = result.fatal ? "—" : result.text || "—";
+    output.textContent = result.fatal ? "—" : formatPhonemic(result.text) || "—";
+    if (surface && surfaceRow) {
+      const showSurface = allophonyRules(language.allophony).length > 0;
+      surfaceRow.hidden = !showSurface;
+      surface.textContent = showSurface
+        ? result.surfaceError
+          ? "surface error"
+          : formatPhonetic(result.surface) || "—"
+        : "—";
+    }
     parsed.innerHTML = result.inputTokens.length
       ? `<span>Read as</span> ${result.inputTokens.map((token) => `<code>${esc(token)}</code>`).join(" ")}`
       : `<span>Type a form to test.</span>`;

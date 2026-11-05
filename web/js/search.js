@@ -1,14 +1,16 @@
-import { getLineage, ruleNumberMap } from "./model.js";
+import { allophonyEntries, getLineage, ruleNumberMap } from "./model.js";
+import { formatPhonemic, stripLevelMarks } from "./notation.js";
 import { esc, icon } from "./ui.js";
 
 // The command palette: Ctrl+K opens a searchable index of the whole project —
 // languages (by name and by lineage path), words (gloss, form, note), sound
-// changes (notation, note), plus the two global views. Results jump straight
-// to the matching tab and highlight the hit.
+// changes (notation, note), allophony rules, plus the two global views.
+// Results jump straight to the matching tab and highlight the hit.
 const TYPE_META = {
   language: { label: "Language", icon: "language" },
   word: { label: "Word", icon: "book" },
   rule: { label: "Rule", icon: "sound" },
+  allophony: { label: "Allophony", icon: "sound" },
   view: { label: "View", icon: "tree" },
 };
 
@@ -52,7 +54,7 @@ function indexEntries(project) {
         id: word.id,
         languageId: language.id,
         title: word.gloss || "(no gloss)",
-        subtitle: `${word.form || "∅"} · ${language.name}`,
+        subtitle: `${formatPhonemic(word.form) || "∅"} · ${language.name}`,
         searchText: `${word.gloss} ${word.form} ${word.note} ${language.name}`,
         hash: `#/language/${encodeURIComponent(language.id)}/vocabulary`,
         focus: { kind: "word", id: word.id },
@@ -72,6 +74,25 @@ function indexEntries(project) {
         focus: { kind: "rule", id: rule.id },
       });
     });
+
+    for (const entry of allophonyEntries(language.allophony)) {
+      const rule = entry.rule;
+      const groupName = entry.group?.name?.trim() || "";
+      entries.push({
+        type: "allophony",
+        id: rule.id,
+        languageId: language.id,
+        title: rule.notation.trim() || "Empty allophony rule",
+        subtitle: `${language.name} · allophony ${entry.number}${groupName ? ` · ${groupName}` : ""}${rule.enabled === false || entry.group?.enabled === false ? " · off" : ""}`,
+        searchText: `${rule.notation} ${rule.note} ${groupName} ${language.name} allophony synchronic surface`,
+        hash: `#/language/${encodeURIComponent(language.id)}/allophony`,
+        // A rule inside a collapsed group has no card in the DOM. Reveal the
+        // group header instead so the hit is always visible.
+        focus: entry.group?.collapsed
+          ? { kind: "allophonyGroup", id: entry.group.id }
+          : { kind: "allophony", id: rule.id },
+      });
+    }
   }
   return entries;
 }
@@ -88,7 +109,7 @@ function scoreEntry(entry, query) {
   return 1 + Math.min(at / 50, 0.9);
 }
 
-const TYPE_ORDER = { view: 0, language: 1, word: 2, rule: 3 };
+const TYPE_ORDER = { view: 0, language: 1, word: 2, rule: 3, allophony: 4 };
 
 function rankedEntries(entries, query) {
   const scored = [];
@@ -180,7 +201,7 @@ export function createQuickSearch({ getProject, openResult }) {
   function refresh() {
     const project = getProject();
     if (!project) return;
-    const query = input.value.trim().toLowerCase();
+    const query = stripLevelMarks(input.value.trim()).toLowerCase();
     const entries = indexEntries(project);
     // With no query the palette is a jump list: the global views plus every
     // language. Typed queries search the whole index.
@@ -188,9 +209,10 @@ export function createQuickSearch({ getProject, openResult }) {
 
     const words = entries.filter((entry) => entry.type === "word").length;
     const rules = entries.filter((entry) => entry.type === "rule").length;
+    const allophony = entries.filter((entry) => entry.type === "allophony").length;
     summary.textContent = query
-      ? `${results.length} result${results.length === 1 ? "" : "s"} · ${project.languages.length} languages · ${words} words · ${rules} rules indexed`
-      : `${project.languages.length} languages · ${words} words · ${rules} rules indexed`;
+      ? `${results.length} result${results.length === 1 ? "" : "s"} · ${project.languages.length} languages · ${words} words · ${rules} sound changes · ${allophony} allophony indexed`
+      : `${project.languages.length} languages · ${words} words · ${rules} sound changes · ${allophony} allophony indexed`;
 
     active = 0;
     if (!results.length) {
