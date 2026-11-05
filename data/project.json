@@ -2,7 +2,7 @@
   "version": 1,
   "title": "Untitled language family",
   "createdAt": "2026-11-02T06:15:57Z",
-  "updatedAt": "2026-11-04T20:19:32Z",
+  "updatedAt": "2026-11-05T18:12:43Z",
   "languages": [
     {
       "id": "lang_4a601696-4ce1-4096-b253-1900abaaa860",
@@ -306,7 +306,8 @@
             "name": "PT",
             "sounds": ""
           }
-        ]
+        ],
+        "stress": "none"
       },
       "soundChanges": [],
       "vocabulary": [
@@ -344,6 +345,18 @@
           "id": "word_82bfe6b2-9d98-4b75-9c2a-1284cd3de872",
           "gloss": "horse",
           "form": "sakʰe",
+          "note": ""
+        },
+        {
+          "id": "word_ba978c67-a038-4a95-90dc-e9ea6697cdb8",
+          "gloss": "you (sg.)",
+          "form": "n͜da",
+          "note": ""
+        },
+        {
+          "id": "word_98938df6-7d9f-435e-99fc-37187a42bfb7",
+          "gloss": "you (pl.)",
+          "form": "raː",
           "note": ""
         }
       ],
@@ -412,7 +425,8 @@
           "note": "",
           "enabled": true
         }
-      ]
+      ],
+      "featureOverrides": {}
     },
     {
       "id": "lang_ae5c0ecc-f672-47a8-90f3-7b7bef5302e7",
@@ -786,9 +800,11 @@
         "forbiddenCodas": "",
         "forbidden": "",
         "notes": "",
-        "classes": []
+        "classes": [],
+        "stress": "none"
       },
-      "allophony": []
+      "allophony": [],
+      "featureOverrides": {}
     }
   ]
 }

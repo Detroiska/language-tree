@@ -14,6 +14,16 @@ export function stripLevelMarks(value) {
   return text;
 }
 
+// Stress marks are properties of the syllable, so comparisons ignore them even
+// when a user keeps them in a stored form for presentation.
+export function stripStressMarks(value) {
+  return String(value ?? "").replace(/[ˈˌ]/gu, "");
+}
+
+export function normalizeForm(value) {
+  return String(value || "").normalize("NFC");
+}
+
 export function formatPhonemic(value) {
   const text = stripLevelMarks(value);
   return text ? `/${text}/` : "";

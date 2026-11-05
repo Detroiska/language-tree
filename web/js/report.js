@@ -9,7 +9,8 @@ import {
   rootLanguages,
   ruleNumberMap,
 } from "./model.js";
-import { allophoneTable, surfaceForForm } from "./phonology.js";
+import { allophoneTable, hasSurfaceDisplay, surfaceForForm } from "./phonology.js";
+import { stressLabel } from "./prosody.js";
 import { describeBundle } from "./features.js";
 import { formatPhonemic, formatPhonetic } from "./notation.js";
 import { esc, openMenu, toast } from "./ui.js";
@@ -123,6 +124,7 @@ function phonotacticsRows(language) {
   };
   const p = language.phonotactics || {};
   push("Syllable template", p.template);
+  if (p.stress && p.stress !== "none") push("Stress", stressLabel(p.stress));
   for (const category of Array.isArray(p.classes) ? p.classes : []) {
     const name = typeof category?.name === "string" ? category.name.trim() : "";
     const sounds = typeof category?.sounds === "string" ? category.sounds.trim() : "";
@@ -145,7 +147,7 @@ function featureOverrideRows(language) {
 
 function surfaceOf(project, language, form) {
   const result = surfaceForForm(form, project, language.id);
-  return result.errors.length ? "" : result.text;
+  return result.errors.length ? "" : result.display;
 }
 
 function allophonyRows(project, language) {
@@ -158,7 +160,7 @@ function allophonyRows(project, language) {
 }
 
 function vocabularyTable(project, language) {
-  const hasSurface = allophonyRules(language.allophony).length > 0;
+  const hasSurface = hasSurfaceDisplay(language);
   return {
     headers: hasSurface ? ["Gloss", "Form", "Surface", "Note"] : ["Gloss", "Form", "Note"],
     rows: language.vocabulary.map((word) => {

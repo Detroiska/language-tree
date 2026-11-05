@@ -1,5 +1,6 @@
 import { stripLevelMarks } from "./notation.js";
 import { normalizeFeatureOverrides } from "./features.js";
+import { normalizeStressSystem } from "./prosody.js";
 
 let fallbackCounter = 0;
 
@@ -98,6 +99,7 @@ export function defaultPhonotactics() {
     forbidden: "",
     notes: "",
     classes: [],
+    stress: "none",
   };
 }
 
@@ -217,6 +219,24 @@ export function isAllophonyGroup(item) {
   return Boolean(item && typeof item === "object" && !Array.isArray(item) && item.type === "group");
 }
 
+// Allophony rules are single-pass and adjacency-based unless they opt in.
+// "iterative" repeats the rule until the form stops changing (bounded below),
+// and "domain" widens environment matching beyond the touching segments:
+// "word" may skip across the whole word, "syllable" only within the target's
+// syllable. Both are opt-in so existing rules keep their exact behavior.
+export const ALLOPHONY_REPEAT_LIMIT = 12;
+export const ALLOPHONY_DOMAINS = ["adjacent", "syllable", "word"];
+
+export function normalizeAllophonyDomain(value) {
+  return ALLOPHONY_DOMAINS.includes(value) ? value : "adjacent";
+}
+
+export function normalizeAllophonyRepeatLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return ALLOPHONY_REPEAT_LIMIT;
+  return Math.min(100, Math.max(1, Math.round(parsed)));
+}
+
 function ensureAllophony(value) {
   if (!Array.isArray(value)) return [];
   const items = [];
@@ -234,6 +254,9 @@ function ensureAllophony(value) {
       notation: typeof rule.notation === "string" ? rule.notation : "",
       note: typeof rule.note === "string" ? rule.note : "",
       enabled: rule.enabled !== false,
+      iterative: rule.iterative === true,
+      repeatLimit: normalizeAllophonyRepeatLimit(rule.repeatLimit),
+      domain: normalizeAllophonyDomain(rule.domain),
     };
   };
   // Groups are one level deep. A malformed nested group is flattened into its
@@ -382,6 +405,7 @@ function ensurePhonotactics(value) {
             sounds: typeof entry.sounds === "string" ? entry.sounds : "",
           }))
       : [],
+    stress: normalizeStressSystem(base.stress),
   };
 }
 

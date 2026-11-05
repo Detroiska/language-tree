@@ -1,9 +1,12 @@
 import {
+  ALLOPHONY_REPEAT_LIMIT,
   allophonyEntries,
   allophonyRules,
   ancestorsOf,
   groupAllophonyRules,
   isAllophonyGroup,
+  normalizeAllophonyDomain,
+  normalizeAllophonyRepeatLimit,
   uid,
 } from "../model.js";
 import {
@@ -36,6 +39,9 @@ function statusMarkup(status) {
 
 function ruleCardMarkup(rule, number, context, { canMoveUp, canMoveDown, groupDisabled = false }) {
   const disabled = rule.enabled === false || groupDisabled;
+  const iterative = rule.iterative === true;
+  const repeatLimit = normalizeAllophonyRepeatLimit(rule.repeatLimit);
+  const domain = normalizeAllophonyDomain(rule.domain);
   const status =
     rule.enabled === false
       ? { kind: "off", label: "Disabled" }
@@ -51,6 +57,24 @@ function ruleCardMarkup(rule, number, context, { canMoveUp, canMoveDown, groupDi
           <span class="rule-status status-${status.kind}" data-allo-rule-status title="${esc(status.label)}">${statusMarkup(status)}</span>
         </div>
         <input class="rule-note-input" type="text" value="${esc(rule.note)}" placeholder="Optional description, e.g. aspiration in onset" autocomplete="off" aria-label="Allophony rule note">
+        <div class="rule-options">
+          <label class="rule-option" title="Apply this rule repeatedly until the form stops changing">
+            <input type="checkbox" data-allo-rule-iterative ${iterative ? "checked" : ""}>
+            <span>Repeat until stable</span>
+          </label>
+          <label class="rule-option" title="Let the environment skip intervening segments. “Adjacent” keeps the usual touching-segment match.">
+            <span class="rule-option-label">Domain</span>
+            <select class="rule-domain-select" data-allo-rule-domain aria-label="Allophony environment domain">
+              <option value="adjacent" ${domain === "adjacent" ? "selected" : ""}>Adjacent</option>
+              <option value="syllable" ${domain === "syllable" ? "selected" : ""}>Within syllable</option>
+              <option value="word" ${domain === "word" ? "selected" : ""}>Across word</option>
+            </select>
+          </label>
+          <label class="rule-option" title="Maximum number of passes before the rule stops and warns">
+            <span class="rule-option-label">Limit</span>
+            <input class="rule-limit-input" type="number" data-allo-rule-limit min="1" max="100" step="1" value="${repeatLimit}" aria-label="Maximum allophony passes" ${iterative ? "" : "disabled"}>
+          </label>
+        </div>
       </div>
       <div class="rule-controls">
         <label class="rule-select" title="Select rule">
@@ -233,6 +257,7 @@ function notationHelpMarkup() {
           <li><code>/p/ &gt; [+spread_glottis] / # _ V</code><span>Aspirate p word-initially. The result is pʰ even when pʰ is not on the phoneme chart.</span></li>
           <li><code>/n/ &gt; [αplace] / _ [αplace]</code><span>Copy the following place: n becomes ŋ before k, ɲ before c, and so on.</span></li>
           <li><code>/V/ &gt; [αround] / [αround] _</code><span>Spread rounding from the preceding vowel.</span></li>
+          <li><code>/a/ &gt; [u] / u _</code><span>With <strong>Repeat until stable</strong>, spread u through later vowels. Set <strong>Domain</strong> to <em>Across word</em> to skip intervening consonants, or <em>Within syllable</em> to keep the trigger in the target's syllable.</span></li>
         </ul>
         <dl class="help-terms">
           <div><dt>/…/</dt><dd>A phonemic input: a sound from the language's inventory (or a class, category, feature bundle, or set of them).</dd></div>
@@ -245,8 +270,10 @@ function notationHelpMarkup() {
           <div><dt>#</dt><dd>Word boundary in an environment.</dd></div>
           <div><dt>_</dt><dd>Marks where the input sits in the environment.</dd></div>
           <div><dt>∅, 0</dt><dd>Zero: deletion on the output side, insertion on the input side.</dd></div>
+          <div><dt>Repeat until stable</dt><dd>Apply the rule again to its own output until a pass changes nothing. The default cap is 12 passes; a rule that is still changing at the cap stops there and reports a runaway warning.</dd></div>
+          <div><dt>Domain</dt><dd><em>Adjacent</em> matches only touching segments. <em>Across word</em> lets each environment atom match across intervening segments anywhere in the word; <em>Within syllable</em> does the same but stops at the target's syllable edges. Domains are most useful with repeating harmony rules.</dd></div>
         </dl>
-        <p class="help-foot">Precedence inside brackets is literal sound, then category, then chart class, then feature bundle. Feature changes are deltas: they resolve against the current generation’s chart first, then fall back to a synthesized surface symbol from the curated IPA table and its documented diacritics. If neither can spell the result, the rule stops and the derivation reports the nearest charted candidates. An α-variable copies one feature, not the whole segment, and an α-rule is total: if a trigger binds a value the target cannot realize, the derivation stops — restrict the trigger set when that can happen. Rules run in list order, each exactly once. Groups are visual only: <strong>Group rules</strong> selects adjacent rules, <strong>Group selected</strong> wraps them in a numbered container (2.1, 2.2, …), and the engine still applies every rule in the same flattened order. A group switch turns off its rules together without changing their individual switches. Allophony is synchronic: it applies to this language's recorded phonemic forms and is not part of the historical derivation or the cognate chain. It is copied to a daughter as a starting grammar, just like the inventory and phonotactics. Categories are read from this language's Phonotactics tab.</p>
+        <p class="help-foot">Precedence inside brackets is literal sound, then category, then chart class, then feature bundle. Feature changes are deltas: they resolve against the current generation’s chart first, then fall back to a synthesized surface symbol from the curated IPA table and its documented diacritics. If neither can spell the result, the rule stops and the derivation reports the nearest charted candidates. An α-variable copies one feature, not the whole segment, and an α-rule is total: if a trigger binds a value the target cannot realize, the derivation stops — restrict the trigger set when that can happen. Rules run in list order; each applies once unless <strong>Repeat until stable</strong> is on, in which case it runs to a fixed point and the tester shows how many passes it took. A repeat rule that still changes the form at its limit stops and warns instead of looping forever. <strong>Domain</strong> controls whether the environment may skip segments: adjacent only by default, or across the word / within the target's syllable when selected. Groups are visual only: <strong>Group rules</strong> selects adjacent rules, <strong>Group selected</strong> wraps them in a numbered container (2.1, 2.2, …), and the engine still applies every rule in the same flattened order. A group switch turns off its rules together without changing their individual switches. Allophony is synchronic: it applies to this language's recorded phonemic forms and is not part of the historical derivation or the cognate chain. It is copied to a daughter as a starting grammar, just like the inventory and phonotactics. Categories are read from this language's Phonotactics tab.</p>
       </div>
     </details>`;
 }
@@ -269,15 +296,27 @@ function allophonyStepsMarkup(steps) {
           </div>`;
       }
       return `
-        <div class="derivation-step is-changed">
+        <div class="derivation-step is-changed ${step.warning ? "has-warning" : ""}">
           <span class="step-index">${esc(step.label)}</span>
           <div class="step-body">
-            <div class="step-rule"><code>${esc(step.rule?.notation || "")}</code></div>
+            <div class="step-rule">
+              <code>${esc(step.rule?.notation || "")}</code>
+              ${
+                step.iterative && step.passes
+                  ? `<span class="step-badge">${esc(`${step.passes} ${step.passes === 1 ? "pass" : "passes"}`)}</span>`
+                  : ""
+              }
+            </div>
             <div class="step-form">
               <code class="ipa">${esc(formatPhonemic(step.before.join("")))}</code>
               <span class="step-arrow">→</span>
               <code class="ipa">${esc(formatPhonetic(step.after.join("")))}</code>
             </div>
+            ${
+              step.warning
+                ? `<div class="step-warning">${icon("warning")}<span>${esc(step.warning)}</span></div>`
+                : ""
+            }
           </div>
         </div>`;
     })
@@ -311,7 +350,7 @@ export function renderAllophony(container, ctx) {
             <header class="panel-head">
               <div class="panel-title">
                 <h2>Rules</h2>
-                <p>Applied in list order; groups are organizational only.</p>
+                <p>Applied in list order; each runs once unless it repeats. Groups are organizational only.</p>
               </div>
               <div class="panel-actions">
                 <button class="button button-quiet button-small" type="button" data-allo-select-mode>${icon("check")}Group rules</button>
@@ -357,7 +396,7 @@ export function renderAllophony(container, ctx) {
     const parsed = testPanel.querySelector("[data-allo-parsed]");
     const steps = testPanel.querySelector("[data-allo-steps]");
     const inputText = result.input.join("");
-    const outputText = result.errors.length ? "" : result.text;
+    const outputText = result.errors.length ? "" : result.display;
     if (phonemic) phonemic.textContent = inputText ? formatPhonemic(inputText) : "—";
     if (surface) surface.textContent = outputText ? formatPhonetic(outputText) : "—";
     if (parsed) {
@@ -460,7 +499,15 @@ export function renderAllophony(container, ctx) {
 
   container.querySelectorAll("[data-add-allo-rule]").forEach((button) => {
     button.addEventListener("click", () => {
-      const rule = { id: uid("allo"), notation: "", note: "", enabled: true };
+      const rule = {
+        id: uid("allo"),
+        notation: "",
+        note: "",
+        enabled: true,
+        iterative: false,
+        repeatLimit: ALLOPHONY_REPEAT_LIMIT,
+        domain: "adjacent",
+      };
       language.allophony.push(rule);
       ctx.touch({ label: "Add allophony rule" });
       ctx.refresh();
@@ -493,7 +540,15 @@ export function renderAllophony(container, ctx) {
 
     card.querySelectorAll("[data-allo-group-add]").forEach((button) => {
       button.addEventListener("click", () => {
-        const rule = { id: uid("allo"), notation: "", note: "", enabled: true };
+        const rule = {
+          id: uid("allo"),
+          notation: "",
+          note: "",
+          enabled: true,
+          iterative: false,
+          repeatLimit: ALLOPHONY_REPEAT_LIMIT,
+          domain: "adjacent",
+        };
         group.rules.push(rule);
         group.collapsed = false;
         ctx.touch({ label: "Add allophony rule" });
@@ -588,6 +643,9 @@ export function renderAllophony(container, ctx) {
     const toggle = card.querySelector("[data-allo-rule-toggle]");
     const status = card.querySelector("[data-allo-rule-status]");
     const selector = card.querySelector("[data-allo-rule-select]");
+    const iterativeInput = card.querySelector("[data-allo-rule-iterative]");
+    const domainInput = card.querySelector("[data-allo-rule-domain]");
+    const limitInput = card.querySelector("[data-allo-rule-limit]");
 
     selector?.addEventListener("change", () => {
       if (selector.checked) selectedRules.add(rule.id);
@@ -610,6 +668,26 @@ export function renderAllophony(container, ctx) {
     note.addEventListener("input", () => {
       rule.note = note.value;
       ctx.touch({ label: "Edit allophony note" });
+    });
+    iterativeInput?.addEventListener("change", () => {
+      rule.iterative = iterativeInput.checked;
+      if (limitInput) limitInput.disabled = !iterativeInput.checked;
+      ctx.touch({
+        label: rule.iterative ? "Repeat allophony until stable" : "Apply allophony once",
+      });
+      runTest();
+    });
+    domainInput?.addEventListener("change", () => {
+      rule.domain = normalizeAllophonyDomain(domainInput.value);
+      ctx.touch({ label: "Change allophony domain" });
+      runTest();
+      refreshTable();
+    });
+    limitInput?.addEventListener("change", () => {
+      rule.repeatLimit = normalizeAllophonyRepeatLimit(limitInput.value);
+      limitInput.value = String(rule.repeatLimit);
+      ctx.touch({ label: "Change allophony pass limit" });
+      runTest();
     });
     toggle.addEventListener("change", () => {
       rule.enabled = toggle.checked;

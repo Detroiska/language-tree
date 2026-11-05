@@ -3,12 +3,16 @@ import {
   allophonyRules,
   chartPhonemeList,
   getLineage,
+  normalizeAllophonyDomain,
+  normalizeAllophonyRepeatLimit,
   ruleGroups,
   ruleNumberMap,
 } from "./model.js";
 import { compileClasses } from "./categories.js";
 import { buildClassIndex, classForText } from "./naturalclasses.js";
-import { stripLevelMarks } from "./notation.js";
+import { normalizeForm, stripLevelMarks } from "./notation.js";
+import { compilePhonotactics, syllabifyTokens } from "./phonotactics.js";
+import { prosodyFallback, prosodyFromSyllables, normalizeStressSystem } from "./prosody.js";
 import {
   applyFeatureTerms,
   classifyFeatureWords,
@@ -40,10 +44,6 @@ function stripMarks(text) {
 function firstBase(text) {
   const stripped = stripMarks(text);
   return Array.from(stripped)[0] || "";
-}
-
-function normalizeForm(text) {
-  return String(text || "").normalize("NFC");
 }
 
 // Combining marks belong to the segment before them. A tie bar also pulls in
@@ -82,9 +82,18 @@ export class SegmentContext {
     featurePhonemes = [],
     featureOverrides = null,
     allowSyntheticOutputs = false,
+    stressSystem = "none",
+    phonotactics = null,
   } = {}) {
     this.vowels = new Set(vowels);
     this.consonants = new Set(consonants);
+    // Stress is assigned from this language's grammar rather than stored as a
+    // segment. `phonotactics` supplies the syllable template used to place it;
+    // the compiled forms are cached on first use.
+    this.stressSystem = normalizeStressSystem(stressSystem);
+    this.phonotactics = phonotactics;
+    this._compiledPhonotactics = undefined;
+    this._prosodyCache = new Map();
     // Chart-derived natural classes ( labeled hierarchies from the phonology
     // tables): a reference like plosive.plain or V.back expands against
     // these. Kept per-language or per-lineage by the context builders.
@@ -146,12 +155,25 @@ export class SegmentContext {
     return !this.isVowel(token);
   }
 
-  tokenize(text) {
+  // Stress marks belong to the syllable that follows them. They are never
+  // tokens: `ˈkasa` still has four segments, and comparisons, alignment, and
+  // phonotactics see `k a s a`. `stress[i]` records the mark on token i so the
+  // rule engine can condition on it.
+  tokenizeWithStress(text) {
     const source = normalizeForm(text);
     const tokens = [];
+    const stress = [];
+    let pending = "";
+    let explicit = false;
     let index = 0;
     while (index < source.length) {
       const char = source[index];
+      if (char === "ˈ" || char === "ˌ") {
+        pending = char;
+        explicit = true;
+        index += 1;
+        continue;
+      }
       if (/\s/.test(char) || char === "." || char === "-" || char === "·") {
         index += 1;
         continue;
@@ -169,19 +191,60 @@ export class SegmentContext {
         // than letting the combining mark begin a token of its own.
         const end = absorbSegmentEnd(source, index + match.length, TIE_BARS.has(source[index + match.length - 1]));
         tokens.push(source.slice(index, end));
+        stress.push(pending);
+        pending = "";
         index = end;
         continue;
       }
 
       const end = absorbSegmentEnd(source, index + char.length, TIE_BARS.has(char));
       tokens.push(source.slice(index, end));
+      stress.push(pending);
+      pending = "";
       index = end;
     }
-    return tokens;
+    return { tokens, stress, explicit };
+  }
+
+  tokenize(text) {
+    return this.tokenizeWithStress(text).tokens;
+  }
+
+  compiledPhonotactics() {
+    if (this._compiledPhonotactics === undefined) {
+      this._compiledPhonotactics = this.phonotactics
+        ? compilePhonotactics(this.phonotactics, this)
+        : null;
+    }
+    return this._compiledPhonotactics;
+  }
+
+  // Stress and syllable boundaries for a token list. The language's own
+  // template is used when it parses the word; otherwise a maximal-onset
+  // fallback still gives a useful preview. Results are cached because the
+  // same form is often tested by several rules in a row.
+  prosodyFor(tokens) {
+    const key = tokens.join("\u0000");
+    const cached = this._prosodyCache.get(key);
+    if (cached) return cached;
+
+    let prosody = null;
+    const compiled = this.compiledPhonotactics();
+    if (compiled?.ok) {
+      const parse = syllabifyTokens(tokens, compiled.shapes, this);
+      if (parse.ok) {
+        prosody = prosodyFromSyllables(tokens, parse.syllables, this.stressSystem);
+      }
+    }
+    if (!prosody) {
+      prosody = prosodyFallback(tokens, (token) => this.isVowel(token), this.stressSystem);
+    }
+    this._prosodyCache.set(key, prosody);
+    return prosody;
   }
 }
 
-export function contextForInventory(inventory, featureOverrides = null) {
+export function contextForInventory(inventory, featureOverrides = null, { stress = "none" } = {}) {
   const known = new Set();
   const vowels = new Set();
   const consonants = new Set();
@@ -210,6 +273,7 @@ export function contextForInventory(inventory, featureOverrides = null) {
     chart,
     featurePhonemes: chart,
     featureOverrides,
+    stressSystem: stress,
   });
 }
 
@@ -298,6 +362,8 @@ function buildLanguageContext(
     featurePhonemes,
     featureOverrides,
     allowSyntheticOutputs,
+    stressSystem: language?.phonotactics?.stress,
+    phonotactics: language?.phonotactics || null,
   });
 }
 
@@ -416,11 +482,29 @@ export function compileAllophonyRules(rules, context) {
       group: entry.group,
       groupDisabled: entry.group?.enabled === false,
     };
+    const options = {
+      iterative: rule.iterative === true,
+      repeatLimit: normalizeAllophonyRepeatLimit(rule.repeatLimit),
+      domain: normalizeAllophonyDomain(rule.domain),
+    };
     // Keep the stored rule (id, note, enabled) alongside the compiled target
     // and replacement. compileRule's successful result has its own `rule`
     // object, so merging in the stored fields is what preserves `enabled`.
-    if (!result.ok) return { ...result, ...meta, rule };
-    return { ...result, ...meta, rule: { ...result.rule, ...rule, source: rule.notation } };
+    if (!result.ok) return { ...result, ...meta, ...options, rule };
+    return {
+      ...result,
+      ...meta,
+      ...options,
+      rule: {
+        ...result.rule,
+        ...rule,
+        ...options,
+        // A widened domain needs progress records even when the notation
+        // itself has no stress or syllable atom.
+        needsProsody: result.rule.needsProsody || options.domain !== "adjacent",
+        source: rule.notation,
+      },
+    };
   });
 }
 
@@ -428,6 +512,7 @@ export function applyAllophony(tokens, compiledRules, context) {
   let current = [...tokens];
   const steps = [];
   const errors = [];
+  const warnings = [];
   for (const [index, compiled] of (compiledRules || []).entries()) {
     if (compiled.rule?.enabled === false || compiled.groupDisabled) continue;
     const label = compiled.number || String(index + 1);
@@ -445,35 +530,85 @@ export function applyAllophony(tokens, compiledRules, context) {
       });
       continue;
     }
-    const result = applyRule(current, compiled.rule, context);
-    if (result.error) {
-      errors.push(result.error);
+
+    const iterative = compiled.iterative === true;
+    const repeatLimit = normalizeAllophonyRepeatLimit(compiled.repeatLimit);
+    const maxPasses = iterative ? repeatLimit : 1;
+    const before = [...current];
+    let after = before;
+    let changed = false;
+    let passes = 0;
+    let failure = "";
+
+    for (let pass = 0; pass < maxPasses; pass += 1) {
+      const result = applyRule(after, compiled.rule, context);
+      if (result.error) {
+        failure = result.error;
+        break;
+      }
+      if (!result.changed) break;
+      changed = true;
+      after = result.tokens;
+      passes += 1;
+    }
+
+    if (failure) {
+      errors.push(failure);
       steps.push({
         kind: "allophony-error",
         label,
         rule: compiled.rule,
         compiled,
-        error: result.error,
-        before: [...current],
-        after: [...current],
+        error: failure,
+        before,
+        after: before,
         changed: false,
       });
       // A failed feature resolution is a hard stop: continuing would derive
       // a surface form from a rule that cannot be interpreted.
       break;
     }
+
+    // The cap is a safety valve, not a convergence claim. Probe once more so a
+    // rule that is still changing after the last allowed pass is reported as
+    // runaway instead of looking finished.
+    let runaway = false;
+    if (iterative && changed) {
+      const probe = applyRule(after, compiled.rule, context);
+      runaway = !probe.error && probe.changed;
+    }
+    let warning = "";
+    if (runaway) {
+      warning = `Stopped after ${repeatLimit} passes, but the rule still changes the form. It may never converge; raise the pass limit or narrow the rule.`;
+      warnings.push(warning);
+    }
+
     steps.push({
       kind: "allophony",
       label,
       rule: compiled.rule,
       compiled,
-      before: [...current],
-      after: [...result.tokens],
-      changed: result.changed,
+      before,
+      after,
+      changed,
+      iterative,
+      passes,
+      runaway,
+      warning,
     });
-    current = result.tokens;
+    current = after;
   }
-  return { tokens: current, steps, errors, text: current.join("") };
+  return { tokens: current, steps, errors, warnings, text: current.join("") };
+}
+
+// Surface notation is useful when there is something to show: allophony
+// output, predicted stress, or both. Views use this to decide whether a
+// surface column appears at all.
+export function hasSurfaceDisplay(language) {
+  return (
+    allophonyRules(language?.allophony || []).length > 0 ||
+    normalizeStressSystem(language?.phonotactics?.stress) !== "none"
+  );
 }
 
 // Surface form of a phonemic form in the current language. The input is the
@@ -485,12 +620,21 @@ export function surfaceForForm(form, project, languageId) {
   const compiled = compileAllophonyRules(language?.allophony || [], context);
   const input = context.tokenize(stripLevelMarks(form));
   const result = applyAllophony(input, compiled, context);
+  // Surface display adds the language's predicted stress and syllable dots.
+  // Keeping it separate from `text` means every existing comparison and export
+  // still sees the plain token string.
+  const prosody = context.prosodyFor(result.tokens);
   return {
     ...result,
     input,
     context,
     compiled,
     language,
+    display: prosody.display,
+    syllables: prosody.syllables,
+    stress: prosody.stress,
+    stressIndex: prosody.stressIndex,
+    boundaries: prosody.boundaries,
   };
 }
 
@@ -567,6 +711,11 @@ function chunksOf(text) {
     }
     if (char === "#") {
       chunks.push("#");
+      index += 1;
+      continue;
+    }
+    if (char === "ˈ" || char === "ˌ") {
+      chunks.push(char);
       index += 1;
       continue;
     }
@@ -664,6 +813,7 @@ function parsePattern(text, context, options = {}) {
     allowClass = true,
     allowSet = true,
     allowVariables = true,
+    allowProsody = false,
     role = "pattern",
   } = options;
   const chunks = chunksOf(text);
@@ -711,6 +861,26 @@ function parsePattern(text, context, options = {}) {
   };
 
   for (const chunk of chunks) {
+    if (chunk === "ˈ" || chunk === "ˌ") {
+      if (!allowProsody) {
+        return {
+          ok: false,
+          error: "Stress marks (ˈ, ˌ) only work in the environment, after “/”.",
+        };
+      }
+      pattern.push({ type: "stress", value: chunk });
+      continue;
+    }
+    if (chunk === "." || chunk === "σ") {
+      if (!allowProsody) {
+        return {
+          ok: false,
+          error: "Syllable edges (. or σ) only work in the environment, after “/”.",
+        };
+      }
+      pattern.push({ type: "syllable" });
+      continue;
+    }
     if (chunk === "#") {
       if (!allowBoundary) return { ok: false, error: "A word boundary (#) is only valid in the environment." };
       pattern.push({ type: "boundary", value: "#" });
@@ -818,35 +988,103 @@ function matchTarget(tokens, start, pattern, context) {
   return bindings;
 }
 
-function matchesLeft(tokens, index, pattern, context, bindings) {
+function matchesLeft(
+  tokens,
+  index,
+  pattern,
+  context,
+  bindings,
+  prosody = null,
+  domain = "adjacent",
+  limit = null
+) {
   let cursor = index;
   let next = { ...bindings };
+  const floor = limit === null ? 0 : Math.max(0, limit);
   for (let offset = pattern.length - 1; offset >= 0; offset -= 1) {
     const item = pattern[offset];
     if (item.type === "boundary") {
       if (cursor !== 0) return null;
       continue;
     }
-    if (cursor <= 0) return null;
-    next = tokenMatcher(item, tokens[cursor - 1], context, next);
-    if (!next) return null;
-    cursor -= 1;
+    if (item.type === "stress") {
+      if (!prosody || prosody.stress[cursor] !== item.value) return null;
+      continue;
+    }
+    if (item.type === "syllable") {
+      if (!prosody || !prosody.boundaries.has(cursor)) return null;
+      continue;
+    }
+    if (cursor <= floor) return null;
+    if (domain === "adjacent") {
+      next = tokenMatcher(item, tokens[cursor - 1], context, next);
+      if (!next) return null;
+      cursor -= 1;
+      continue;
+    }
+    // A widened domain lets the environment skip segments instead of
+    // requiring the very next one. Each atom still has to occur in order, so
+    // [αround] V _ requires a matching segment before the target, nearest
+    // first, and V then has to be further left again.
+    let found = -1;
+    for (let scan = cursor - 1; scan >= floor; scan -= 1) {
+      const matched = tokenMatcher(item, tokens[scan], context, next);
+      if (matched) {
+        found = scan;
+        next = matched;
+        break;
+      }
+    }
+    if (found === -1) return null;
+    cursor = found;
   }
   return next;
 }
 
-function matchesRight(tokens, index, pattern, context, bindings) {
+function matchesRight(
+  tokens,
+  index,
+  pattern,
+  context,
+  bindings,
+  prosody = null,
+  domain = "adjacent",
+  limit = null
+) {
   let cursor = index;
   let next = { ...bindings };
+  const ceiling = limit === null ? tokens.length : Math.min(tokens.length, limit);
   for (const item of pattern) {
     if (item.type === "boundary") {
       if (cursor !== tokens.length) return null;
       continue;
     }
-    if (cursor >= tokens.length) return null;
-    next = tokenMatcher(item, tokens[cursor], context, next);
-    if (!next) return null;
-    cursor += 1;
+    if (item.type === "stress") {
+      if (!prosody || prosody.stress[cursor] !== item.value) return null;
+      continue;
+    }
+    if (item.type === "syllable") {
+      if (!prosody || !prosody.boundaries.has(cursor)) return null;
+      continue;
+    }
+    if (cursor >= ceiling) return null;
+    if (domain === "adjacent") {
+      next = tokenMatcher(item, tokens[cursor], context, next);
+      if (!next) return null;
+      cursor += 1;
+      continue;
+    }
+    let found = -1;
+    for (let scan = cursor; scan < ceiling; scan += 1) {
+      const matched = tokenMatcher(item, tokens[scan], context, next);
+      if (matched) {
+        found = scan;
+        next = matched;
+        break;
+      }
+    }
+    if (found === -1) return null;
+    cursor = found + 1;
   }
   return next;
 }
@@ -943,13 +1181,13 @@ export function compileRule(notation, context) {
   if (environment) {
     const [leftText, rightText] = environment.split("_");
     if (leftText.trim()) {
-      const parsedLeft = parsePattern(leftText, context, { allowBoundary: true, allowClass: true, role: "left environment" });
+      const parsedLeft = parsePattern(leftText, context, { allowBoundary: true, allowClass: true, allowProsody: true, role: "left environment" });
       if (!parsedLeft.ok) return parsedLeft;
       left = parsedLeft.pattern;
       warnings.push(...(parsedLeft.warnings || []));
     }
     if (rightText.trim()) {
-      const parsedRight = parsePattern(rightText, context, { allowBoundary: true, allowClass: true, role: "right environment" });
+      const parsedRight = parsePattern(rightText, context, { allowBoundary: true, allowClass: true, allowProsody: true, role: "right environment" });
       if (!parsedRight.ok) return parsedRight;
       right = parsedRight.pattern;
       warnings.push(...(parsedRight.warnings || []));
@@ -1044,6 +1282,16 @@ export function compileRule(notation, context) {
     }
   }
 
+  // Stress marks are inert when the language has no stress system. Warn once
+  // instead of letting the rule look valid but never match.
+  if (left.some((atom) => atom.type === "stress") || right.some((atom) => atom.type === "stress")) {
+    if ((context.stressSystem || "none") === "none") {
+      warnings.push(
+        "This language has no stress system, so stress marks (ˈ, ˌ) cannot match. Choose one in Phonotactics → Stress."
+      );
+    }
+  }
+
   // A literal sound that no chart in the context can produce can never match
   // a charted form, so the rule would sit valid-but-inert. `known` is the
   // tokenizer's alphabet: chart phonemes plus their bases plus the surface
@@ -1094,12 +1342,42 @@ export function compileRule(notation, context) {
       left,
       right,
       environment: environment ? environment.trim() : "",
+      needsProsody: [...target.pattern, ...left, ...right].some(
+        (atom) => atom.type === "stress" || atom.type === "syllable"
+      ),
     },
   };
 }
 
+// Bounds of the syllable that contains a match. Insertions sit between
+// segments, so prefer the syllable beginning at that point, then the one
+// ending there. Returns null when the word has no syllable covering the match,
+// in which case the caller falls back to the whole word.
+function syllableBoundsAt(start, end, prosody) {
+  const syllables = prosody?.syllables || [];
+  let record = syllables.find((syllable) => start >= syllable.start && start < syllable.end);
+  if (!record && start === end) {
+    record =
+      syllables.find((syllable) => syllable.start === start) ||
+      syllables.find((syllable) => syllable.end === start);
+  }
+  return record ? { start: record.start, end: record.end } : null;
+}
+
 export function findRuleMatches(tokens, compiled, context) {
   const matches = [];
+  const domain =
+    compiled.domain === "word" || compiled.domain === "syllable" ? compiled.domain : "adjacent";
+  // Stress and syllable-edge atoms need the word's prosody. It is computed
+  // once per call and reused at every candidate position. A widened domain
+  // also needs it, because "syllable" is defined by these records.
+  const prosody =
+    compiled.needsProsody || domain !== "adjacent" ? context.prosodyFor(tokens) : null;
+  const boundsFor = (start, end) => {
+    if (domain === "word") return null;
+    if (domain === "syllable") return syllableBoundsAt(start, end, prosody);
+    return null;
+  };
   // An empty target is an insertion. The match sits between two segments, so
   // the environment is checked at every boundary, including before the first
   // and after the last segment. α-variables can only come from the
@@ -1107,9 +1385,28 @@ export function findRuleMatches(tokens, compiled, context) {
   // compile time.
   if (!compiled.target.length) {
     for (let index = 0; index <= tokens.length; index += 1) {
-      let bindings = matchesLeft(tokens, index, compiled.left, context, {});
+      const bounds = boundsFor(index, index);
+      let bindings = matchesLeft(
+        tokens,
+        index,
+        compiled.left,
+        context,
+        {},
+        prosody,
+        domain,
+        bounds ? bounds.start : null
+      );
       if (!bindings) continue;
-      bindings = matchesRight(tokens, index, compiled.right, context, bindings);
+      bindings = matchesRight(
+        tokens,
+        index,
+        compiled.right,
+        context,
+        bindings,
+        prosody,
+        domain,
+        bounds ? bounds.end : null
+      );
       if (!bindings) continue;
       matches.push({ start: index, end: index, replacement: compiled.replacement, bindings });
     }
@@ -1122,12 +1419,31 @@ export function findRuleMatches(tokens, compiled, context) {
       index += 1;
       continue;
     }
-    bindings = matchesLeft(tokens, index, compiled.left, context, bindings);
+    const bounds = boundsFor(index, index + compiled.target.length);
+    bindings = matchesLeft(
+      tokens,
+      index,
+      compiled.left,
+      context,
+      bindings,
+      prosody,
+      domain,
+      bounds ? bounds.start : null
+    );
     if (!bindings) {
       index += 1;
       continue;
     }
-    bindings = matchesRight(tokens, index + compiled.target.length, compiled.right, context, bindings);
+    bindings = matchesRight(
+      tokens,
+      index + compiled.target.length,
+      compiled.right,
+      context,
+      bindings,
+      prosody,
+      domain,
+      bounds ? bounds.end : null
+    );
     if (!bindings) {
       index += 1;
       continue;
@@ -1158,6 +1474,8 @@ function describePattern(pattern) {
     .map((atom) => {
       if (atom.type === "literal") return `“${atom.value}”`;
       if (atom.type === "boundary") return "#";
+      if (atom.type === "stress") return atom.value;
+      if (atom.type === "syllable") return ".";
       if (atom.type === "class") return atom.value;
       if (atom.type === "set") {
         const body = shortList(atom.values);
@@ -1180,6 +1498,7 @@ export function explainRuleMiss(tokens, compiled, context) {
   const right = compiled.right || [];
   const hasLeft = left.length > 0;
   const hasRight = right.length > 0;
+  const prosody = compiled.needsProsody ? context.prosodyFor(tokens) : null;
   const unit = (count) => `${count} ${count === 1 ? "place" : "places"}`;
 
   // Insertions are zero-width: both environment sides must hold at one point.
@@ -1187,10 +1506,10 @@ export function explainRuleMiss(tokens, compiled, context) {
     if (!hasLeft && !hasRight) return "";
     let leftOk = 0;
     for (let index = 0; index <= tokens.length; index += 1) {
-      const bindings = matchesLeft(tokens, index, left, context, {});
+      const bindings = matchesLeft(tokens, index, left, context, {}, prosody);
       if (!bindings) continue;
       leftOk += 1;
-      if (matchesRight(tokens, index, right, context, bindings)) return "";
+      if (matchesRight(tokens, index, right, context, bindings, prosody)) return "";
     }
     if (!hasLeft) return `No insertion point satisfies the right environment (${describePattern(right)}).`;
     if (!hasRight) return `No insertion point satisfies the left environment (${describePattern(left)}).`;
@@ -1204,10 +1523,10 @@ export function explainRuleMiss(tokens, compiled, context) {
     let bindings = matchTarget(tokens, index, compiled.target, context);
     if (!bindings) continue;
     targetHits += 1;
-    bindings = matchesLeft(tokens, index, left, context, bindings);
+    bindings = matchesLeft(tokens, index, left, context, bindings, prosody);
     if (!bindings) continue;
     leftOk += 1;
-    if (matchesRight(tokens, index + compiled.target.length, right, context, bindings)) return "";
+    if (matchesRight(tokens, index + compiled.target.length, right, context, bindings, prosody)) return "";
   }
   if (!targetHits) {
     const form = tokens.join("") || "∅";

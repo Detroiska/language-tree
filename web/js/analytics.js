@@ -6,7 +6,7 @@ import {
   allophoneCandidates,
   allophoneTable,
 } from "./phonology.js";
-import { createPhonotacticsChecker } from "./phonotactics.js";
+import { createPhonotacticsChecker } from "./phonotacticsCheck.js";
 import {
   createFeatureResolver,
   featureDistance,

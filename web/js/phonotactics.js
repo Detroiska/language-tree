@@ -1,7 +1,8 @@
-import { contextForInventory, normalizeForm } from "./phonology.js";
+import { normalizeForm } from "./notation.js";
 import { compileClasses } from "./categories.js";
 import { classForText, parseClassRef, normalizeLabelKey } from "./naturalclasses.js";
 import { classifyFeatureWords, featureMembers } from "./features.js";
+import { prosodyFromSyllables } from "./prosody.js";
 
 // Categories are shared with the sound-change and allophony engines; the
 // compiler lives in categories.js so both sides can import it without a cycle.
@@ -684,7 +685,7 @@ function preferMatch(a, b) {
   return a.end - b.end;
 }
 
-function syllabify(tokens, shapes, context) {
+export function syllabifyTokens(tokens, shapes, context) {
   const length = tokens.length;
   const matchesAt = new Array(length);
   const canFinish = new Array(length + 1).fill(false);
@@ -853,11 +854,15 @@ export function validateWord(form, compiled, context) {
   }
 
   result.checked = true;
-  const parse = syllabify(tokens, compiled.shapes, context);
+  const parse = syllabifyTokens(tokens, compiled.shapes, context);
   result.parse = parse;
   if (parse.ok) {
     result.syllables = parse.syllables;
     result.syllableText = parse.text;
+    const prosody = prosodyFromSyllables(tokens, parse.syllables, context.stressSystem || "none");
+    result.stressIndex = prosody.stressIndex;
+    result.stress = prosody.stress;
+    result.displayText = prosody.display;
   } else {
     result.partialText = parse.partialText || "";
     result.issues.push({ type: "syllable", message: parse.error });
@@ -899,18 +904,4 @@ export function validateWord(form, compiled, context) {
 
   result.ok = result.issues.length === 0;
   return result;
-}
-
-// One compiled checker can validate many forms: the inventory and
-// phonotactics are fixed until the next render.
-export function createPhonotacticsChecker(language) {
-  const context = contextForInventory(language.inventory, language.featureOverrides);
-  const compiled = compilePhonotactics(language.phonotactics || {}, context);
-  return {
-    context,
-    compiled,
-    validate(form) {
-      return validateWord(form, compiled, context);
-    },
-  };
 }

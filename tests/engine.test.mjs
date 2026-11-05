@@ -45,7 +45,8 @@ import {
   featureMembers,
   resolveFeatureBundle,
 } from "../web/js/features.js";
-import { compilePhonotactics, createPhonotacticsChecker } from "../web/js/phonotactics.js";
+import { compilePhonotactics } from "../web/js/phonotactics.js";
+import { createPhonotacticsChecker, stressMarkedForm } from "../web/js/phonotacticsCheck.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
 import { decodeHashPart } from "../web/js/routes.js";
 import { alignSegments, diffPairMarkup, formDiffMarkup } from "../web/js/diff.js";

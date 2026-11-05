@@ -1,4 +1,5 @@
-import { createPhonotacticsChecker } from "../phonotactics.js";
+import { createPhonotacticsChecker, stressMarkedForm } from "../phonotacticsCheck.js";
+import { STRESS_SYSTEMS, normalizeStressSystem, stressLabel } from "../prosody.js";
 import { suggestClassRefs } from "../naturalclasses.js";
 import { cellKey, chartLeaves, nodeLeafIds } from "../model.js";
 import { esc, icon, toast } from "../ui.js";
@@ -240,7 +241,7 @@ function summaryMarkup(results, compiled) {
     ${counts.invalid ? `<span><strong>${counts.invalid}</strong> to review</span>` : ""}`;
 }
 
-function testResultMarkup(result) {
+function testResultMarkup(result, stress = "none") {
   if (!result.text) return `<p class="test-placeholder">Type a form to check it against the template and inventory.</p>`;
   return `
     <div class="phonotactics-test-result">
@@ -254,8 +255,13 @@ function testResultMarkup(result) {
       </div>
       <div class="test-reading">
         <span class="field-label">Syllables</span>
-        <code class="ipa">${esc(result.syllableText) || "—"}</code>
+        <code class="ipa">${esc(result.displayText || result.syllableText) || "—"}</code>
       </div>
+      ${
+        result.stressIndex >= 0
+          ? `<p class="field-help">${esc(stressLabel(stress))} stress on syllable ${result.stressIndex + 1} of ${result.syllables.length}.</p>`
+          : ""
+      }
       ${issueListMarkup(result, 6)}
     </div>`;
 }
@@ -280,7 +286,7 @@ function wordCheckMarkup(language, checker, results) {
         <tr class="${status === "invalid" ? "is-invalid" : ""}">
           <td class="gloss-cell">${word.gloss.trim() ? esc(word.gloss) : `<span class="muted">untitled</span>`}</td>
           <td><code class="ipa">${word.form.trim() ? esc(word.form) : `<span class="muted">no form</span>`}</code></td>
-          <td><code class="ipa">${esc(result.syllableText) || "—"}</code></td>
+          <td><code class="ipa">${esc(result.displayText || result.syllableText) || "—"}</code></td>
           <td>${statusChip(result, { compact: true })}</td>
           <td class="word-issues">${
             result.issues.length
@@ -346,6 +352,31 @@ export function renderPhonotactics(container, ctx) {
               </div>
               <div data-template-feedback></div>
               <div data-template-shapes></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header class="panel-head">
+              <div class="panel-title">
+                <h2>Stress</h2>
+                <p>Choose where primary stress falls. Surface forms mark the stressed syllable with <code>ˈ</code> and separate syllables with a dot, as in <code>ˈka.sa</code>.</p>
+              </div>
+              <div class="panel-actions">
+                <button class="button button-quiet button-small" type="button" data-mark-stress ${normalizeStressSystem(phonotactics.stress) === "none" ? "disabled" : ""}>Mark stress in vocabulary</button>
+              </div>
+            </header>
+            <div class="panel-body form-stack">
+              <label class="field">
+                <span class="field-label">Stress system</span>
+                <select class="select" data-phonotactics-field="stress" aria-label="Stress system">
+                  ${STRESS_SYSTEMS.map(
+                    (item) =>
+                      `<option value="${esc(item.value)}" ${normalizeStressSystem(phonotactics.stress) === item.value ? "selected" : ""}>${esc(item.label)}</option>`
+                  ).join("")}
+                </select>
+                <span class="field-help">Weight-sensitive stress stresses a heavy penult — one with a coda or long nucleus — and otherwise falls back to the antepenult. Rule environments can test stress with <code>ˈ</code>/<code>ˌ</code> and syllable edges with <code>.</code> or <code>σ</code>.</span>
+              </label>
+              <p class="field-help">Stress and dots are presentation only: they are computed from the template and never stored as segments. “Mark stress in vocabulary” writes the predicted mark into recorded forms so exports keep it.</p>
             </div>
           </section>
 
@@ -506,6 +537,7 @@ export function renderPhonotactics(container, ctx) {
   const templateShapesElement = container.querySelector("[data-template-shapes]");
   const testInput = container.querySelector("[data-phonotactics-test]");
   const testResultElement = container.querySelector("[data-phonotactics-test-result]");
+  const markStressButton = container.querySelector("[data-mark-stress]");
 
   const refresh = () => {
     checker = createPhonotacticsChecker(language);
@@ -516,13 +548,14 @@ export function renderPhonotactics(container, ctx) {
     templateStatusElement.innerHTML = templateStatusMarkup(checker.compiled);
     templateFeedbackElement.innerHTML = templateFeedbackMarkup(checker.compiled);
     templateShapesElement.innerHTML = shapeMarkup(checker.compiled);
+    if (markStressButton) markStressButton.disabled = checker.stress === "none";
     syncClassRows();
     updateTest();
   };
 
   const updateTest = () => {
     if (!testInput || !testResultElement) return;
-    testResultElement.innerHTML = testResultMarkup(checker.validate(testInput.value));
+    testResultElement.innerHTML = testResultMarkup(checker.validate(testInput.value), checker.stress);
   };
 
   const constraintFields = {
@@ -697,6 +730,28 @@ export function renderPhonotactics(container, ctx) {
   testInput?.addEventListener("input", updateTest);
 
   container.addEventListener("click", (event) => {
+    if (event.target.closest("[data-mark-stress]")) {
+      if (checker.stress === "none") {
+        toast("Choose a stress system first.");
+        return;
+      }
+      let changed = 0;
+      for (const word of language.vocabulary) {
+        const marked = stressMarkedForm(word.form, checker);
+        if (marked && marked !== word.form) {
+          word.form = marked;
+          changed += 1;
+        }
+      }
+      if (!changed) {
+        toast("Every recorded form already carries its predicted stress.");
+        return;
+      }
+      ctx.touch({ label: "Mark stress in vocabulary" });
+      refresh();
+      toast(`Marked stress on ${changed} ${changed === 1 ? "word" : "words"}.`);
+      return;
+    }
     if (event.target.closest("[data-open-vocabulary]")) {
       ctx.navigate(`#/language/${language.id}/vocabulary`);
     }

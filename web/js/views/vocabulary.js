@@ -1,8 +1,8 @@
 import { allophonyRules, ancestorsOf, uid } from "../model.js";
 import { applyWordList, copyWords, downloadWords, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
-import { deriveForm, surfaceForForm } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
-import { createPhonotacticsChecker } from "../phonotactics.js";
+import { deriveForm, hasSurfaceDisplay, surfaceForForm } from "../phonology.js";
+import { formatPhonemic, formatPhonetic, stripLevelMarks, stripStressMarks } from "../notation.js";
+import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
 import { esc, icon, openModal, toast } from "../ui.js";
 
 function parentFor(ctx) {
@@ -32,7 +32,10 @@ function expectedFor(ctx, word, parent) {
 }
 
 function sameForm(a, b) {
-  const normalize = (value) => String(value || "").normalize("NFC").replace(/\s+/g, " ").trim();
+  const normalize = (value) =>
+    stripStressMarks(String(value || "").normalize("NFC"))
+      .replace(/[.\-·\s]+/gu, "")
+      .trim();
   return normalize(a) === normalize(b);
 }
 
@@ -49,12 +52,12 @@ function checkCellMarkup(word, expected) {
 }
 
 function surfaceMarkup(form, ctx) {
-  if (!allophonyRules(ctx.language.allophony).length || !String(form || "").trim()) return "";
+  if (!hasSurfaceDisplay(ctx.language) || !String(form || "").trim()) return "";
   const result = surfaceForForm(form, ctx.project, ctx.language.id);
   if (result.errors.length) {
     return `<span class="surface-preview surface-error" title="${esc(result.errors[0])}">${icon("warning")}surface error</span>`;
   }
-  return `<span class="surface-preview" title="Surface form after allophony">${esc(formatPhonetic(result.text))}</span>`;
+  return `<span class="surface-preview" title="Surface form after allophony, with predicted stress and syllables">${esc(formatPhonetic(result.display))}</span>`;
 }
 
 function updateRowCheck(row, ctx, word, parent) {
