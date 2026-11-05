@@ -2,6 +2,7 @@ import { allophonyRules, findLanguage, getLineage, uid } from "../model.js";
 import { compileChainFrom, deriveStages, ruleCompileErrors, surfaceForForm } from "../phonology.js";
 import { formatPhonemic, formatPhonetic } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
+import { diffPairMarkup } from "../diff.js";
 import { esc, icon, toast } from "../ui.js";
 
 // The explorer follows one word (a gloss plus its form) through the family.
@@ -279,6 +280,13 @@ function traceMarkup(project, source, word, rows) {
     .map((row) => {
       const cell = deriveFor(row, word, project);
       const status = statusFor(word, row, cell);
+      // A differing reflex colors the segments that diverged: minimal
+      // alignment over the language's own tokenizer, so the user sees which
+      // sound moved instead of a binary "Differs".
+      const diff =
+        status.kind === "differs" && row.chain.ok
+          ? diffPairMarkup(cell.derived, cell.recorded?.form || "", row.chain.context)
+          : null;
       const disabled =
         row.isSource || status.kind === "match" || status.kind === "source" || status.kind === "error"
           ? "disabled"
@@ -288,9 +296,9 @@ function traceMarkup(project, source, word, rows) {
         <tr${row.isSource ? ' class="is-source-row"' : ""}>
           <td class="cognate-lang"><span class="cognate-lang-name" style="--cognate-depth:${row.depth}">${esc(row.language.name)}</span></td>
           <td>${pathMarkup(row)}</td>
-          <td><code class="ipa derived-form">${esc(formatPhonemic(cell.derived)) || "—"}</code></td>
+          <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(cell.derived)) || "—"}</code></td>
           ${showSurface ? `<td><code class="ipa surface-form">${esc(formatPhonetic(cell.surface)) || "—"}</code></td>` : ""}
-          <td>${cell.recorded && cell.recorded.form.trim() ? `<code class="ipa">${esc(formatPhonemic(cell.recorded.form))}</code>` : `<span class="muted">not recorded</span>`}</td>
+          <td>${diff ? `<code class="ipa">${diff.right}</code>` : cell.recorded && cell.recorded.form.trim() ? `<code class="ipa">${esc(formatPhonemic(cell.recorded.form))}</code>` : `<span class="muted">not recorded</span>`}</td>
           <td>${chipMarkup(status)}</td>
           <td class="row-actions">
             <button class="icon-button icon-button-small" type="button" data-toggle-steps="${esc(row.language.id)}" title="Show derivation steps" aria-label="Show derivation steps">${icon("chevronRight")}</button>

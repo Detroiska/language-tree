@@ -5220,3 +5220,387 @@ th:hover > .axis-menu,
     font-size: 16px;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Segment diffs                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Wrapped around every aligned segment; only segments the other form does
+   not share are visually lifted. Used in the cognate explorer trace and the
+   inherited-vocabulary check. */
+.seg-same {
+  color: inherit;
+}
+
+.seg-diff {
+  color: var(--gold);
+  background: var(--gold-soft);
+  border-radius: 3px;
+}
+
+.status-chip.seg-diff {
+  color: var(--gold);
+  background: var(--gold-soft);
+}
+
+/* ------------------------------------------------------------------ */
+/* Derivation: why a rule did not apply                                */
+/* ------------------------------------------------------------------ */
+
+.step-why {
+  margin: 1px 0 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.step-why::before {
+  content: "\21B3\a0";
+  color: var(--faint);
+}
+
+.step-rule-why {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.step-rule-list li:not(.is-match) .step-rule-why {
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------------ */
+/* Rule tester: one-click conflict fix                                 */
+/* ------------------------------------------------------------------ */
+
+/* display:flex would fight the hidden attribute, so display:none is
+   restated right below, like the IPA keyboard affordance does. */
+.tester-conflict {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--gold);
+  background: var(--gold-soft);
+  border-radius: 8px;
+}
+
+.tester-conflict[hidden] {
+  display: none;
+}
+
+.tester-conflict-copy {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 0 0 9px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.tester-conflict-copy .icon {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-top: 2px;
+  color: var(--gold);
+}
+
+/* ------------------------------------------------------------------ */
+/* Chart-class autocomplete                                            */
+/* ------------------------------------------------------------------ */
+
+/* Sits above context menus (150) and below the IPA keyboard (160), so a
+   rule field and its list never trap a palette or context menu. */
+.class-complete {
+  position: fixed;
+  z-index: 155;
+  min-width: 230px;
+  max-width: 320px;
+  max-height: 250px;
+  padding: 6px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+}
+
+.cc-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 7px 7px;
+  border-bottom: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cc-head .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.cc-body {
+  padding-top: 3px;
+}
+
+.cc-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 5px 8px;
+  margin-top: 2px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cc-item:hover,
+.cc-item.is-active {
+  color: var(--accent-strong);
+  background: var(--accent-faint);
+}
+
+.cc-ref {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.cc-item.is-active .cc-ref {
+  color: var(--accent-strong);
+}
+
+.cc-meta {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------------ */
+/* Analytics                                                           */
+/* ------------------------------------------------------------------ */
+
+.analytics-main {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.analytics-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+@media (max-width: 1100px) {
+  .analytics-two {
+    grid-template-columns: 1fr;
+  }
+}
+
+.freq-table .freq-sound {
+  white-space: nowrap;
+}
+
+.freq-table .freq-count {
+  width: 1%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.freq-table .freq-bar-cell {
+  width: 55%;
+  min-width: 130px;
+}
+
+.freq-bar-wrap {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  background: var(--surface-tint);
+  border-radius: 4px;
+}
+
+.freq-bar {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  opacity: 0.75;
+}
+
+.analysis-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.analysis-note .icon {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+}
+
+.analysis-note strong {
+  color: var(--ink-soft);
+}
+
+.analysis-note-warn {
+  color: var(--gold);
+  background: var(--gold-soft);
+  border-color: var(--gold);
+}
+
+.analysis-offchart {
+  margin-left: 5px;
+}
+
+.cluster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cluster-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.cluster-row .freq-bar-wrap {
+  flex: 1 1 auto;
+}
+
+.cluster-count {
+  min-width: 3ch;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.cluster-empty {
+  color: var(--faint);
+}
+
+.balance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.balance-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12.5px;
+}
+
+.balance-label {
+  color: var(--muted);
+}
+
+.symmetry-block {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.symmetry-block h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.symmetry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.symmetry-list li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.gap-manner {
+  min-width: 92px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.gap-missing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--muted);
+}
+
+.analysis-empty {
+  font-size: 12px;
+}
+
+.leak-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.leak-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.leak-gloss {
+  min-width: 90px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.leak-symbols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+  margin-left: auto;
+}

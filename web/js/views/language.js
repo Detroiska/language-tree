@@ -22,6 +22,7 @@ import {
   toast,
 } from "../ui.js";
 import { renderAllophony } from "./allophony.js";
+import { renderAnalytics } from "./analytics.js";
 import { renderInventory } from "./inventory.js";
 import { renderPhonotactics } from "./phonotactics.js";
 import { renderChanges } from "./soundchanges.js";
@@ -34,6 +35,7 @@ const TABS = [
   { id: "phonotactics", label: "Phonotactics" },
   { id: "changes", label: "Sound changes" },
   { id: "vocabulary", label: "Vocabulary" },
+  { id: "analytics", label: "Analytics" },
 ];
 
 function tabId(value) {
@@ -417,5 +419,6 @@ export function renderLanguage(container, ctx, tabValue) {
   else if (activeTab === "changes") renderChanges(content, ctx);
   else if (activeTab === "allophony") renderAllophony(content, ctx);
   else if (activeTab === "vocabulary") renderVocabulary(content, ctx);
+  else if (activeTab === "analytics") renderAnalytics(content, ctx);
   else renderOverview(content, ctx);
 }

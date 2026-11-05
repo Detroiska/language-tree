@@ -1,0 +1,277 @@
+import { store } from "./store.js";
+import { findLanguage, getLineage } from "./model.js";
+import { buildClassIndex, suggestClassRefs } from "./naturalclasses.js";
+import { decodeHashPart } from "./routes.js";
+import { esc, icon } from "./ui.js";
+
+// Class autocomplete for rule notation fields (.rule-input — sound changes
+// and allophony).
+//
+// Chart classes are the most open-ended notation in rule text: `plosive.plain`
+// only works when it is spelled the way the chart spells it. This module
+// watches the token being typed (letters, dots and dashes between notation
+// breaks), matches it against `suggestClassRefs()` for the current language's
+// charts, and offers a small insertable list — keyboard navigable, caret
+// preserved on acceptance. Accepting fires a synthetic input event so every
+// existing listener (rule status, tester re-run, autosave, undo) treats it
+// exactly like typing.
+
+const TARGET_SELECTOR = ".rule-input";
+
+// Characters that end a token. Dots stay inside the token so `plosive.pl`
+// keeps matching through the dot; dashes as well, since labels fold dashes
+// (`dental-alveolar`).
+const TOKEN_BREAK = /[\s>,_#/[\]^|;*(]/u;
+
+const MAX_ITEMS = 8;
+
+const state = {
+  open: false,
+  menu: null,
+  target: null,
+  token: { start: 0, end: 0, text: "" },
+  items: [],
+  active: 0,
+  // Guards against the insertion's own synthetic input event reopening the
+  // list (as well as events inserted by the phoneme keyboard until the user
+  // really types).
+  busy: false,
+};
+
+function isTarget(element) {
+  return element instanceof HTMLInputElement && element.isConnected && element.matches(TARGET_SELECTOR);
+}
+
+function ruleLanguageId() {
+  const parts = window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (parts[0] !== "language" || !parts[1]) return null;
+  return decodeHashPart(parts[1]);
+}
+
+// The class index resolves against the whole lineage — the same charts a
+// compiled rule would see — so inherited labels autocomplete too.
+function suggestionsFor() {
+  const languageId = ruleLanguageId();
+  const language = languageId ? findLanguage(store.project, languageId) : null;
+  if (!language) return [];
+  const index = buildClassIndex(
+    getLineage(store.project, language.id).flatMap((member) => [
+      { chart: member.inventory.consonants, kind: "consonant" },
+      { chart: member.inventory.vowels, kind: "vowel" },
+    ])
+  );
+  return suggestClassRefs(index);
+}
+
+function tokenAt(input) {
+  const value = input.value;
+  const caret = typeof input.selectionStart === "number" ? input.selectionStart : value.length;
+  let start = caret;
+  while (start > 0 && !TOKEN_BREAK.test(value[start - 1])) start -= 1;
+  let end = caret;
+  while (end < value.length && !TOKEN_BREAK.test(value[end])) end += 1;
+  return { start, end, text: value.slice(start, end) };
+}
+
+function matchesQuery(ref, query) {
+  const lower = ref.toLowerCase();
+  if (lower.startsWith(query)) return true;
+  // Typing a later segment ("… .pl") should still find `plosive.plain`.
+  return lower.split(".").some((part) => part.startsWith(query));
+}
+
+function itemMarkup(item, index) {
+  const sample = item.members.slice(0, 4).join(" ");
+  const more = item.members.length > 4 ? ` +${item.members.length - 4}` : "";
+  const chart = item.chart ? `${item.chart}·` : "";
+  return `
+    <button type="button" class="cc-item ${index === state.active ? "is-active" : ""}" data-cc-index="${index}" role="option" aria-selected="${index === state.active ? "true" : "false"}">
+      <span class="cc-ref">${esc(chart)}${esc(item.ref)}</span>
+      <span class="cc-meta" title="${esc(item.members.join(" "))}">${item.members.length} ${item.members.length === 1 ? "member" : "members"} — ${esc(sample)}${esc(more)}</span>
+    </button>`;
+}
+
+function buildMenu() {
+  const menu = document.createElement("div");
+  menu.className = "class-complete";
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", "Chart class suggestions");
+  menu.innerHTML = `<div class="cc-head">${icon("grid")}<span>Chart classes</span></div><div class="cc-body" data-cc-body></div>`;
+  // Accept on mousedown-with-preventDefault so the caret never leaves the
+  // field before the click lands.
+  menu.addEventListener("mousedown", (event) => {
+    if (event.target.closest(".cc-item")) event.preventDefault();
+  });
+  menu.addEventListener("click", (event) => {
+    const item = event.target.closest(".cc-item");
+    if (item) {
+      accept(Number(item.dataset.ccIndex));
+    }
+  });
+  state.menu = menu;
+  return menu;
+}
+
+function refreshMenu() {
+  if (!state.menu) return;
+  const body = state.menu.querySelector("[data-cc-body]");
+  body.innerHTML = state.items.map(itemMarkup).join("");
+}
+
+function positionMenu() {
+  if (!state.menu || !state.target) return;
+  const anchor = state.target.getBoundingClientRect();
+  const rect = state.menu.getBoundingClientRect();
+  let left = anchor.left;
+  let top = anchor.bottom + 4;
+  if (left + rect.width > window.innerWidth - 12) left = window.innerWidth - rect.width - 12;
+  if (top + rect.height > window.innerHeight - 12) top = anchor.top - rect.height - 6;
+  state.menu.style.left = `${Math.max(10, left)}px`;
+  state.menu.style.top = `${Math.max(10, top)}px`;
+}
+
+function open(target) {
+  state.target = target;
+  if (!state.menu || !state.menu.isConnected) document.body.appendChild(buildMenu());
+  state.open = true;
+}
+
+function close() {
+  if (!state.open) return;
+  state.open = false;
+  state.menu?.remove();
+  state.target = null;
+  state.items = [];
+}
+
+// Recompute the suggestion list from the field's current text and caret.
+function refreshForTarget() {
+  if (!state.open || !isTarget(state.target)) {
+    close();
+    return;
+  }
+  const token = tokenAt(state.target);
+  state.token = token;
+  const query = token.text.normalize("NFC").trim().toLowerCase();
+  if (!query || /[^a-z\p{L}\p{N}.\-]/u.test(query)) {
+    close();
+    return;
+  }
+  const all = suggestionsFor();
+  state.items = all.filter((item) => matchesQuery(item.ref, query)).slice(0, MAX_ITEMS);
+  state.active = Math.min(state.active, Math.max(0, state.items.length - 1));
+  // Silence beats a permanent "no matches" nag: the popup is only worth its
+  // screen space while it has something to offer.
+  if (!state.items.length) {
+    close();
+  }
+}
+
+function setActive(next) {
+  if (!state.items.length) return;
+  state.active = (next + state.items.length) % state.items.length;
+  state.menu?.querySelectorAll(".cc-item").forEach((element) => {
+    const index = Number(element.dataset.ccIndex);
+    element.classList.toggle("is-active", index === state.active);
+    element.setAttribute("aria-selected", index === state.active ? "true" : "false");
+  });
+}
+
+function accept(index) {
+  const input = state.target;
+  const item = state.items[index];
+  if (!item || !isTarget(input)) {
+    close();
+    return;
+  }
+  const ref = item.ref;
+  input.setRangeText(ref, state.token.start, state.token.end, "end");
+  close();
+  // The next input event — ours below, or anything the phoneme keyboard
+  // later inserts — must not reopen the list over the finished token.
+  state.busy = true;
+  window.setTimeout(() => {
+    state.busy = false;
+  }, 0);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.focus();
+}
+
+function onInput(event) {
+  if (state.busy) return;
+  const element = event.target;
+  if (!isTarget(element)) return;
+  if (!state.open) {
+    // Typing a letter-combo is the only trigger; pasting an arrow or deleting
+    // never opens anything.
+    open(element);
+  } else if (state.target !== element) {
+    state.target = element;
+  }
+  refreshForTarget();
+}
+
+function onKeyDown(event) {
+  if (!state.open || !isTarget(event.target)) return;
+  if (state.target !== event.target) return;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setActive(state.active + 1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setActive(state.active - 1);
+  } else if ((event.key === "Enter" || event.key === "Tab") && state.open && state.items.length) {
+    event.preventDefault();
+    accept(state.active);
+  } else if (event.key === "Escape") {
+    close();
+  }
+}
+
+function onPointerDown(event) {
+  if (!state.open) return;
+  const element = event.target instanceof Element ? event.target : null;
+  if (state.menu?.contains(element) || element === state.target) return;
+  close();
+}
+
+function onScroll(event) {
+  if (event.target instanceof Node && state.menu?.contains(event.target)) return;
+  close();
+}
+
+function onResize() {
+  positionMenu();
+}
+
+function onHashChange() {
+  close();
+}
+
+function onFocusIn(event) {
+  if (!isTarget(event.target)) return;
+  // Focus moves happen on every tab switch; only an already-open popup
+  // follows focus, typing is what opens one.
+  if (state.open && state.target !== event.target) close();
+}
+
+function onFocusOut(event) {
+  if (state.open && isTarget(event.target)) {
+    // Keep the list while the pointer travels to it (mousedown already
+    // prevents the caret from leaving, so this is just tidiness).
+    window.setTimeout(() => {
+      if (state.open && !isTarget(state.target)) close();
+    }, 0);
+  }
+}
+
+export function initClassAutocomplete() {
+  document.addEventListener("input", onInput);
+  document.addEventListener("keydown", onKeyDown);
+  document.addEventListener("pointerdown", onPointerDown);
+  document.addEventListener("focusin", onFocusIn);
+  document.addEventListener("focusout", onFocusOut);
+  window.addEventListener("scroll", onScroll, true);
+  window.addEventListener("resize", onResize);
+  window.addEventListener("hashchange", onHashChange);
+}

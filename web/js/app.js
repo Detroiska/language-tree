@@ -15,6 +15,7 @@ import {
 } from "./ui.js";
 import { createQuickSearch } from "./search.js";
 import { initPhonemeKeyboard } from "./keyboard.js";
+import { initClassAutocomplete } from "./autocomplete.js";
 import { decodeHashPart } from "./routes.js";
 import { renderCognates } from "./views/cognates.js";
 import { renderLanguage } from "./views/language.js";
@@ -32,7 +33,7 @@ const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
 const undoButton = document.getElementById("undo-button");
 const redoButton = document.getElementById("redo-button");
-const TAB_IDS = new Set(["overview", "phonology", "phonotactics", "changes", "allophony", "vocabulary"]);
+const TAB_IDS = new Set(["overview", "phonology", "phonotactics", "changes", "allophony", "vocabulary", "analytics"]);
 
 let currentRoute = null;
 let booted = false;
@@ -410,6 +411,9 @@ async function init() {
   // The phoneme keyboard wires its own global listeners (combo, focus
   // tracking, floating affordance) and needs no per-view setup.
   initPhonemeKeyboard();
+
+  // Chart-class autocomplete over rule notation fields, also self-wiring.
+  initClassAutocomplete();
 
   quickSearch = createQuickSearch({
     getProject: () => store.project,

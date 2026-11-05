@@ -28,6 +28,7 @@ import {
   compileChainFrom,
   deriveForm,
   deriveStages,
+  explainRuleMiss,
   normalizeAllophonyNotation,
   surfaceForForm,
 } from "../web/js/phonology.js";
@@ -47,6 +48,8 @@ import {
 import { compilePhonotactics, createPhonotacticsChecker } from "../web/js/phonotactics.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
 import { decodeHashPart } from "../web/js/routes.js";
+import { alignSegments, diffPairMarkup, formDiffMarkup } from "../web/js/diff.js";
+import { analyzeLexicon } from "../web/js/analytics.js";
 
 let passed = 0;
 const failures = [];
@@ -1579,6 +1582,198 @@ truthy(
   "HTML report includes feature overrides",
   overrideHtml.includes("Feature overrides") && overrideHtml.includes(customSymbol)
 );
+
+/* ---- segment diff -------------------------------------------------------- */
+
+equal(
+  "alignment walks equal runs",
+  alignSegments(["k", "a"], ["k", "a"]),
+  [
+    { left: "k", right: "k", kind: "equal" },
+    { left: "a", right: "a", kind: "equal" },
+  ]
+);
+equal(
+  "a differing segment reads as a substitution",
+  alignSegments(["t", "a"], ["s", "a"]),
+  [
+    { left: "t", right: "s", kind: "sub" },
+    { left: "a", right: "a", kind: "equal" },
+  ]
+);
+equal(
+  "a missing segment is a deletion",
+  alignSegments(["k", "a", "s"], ["k", "a"]),
+  [
+    { left: "k", right: "k", kind: "equal" },
+    { left: "a", right: "a", kind: "equal" },
+    { left: "s", right: null, kind: "del" },
+  ]
+);
+equal(
+  "an added segment is an insertion",
+  alignSegments(["k", "a"], ["k", "a", "s"]),
+  [
+    { left: "k", right: "k", kind: "equal" },
+    { left: "a", right: "a", kind: "equal" },
+    { left: null, right: "s", kind: "ins" },
+  ]
+);
+equal("aligning nothing is an empty list", alignSegments([], []), []);
+equal(
+  "inserting into an empty form",
+  alignSegments([], ["a"]),
+  [{ left: null, right: "a", kind: "ins" }]
+);
+truthy("unchanged forms skip the diff", formDiffMarkup(["k", "a"], ["k", "a"]) === null);
+truthy(
+  "changed forms mark the differing segment",
+  /seg-diff[^>]*>t</u.test(formDiffMarkup(["k", "a", "t"], ["k", "a", "s"]).left)
+);
+const diffPair = diffPairMarkup("kat", "kas", ctx);
+truthy(
+  "diff pairs wrap colored sides in slashes",
+  diffPair !== null &&
+    diffPair.left.startsWith("/") &&
+    diffPair.left.endsWith("/") &&
+    /seg-diff[^>]*>t</u.test(diffPair.left) &&
+    /seg-diff[^>]*>s</u.test(diffPair.right)
+);
+truthy("identical forms need no diff pair", diffPairMarkup("kat", "kat", ctx) === null);
+truthy("diff pairs need a context", diffPairMarkup("kat", "kas", null) === null);
+
+/* ---- why a rule did not apply -------------------------------------------- */
+
+const missTarget = compileRule("p > f / V _ V", ctx);
+truthy(
+  "a missing input is explained",
+  /matches no part of “kat”/u.test(explainRuleMiss(ctx.tokenize("kat"), missTarget.rule, ctx))
+);
+const missLeft = compileRule("k > x / s _ V", ctx);
+truthy(
+  "a failing left environment is named",
+  /left environment/u.test(explainRuleMiss(ctx.tokenize("kasa"), missLeft.rule, ctx))
+);
+const missRight = compileRule("s > z / a _ #", ctx);
+truthy(
+  "a failing right environment is named",
+  /right environment/u.test(explainRuleMiss(ctx.tokenize("kasa"), missRight.rule, ctx))
+);
+const missInsertion = compileRule("∅ > ʔ / u _ u", ctx);
+truthy(
+  "a blocked insertion names its environment",
+  /environment/u.test(explainRuleMiss(ctx.tokenize("apa"), missInsertion.rule, ctx))
+);
+equal(
+  "a matching rule produces no miss explanation",
+  explainRuleMiss(ctx.tokenize("apa"), missTarget.rule, ctx),
+  ""
+);
+
+const conflictProject = {
+  title: "Conflict",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+        { id: "r2", notation: "p > h", note: "", enabled: true, parentId: null },
+      ],
+      vocabulary: [],
+    },
+  ],
+};
+const conflictStep = deriveForm("apa", conflictProject, "child", { directOnly: true }).steps.find(
+  (step) => step.conflict
+);
+truthy("overlapping parallel rules are reported as a conflict", conflictStep && conflictStep.kind === "error");
+equal("the conflict names the earlier rule as first", conflictStep.conflict.firstId, "r1");
+equal("the conflict names the later rule as second", conflictStep.conflict.secondId, "r2");
+
+const debugStep = deriveForm("kat", project, "child", { directOnly: true }).steps.find(
+  (step) => step.kind === "parallel"
+);
+truthy(
+  "parallel entries explain why they matched nothing",
+  debugStep.entries.some((entry) => entry.notation === "p > f / V _ V" && /matches no part/u.test(entry.debug || ""))
+);
+
+const seqStaged = stagedProject([
+  { id: "s1", notation: "a > e", note: "", enabled: true, parentId: null },
+  { id: "s2", notation: "t > x / u _ a", note: "", enabled: true, parentId: "s1" },
+]);
+const seqStep = deriveForm("kata", seqStaged, "child", { directOnly: true }).steps.find(
+  (step) => step.kind === "sequential"
+);
+truthy(
+  "sequential steps explain a failed environment",
+  seqStep && !seqStep.changed && /left environment/u.test(seqStep.debug || "")
+);
+
+/* ---- lexicon analytics ---------------------------------------------------- */
+
+const analyticsChart = makeChart(
+  ["Plosive", "Nasal"],
+  ["Bilabial", "Velar"],
+  [
+    ["Plosive", "Bilabial", ["p", "b"]],
+    ["Plosive", "Velar", ["k"]],
+    ["Nasal", "Bilabial", ["m"]],
+  ]
+);
+const analyticsLanguage = {
+  id: "ana",
+  name: "Ana",
+  parentId: null,
+  inventory: { consonants: analyticsChart, vowels },
+  phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+  soundChanges: [],
+  allophony: [],
+  vocabulary: [
+    { id: "w1", gloss: "apa", form: "apa", notes: "" },
+    { id: "w2", gloss: "kama", form: "kama", notes: "" },
+    { id: "w3", gloss: "edge", form: "aθa", notes: "" },
+  ],
+};
+const analysis = analyzeLexicon({ title: "Analytics", languages: [analyticsLanguage] }, analyticsLanguage);
+equal("analytics counts every recorded token", analysis.frequency[0], { value: "a", count: 6, charted: true });
+equal(
+  "analytics lists charted sounds with no tokens",
+  [...analysis.neverUsed].sort(),
+  ["ɑ", "b", "i", "u"].sort()
+);
+equal("analytics reports uncharted tokens", analysis.uncharted, [{ value: "θ", count: 1 }]);
+equal("analytics counts consonant and vowel tokens", [analysis.consonantTokens, analysis.vowelTokens], [4, 6]);
+truthy(
+  "analytics syllabifies parseable words",
+  analysis.parseableWords === 2 && analysis.syllablesTotal === 4
+);
+truthy(
+  "analytics records an empty onset as ∅",
+  analysis.onsets.some((row) => row.value === "∅" && row.count === 1)
+);
+equal("analytics counts codas", analysis.codas, [{ value: "∅", count: 4 }]);
+truthy(
+  "analytics flags sounds missing their voicing counterpart",
+  analysis.voicelessWithoutVoiced.includes("k") && analysis.voicedWithoutVoiceless.includes("m")
+);
+const nasalGap = analysis.gaps.find((gap) => gap.manner === "Nasal");
+equal("analytics names the missing place in a manner row", nasalGap?.missing, ["Velar"]);
+equal("analytics sees no allophony to leak", [analysis.hasAllophony, analysis.leaks.length], [false, 0]);
+
+allophonyFor(["s > θ / V _ V"]);
+syntheticLanguage.vocabulary = [{ id: "lv1", gloss: "asthma", form: "aθa", notes: "" }];
+const leakAnalysis = analyzeLexicon(syntheticProject, syntheticLanguage);
+truthy(
+  "analytics flags allophony outputs recorded in phonemic forms",
+  leakAnalysis.hasAllophony &&
+    leakAnalysis.leaks.some((leak) => leak.gloss === "asthma" && leak.symbols.includes("θ"))
+);
+syntheticLanguage.vocabulary = [];
 
 /* ---- summary ------------------------------------------------------------- */
 

@@ -16,7 +16,13 @@ import {
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
+import { diffPairMarkup } from "../diff.js";
 import { esc, icon, toast } from "../ui.js";
+
+// The tester input is re-created on every view render (which edits trigger),
+// so the typed form is remembered per language — otherwise adding a rule or
+// recording a word wipes what was being tested.
+const testerMemory = new Map();
 
 function compileDirect(ctx) {
   const context = contextForLanguage(ctx.project, ctx.language.id);
@@ -160,6 +166,8 @@ function testPanelMarkup(ctx) {
   const lineage = getLineage(ctx.project, ctx.language.id);
   const parent = lineage.length > 1 ? lineage[lineage.length - 2] : null;
   const suggestions = parent?.vocabulary.filter((word) => word.form.trim()).slice(0, 4) || [];
+  const remembered = testerMemory.get(ctx.language.id);
+  const initialValue = remembered ?? (parent?.vocabulary.find((word) => word.form.trim())?.form || "");
   return `
     <section class="panel test-panel" data-test-panel>
       <header class="panel-head">
@@ -174,7 +182,7 @@ function testPanelMarkup(ctx) {
           ? `
             <div class="test-input-wrap">
               <label class="field-label" for="test-word">Input form <span class="field-optional">${esc(parent.name)}</span></label>
-              <input class="input ipa-input" id="test-word" data-test-input value="${esc(parent.vocabulary.find((word) => word.form.trim())?.form || "")}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+              <input class="input ipa-input" id="test-word" data-test-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
               ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-test-word="${esc(word.form)}" title="${esc(word.gloss)}">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
             </div>
             <div class="derivation" data-derivation>
@@ -188,6 +196,7 @@ function testPanelMarkup(ctx) {
               </div>
               <div class="derivation-parsed" data-test-parsed></div>
               <div class="derivation-steps" data-test-steps></div>
+              <div class="tester-conflict" data-test-conflict hidden></div>
             </div>
           `
           : `
@@ -258,7 +267,7 @@ function inheritedPanelMarkup(ctx) {
     </section>`;
 }
 
-function checkRows(ctx) {
+function checkRows(ctx, context = null) {
   const parent = ancestorsOf(ctx.project, ctx.language.id).at(-1);
   if (!parent) {
     return {
@@ -321,14 +330,18 @@ function checkRows(ctx) {
         </thead>
         <tbody>
           ${rows
-            .map(
-              (row) => `
+            .map((row) => {
+              const diff =
+                row.status === "differs" && context
+                  ? diffPairMarkup(row.derived, row.recorded?.form || "", context)
+                  : null;
+              return `
                 <tr>
                   <td class="gloss-cell">${esc(row.word.gloss)}</td>
                   <td><code class="ipa">${esc(formatPhonemic(row.word.form))}</code></td>
-                  <td><code class="ipa derived-form">${esc(formatPhonemic(row.derived)) || "—"}</code></td>
+                  <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(row.derived)) || "—"}</code></td>
                   ${allophonyRules(ctx.language.allophony).length ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
-                  <td>${row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
+                  <td>${diff ? `<code class="ipa">${diff.right}</code>` : row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
                   <td>
                     <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
                       ${row.status === "match" ? icon("check") : row.status === "differs" || row.status === "error" ? icon("warning") : icon("info")}
@@ -340,14 +353,61 @@ function checkRows(ctx) {
                       ${row.status === "missing" ? "Record" : "Use derived"}
                     </button>
                   </td>
-                </tr>`
-            )
+                </tr>`;
+            })
             .join("")}
         </tbody>
       </table>
     </div>
     <p class="check-foot">Comparison is by gloss, using only this language’s direct changes. Not every word needs to be inherited; use “Use derived” when a reflex is correct. Top-level rules that change the same part of a word stop the derivation and appear as a rule error.</p>`;
   return { summary, html, rows, parent, byGloss };
+}
+
+function conflictFixMarkup(ctx, conflict) {
+  const language = ctx.language;
+  const groups = ruleGroups(language.soundChanges);
+  const firstGroup = groups.find((group) => group.rule.id === conflict.firstId);
+  const secondGroup = groups.find((group) => group.rule.id === conflict.secondId);
+  if (!firstGroup || !secondGroup) {
+    return `<p class="tester-conflict-copy">The rules named in this conflict can no longer be found — the list changed.</p>`;
+  }
+  // Turning the second rule into a child of the first works only for a
+  // top-level rule without children of its own; nested children break the
+  // one-level rule tree, so manual editing wins there.
+  const blocked = secondGroup.children.length > 0;
+  const reason = blocked
+    ? `${conflict.secondLabel} already has sequential children, so it cannot be moved — restructure those rules by hand first.`
+    : `${conflict.secondLabel} (${esc(secondGroup.rule.notation) || "empty rule"}) then runs after ${conflict.firstLabel} (${esc(firstGroup.rule.notation) || "empty rule"}) instead of matching the same spot in parallel.`;
+  return `
+    <p class="tester-conflict-copy">${icon("warning")}<strong>Top-level conflict.</strong> ${esc(reason)}</p>
+    <button class="button button-quiet button-small" type="button" data-conflict-fix ${blocked ? "disabled" : ""}>
+      ${icon("sliders")}<span>Make rule ${esc(conflict.secondLabel)} sequential under rule ${esc(conflict.firstLabel)}</span>
+    </button>`;
+}
+
+function convertConflict(ctx, conflict) {
+  const language = ctx.language;
+  const array = language.soundChanges;
+  const first = array.find((rule) => rule.id === conflict.firstId);
+  const second = array.find((rule) => rule.id === conflict.secondId);
+  if (!first || !second) return;
+  if (array.some((rule) => rule.parentId === second.id)) {
+    toast(`${conflict.secondLabel} has sequential children of its own — move them manually first.`, { type: "error" });
+    return;
+  }
+  const existingChildren = array.filter((rule) => rule.parentId === first.id);
+  const anchor = existingChildren.length ? existingChildren[existingChildren.length - 1] : first;
+  const secondIndex = array.indexOf(second);
+  array.splice(secondIndex, 1);
+  // Slot in after any children `first` already has, so the new child runs
+  // last instead of jumping ahead of an existing sequential chain.
+  array.splice(array.indexOf(anchor) + 1, 0, second);
+  second.parentId = first.id;
+  ctx.touch({
+    label: `Convert ${conflict.secondLabel} to a sequential rule of ${conflict.firstLabel}`,
+  });
+  ctx.refresh();
+  toast(`Rule ${conflict.secondLabel} now runs after rule ${conflict.firstLabel} instead of in parallel.`, { type: "success" });
 }
 
 function lineageMarkup(ctx) {
@@ -415,6 +475,7 @@ export function renderChanges(container, ctx) {
   const runTest = () => {
     if (!testPanel || !testInput) return;
     const result = directDerivation(ctx, testInput.value);
+    testerMemory.set(language.id, testInput.value);
     const output = testPanel.querySelector("[data-test-output]");
     const surface = testPanel.querySelector("[data-test-surface]");
     const surfaceRow = testPanel.querySelector("[data-test-surface-row]");
@@ -441,11 +502,27 @@ export function renderChanges(container, ctx) {
       emptyText: "No rules change this form — it passes through unchanged.",
       hideEmpty: true,
     });
+    // The one-click remedy for an overlapping top-level pair, offered right
+    // where the conflict is reported.
+    const conflict = result.steps.find((step) => step.conflict)?.conflict || null;
+    const conflictBox = testPanel.querySelector("[data-test-conflict]");
+    if (conflictBox) {
+      if (conflict) {
+        conflictBox.innerHTML = conflictFixMarkup(ctx, conflict);
+        conflictBox.hidden = false;
+        conflictBox.querySelector("[data-conflict-fix]")?.addEventListener("click", () => {
+          convertConflict(ctx, conflict);
+        });
+      } else {
+        conflictBox.hidden = true;
+        conflictBox.innerHTML = "";
+      }
+    }
   };
 
   const refreshCheck = () => {
     if (!checkPanel || !checkBody) return;
-    const data = checkRows(ctx);
+    const data = checkRows(ctx, context);
     checkBody.innerHTML = data.html;
     if (checkSummary) checkSummary.textContent = data.summary;
   };

@@ -1139,6 +1139,88 @@ export function findRuleMatches(tokens, compiled, context) {
   return matches;
 }
 
+function shortList(values, limit = 5) {
+  const shown = values.slice(0, limit).map((value) => `“${value}”`);
+  const rest = values.length - shown.length;
+  return rest > 0 ? [...shown, "…"].join(", ") : shown.join(", ");
+}
+
+// Human-readable form of a compiled pattern, used when explaining why a rule
+// never matched. Truncation keeps feature bundles (which expand to many
+// sounds) readable.
+function describePattern(pattern) {
+  if (!pattern || !pattern.length) return "∅";
+  return pattern
+    .map((atom) => {
+      if (atom.type === "literal") return `“${atom.value}”`;
+      if (atom.type === "boundary") return "#";
+      if (atom.type === "class") return atom.value;
+      if (atom.type === "set") {
+        const body = shortList(atom.values);
+        return atom.negated ? `^[${body}]` : `[${body}]`;
+      }
+      if (atom.type === "feature") return describeTerms(atom.terms);
+      return "?";
+    })
+    .join(" ");
+}
+
+// Where did the rule fail to match? The derivation already says "unchanged";
+// this names the stage that blocked it — no target match, an environment side
+// that never holds — so a rule with zero matches is debuggable instead of
+// silent. Returns "" whenever the rule actually matches somewhere, or when no
+// diagnosis is possible, so callers can attach it only to inert rules.
+export function explainRuleMiss(tokens, compiled, context) {
+  if (!compiled || !Array.isArray(compiled.target)) return "";
+  const left = compiled.left || [];
+  const right = compiled.right || [];
+  const hasLeft = left.length > 0;
+  const hasRight = right.length > 0;
+  const unit = (count) => `${count} ${count === 1 ? "place" : "places"}`;
+
+  // Insertions are zero-width: both environment sides must hold at one point.
+  if (!compiled.target.length) {
+    if (!hasLeft && !hasRight) return "";
+    let leftOk = 0;
+    for (let index = 0; index <= tokens.length; index += 1) {
+      const bindings = matchesLeft(tokens, index, left, context, {});
+      if (!bindings) continue;
+      leftOk += 1;
+      if (matchesRight(tokens, index, right, context, bindings)) return "";
+    }
+    if (!hasLeft) return `No insertion point satisfies the right environment (${describePattern(right)}).`;
+    if (!hasRight) return `No insertion point satisfies the left environment (${describePattern(left)}).`;
+    if (!leftOk) return `No insertion point satisfies the left environment (${describePattern(left)}).`;
+    return `The left environment (${describePattern(left)}) holds at ${unit(leftOk)} insertion points, but the right environment (${describePattern(right)}) never holds at one of them.`;
+  }
+
+  let targetHits = 0;
+  let leftOk = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    let bindings = matchTarget(tokens, index, compiled.target, context);
+    if (!bindings) continue;
+    targetHits += 1;
+    bindings = matchesLeft(tokens, index, left, context, bindings);
+    if (!bindings) continue;
+    leftOk += 1;
+    if (matchesRight(tokens, index + compiled.target.length, right, context, bindings)) return "";
+  }
+  if (!targetHits) {
+    const form = tokens.join("") || "∅";
+    return `The input (${describePattern(compiled.target)}) matches no part of “${form}”.`;
+  }
+  if (hasLeft && !leftOk) {
+    return `The input matches at ${unit(targetHits)}, but the left environment (${describePattern(left)}) always fails there.`;
+  }
+  if (hasRight) {
+    if (!hasLeft) {
+      return `The input matches at ${unit(targetHits)}, but the right environment (${describePattern(right)}) fails at each of them.`;
+    }
+    return `The input and left environment match at ${unit(leftOk)}, but the right environment (${describePattern(right)}) fails at each of them.`;
+  }
+  return "";
+}
+
 // A feature output is a delta on the matched segment, not a complete bundle.
 // Sound-change contexts resolve it against this generation's chart, so a change
 // like n > [αplace] stays phonemic. Allophony contexts may synthesize an
@@ -1244,10 +1326,15 @@ export function compileChainFrom(project, sourceId, targetId) {
 // apply. Two top-level rules that touch the same part of the form are a
 // conflict: the derivation stops with an error instead of guessing an order.
 function applyParallel(tokens, groups, context) {
-  const entries = groups.map((group) => ({
-    group,
-    matches: findRuleMatches(tokens, group.compiled.rule, context),
-  }));
+  const entries = [];
+  for (const group of groups) {
+    const matches = findRuleMatches(tokens, group.compiled.rule, context);
+    const entry = { group, matches };
+    // A rule that matched nothing gets a diagnosis instead of a bare
+    // "0 matches" — the tester shows this under its entry in the step list.
+    if (!matches.length) entry.debug = explainRuleMiss(tokens, group.compiled.rule, context) || "";
+    entries.push(entry);
+  }
   const changes = [];
   for (const entry of entries) {
     for (const match of entry.matches) changes.push({ ...match, entry });
@@ -1262,6 +1349,16 @@ function applyParallel(tokens, groups, context) {
       return {
         ok: false,
         error: `Rules ${a.label} (“${a.rule.notation}”) and ${b.label} (“${b.rule.notation}”) both change overlapping parts of the ancestral form “${tokens.join("")}”. Make one of them sequential or make the rules mutually exclusive.`,
+        // Structured conflict for the tester's one-click fix: turning the
+        // later-overlapping rule into a sequential child of the earlier one
+        // is the standard remedy.
+        conflict: {
+          firstId: a.rule.id,
+          secondId: b.rule.id,
+          firstLabel: a.label,
+          secondLabel: b.label,
+        },
+        entries,
       };
     }
     if (!furthest || change.end > furthest.end) furthest = change;
@@ -1324,6 +1421,7 @@ export function deriveStages(inputTokens, stages, context) {
         kind: "error",
         label: "anc",
         error: parallel.error,
+        conflict: parallel.conflict || null,
         before,
         after: [...before],
         changed: false,
@@ -1345,6 +1443,7 @@ export function deriveStages(inputTokens, stages, context) {
           label: entry.group.label,
           notation: entry.group.rule.notation,
           matches: entry.matches.length,
+          debug: entry.debug || "",
         })),
         languageName,
       });
@@ -1392,6 +1491,8 @@ export function deriveStages(inputTokens, stages, context) {
           stageFailed = true;
           break;
         }
+        // Just like the parallel pass, a sequential step that left the form
+        // unchanged names why: never matched, or matched some other part? 
         steps.push({
           kind: "sequential",
           label: child.label,
@@ -1400,6 +1501,7 @@ export function deriveStages(inputTokens, stages, context) {
           before: [...current],
           after: [...result.tokens],
           changed: result.changed,
+          debug: result.changed ? "" : explainRuleMiss(current, child.compiled.rule, stageContext) || "",
           languageName,
         });
         current = result.tokens;

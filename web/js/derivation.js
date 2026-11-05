@@ -47,6 +47,7 @@ function parallelMarkup(step, showLanguage) {
                   <span class="step-rule-label">${esc(entry.label || "")}</span>
                   <code>${esc(entry.notation || "Empty rule")}</code>
                   <span class="step-rule-count">${countLabel(entry.matches)}</span>
+                  ${entry.debug ? `<span class="step-rule-why" title="${esc(entry.debug)}">${esc(entry.debug)}</span>` : ""}
                 </li>`
             )
             .join("")}
@@ -66,6 +67,7 @@ function sequentialMarkup(step, index, showLanguage) {
           ${languageTag(step, showLanguage)}
           ${step.changed ? "" : `<span class="step-skip">unchanged</span>`}
         </div>
+        ${step.debug ? `<div class="step-why">${esc(step.debug)}</div>` : ""}
         <div class="step-form">
           <code class="ipa">${esc(formText(step.before))}</code>
           <span class="step-arrow">→</span>

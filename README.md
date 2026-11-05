@@ -34,14 +34,16 @@ The repository ships with a demo family, **Pre-Proto-Macro-Meric**, in `data/pro
 - **Phonology charts** — separate consonant and vowel charts with editable rows and columns. Any row or column can be subdivided (aspiration, labialization, rounding, and so on). Charts list contrastive **phonemes**; derived surface allophones live in a separate table below them.
 - **Distinctive features** — a curated IPA feature table for roughly 180 common symbols, plus per-language overrides for custom sounds. Features are read from the symbol itself, never from chart labels, and can be queried in rules, categories, templates, and forbidden sequences with `[+nasal]`, `[-voice]`, or `[+syllabic -round]`. α-notation copies feature values between segments, as in `n > [αplace] / _ [αplace]`.
 - **Phonotactics** — a per-language syllable template, named sound categories (`N` nasals, `G` glides, and whatever else you define), chart classes derived live from the phonology tables (`plosive.plain`, `V.back`), feature bundles (`[+sonorant]`), plus optional allowed/forbidden onset and coda lists and forbidden-sequence constraints. Vocabulary forms are checked against the inventory and the template.
-- **Sound changes** — standard-style notation such as `p > f / V _ V`, `[plosive.plain] > ∅ / _ #`, `[+nasal] > ∅ / _ #`, or `n > [αplace] / _ [αplace]`, with a live tester against ancestral forms. Top-level rules apply together; dotted child rules run in sequence. These are **diachronic** rules: they derive each language’s phonemic form from its ancestor and feed the cognate chain.
+- **Sound changes** — standard-style notation such as `p > f / V _ V`, `[plosive.plain] > ∅ / _ #`, `[+nasal] > ∅ / _ #`, or `n > [αplace] / _ [αplace]`, with a live tester against ancestral forms that explains why a rule did not apply and offers a one-click fix for conflicting top-level rules. Top-level rules apply together; dotted child rules run in sequence. These are **diachronic** rules: they derive each language’s phonemic form from its ancestor and feed the cognate chain.
 - **Allophony** — **synchronic** surface rules such as `/p/ > [pʰ] / # _ V`, `p > pʰ / # _ V`, or `/s/ > [+voice] / V _ V`, applied in list order to this language’s phonemic forms. Inputs and environments accept the same categories, chart classes, and features as sound changes. A derived allophone table and a surface tester show the mapping; daughters inherit a copy of the rules as a starting grammar, but an ancestor’s allophony is never applied during historical derivation.
 - **Phonemic / phonetic notation** — forms are stored as bare IPA and displayed as `/…/` when phonemic and `[…]` when surface. Pasting delimiters into word forms, chart cells, or bulk imports strips them safely; all comparison, search, and phonotactics stay level-agnostic.
 - **Basic vocabulary** — gloss + phonemic IPA form, with a live `[…]` surface preview when allophony is defined, an inherited-form check that applies the current language's sound changes to the parent's words, and a phonotactic validity check on every form.
-- **Cognate explorer** — follow any recorded gloss down the family: each daughter's chain-derived phonemic form next to its recorded form, with an optional surface column, a one-click record action, and a whole-lexicon matrix view.
+- **Cognate explorer** — follow any recorded gloss down the family: each daughter's chain-derived phonemic form next to its recorded form, with diverging segments highlighted in both, an optional surface column, a one-click record action, and a whole-lexicon matrix view.
+- **Lexicon analytics** — a per-language tab over the vocabulary and charts: phoneme frequency with bars, never-used and off-chart callouts, onset and coda tallies from the syllabifier, a consonant/vowel token ratio, voicing-pair and chart-gap symmetry checks, and an allophone-leakage detector for surface-only symbols recorded in phonemic forms.
 - **Undo / redo** — `Ctrl+Z` / `Ctrl+Shift+Z` (or the buttons in the sidebar footer) undo and redo any edit — words, rules, charts, tree changes — with rapid typing merged into single steps and each step written back to the project file.
 - **Quick search** — `Ctrl+K` jumps anywhere in the project: languages (including by lineage path), words by gloss, form, or note, sound changes by notation, allophony rules, plus the two global views. Results highlight the hit.
 - **Phoneme keyboard** — `Ctrl+Alt+K` (`Cmd+Option+K` on macOS), or the small keyboard button that appears beside a focused IPA field, opens a palette of insertable sounds. Word forms, Phonotactics category sounds, and testers show the current language's chart phonemes, the rule tester shows the parent's, rule fields add the lineage union plus syntax keys, and chart cells get a curated IPA reference.
+- **Chart-class autocomplete** — typing in a sound-change or allophony rule field suggests the class references the lineage's charts actually support (`plosive.plain`, `V.back`), with member counts; ↑/↓/Enter or a click inserts the exact spelling at the caret, so a mistyped class cannot sneak in.
 - **Bulk vocabulary import / export** — paste a TSV, CSV, space-aligned, or JSON word list into any language with a live preview and dedupe control; export the same list back to TSV (spreadsheets) or JSON (tools).
 - **Family report & JSON backup** — download the whole family as a plain-text Markdown report or a self-contained HTML page (tree, inventories, phonotactics, sound changes, allophony, vocabulary, cognate sets), or snapshot the exact project document as JSON.
 - **Single JSON project** — `data/project.json`, pretty-printed for readable diffs and git history.
@@ -128,6 +130,8 @@ Template syntax:
 - Inside compact template runs the class comes after the leading atoms: `CV.back` is a consonant plus a back vowel, `T.velar` is a T sound followed by a velar sound.
 - Classes work in sets and forbidden sequences too: `[back t]`, `[^back]`, `[plosive.plain]#` (bans a final plain stop), `[back][plosive.plain]` (a back vowel before a plain stop).
 
+While typing in a sound-change or allophony rule field, a small **class autocomplete** lists the class references the current lineage's charts actually support, with their member counts; choose one with ↑/↓ and Enter or Tab, or click it, and it is inserted at the caret. It only opens when there is something to suggest, so ordinary sound typing is never interrupted.
+
 Constraints are optional lists:
 
 - **Onsets** and **codas** each have an **Allowed** / **Forbidden** switch. An allowed list restricts the clusters the template permits; an empty allowed list allows everything. A forbidden list rejects the clusters listed; an empty forbidden list forbids nothing. Empty onsets or codas are always allowed, and the switch is per list, so allowed onsets can combine with forbidden codas. Switching keeps both lists, so you can flip back without retyping.
@@ -195,7 +199,7 @@ Top-level rules are applied together to the ancestral form. Within one rule, mat
 
 Insertions are zero-width, so two top-level insertion rules at the same boundary do not conflict: both apply, in list order. A replacement at that boundary still conflicts with either insertion. Use a sequential child when one insertion must feed another rule.
 
-The **Rule tester** applies the current language’s rules to a form from its immediate ancestor and shows the ancestral pass and every sequential step. Its output is **phonemic** (`/…/`); when the language has allophony, a **Surface** line applies it to show `[…]`. The **Inherited vocabulary check** compares the derived output with the current language’s recorded glosses, shows the surface form alongside it, and can record the derived phonemic form. Derivations with a rule error cannot be recorded.
+The **Rule tester** applies the current language’s rules to a form from its immediate ancestor and shows the ancestral pass and every sequential step. Its output is **phonemic** (`/…/`); when the language has allophony, a **Surface** line applies it to show `[…]`. A rule that matches nothing says why in its step: the input matched no part of the form, or the left/right environment failed at every place the input itself did match. When two top-level rules conflict over the same part of the ancestral form, the tester offers **Make rule N sequential under rule M** — one click converts the later rule into a sequential child of the earlier one as a single undo step (offered only when that rule has no children of its own). The **Inherited vocabulary check** compares the derived output with the current language’s recorded glosses, shows the surface form alongside it, and can record the derived phonemic form; a **Differs** row highlights exactly which segments diverged on both sides, and an empty form shows as `∅`. Derivations with a rule error cannot be recorded.
 
 Sound changes are strictly **diachronic**: an ancestor’s allophony is not part of the chain and is never applied while deriving a daughter. Allophony is edited in its own tab (below) and applies only to the language whose rules it belongs to.
 
@@ -239,6 +243,7 @@ The **Cognate explorer** follows one recorded word down the whole family. Open i
 - Each chip compares the recorded form with the output of that language's **chain of rules**: every language applies its own staged rules to what it receives from the ancestor, starting strictly below the source. A language's own rules never re-apply to its recorded forms. Each stage is compiled with that generation's own charts and categories, so redefining `N` in a daughter does not change what an ancestor's `N > ∅ / _ #` meant.
 - Status chips reuse the vocabulary conventions: **Matches** agrees with the derivation, **Differs** has a recorded form that does not (the tooltip shows what the rules predict), and a dash means the gloss is not recorded in that language. A **Rule error** chip means a rule on the chain fails to compile.
 - Derived and recorded columns are **phonemic** (`/…/`). When a language has allophony, an extra **Surface** column shows its `[…]` form. Surface forms are applied after the historical chain and never feed it.
+- A **Differs** status aligns the two forms per segment and highlights the diverging sounds on both sides; an empty side shows `∅`.
 - Expand a row with the chevron to see the derivation step by step. **Record** (or **Use derived**) writes the derived phonemic form into that language's lexicon when a reflex is correct.
 - Comparison is by gloss only: the first entry with the same gloss (case-insensitive) is used, matching the inherited check. Languages outside the source's line of descent are not compared.
 
@@ -292,7 +297,7 @@ The parser and derivation engines are plain ES modules without DOM dependencies,
 node tests/engine.test.mjs
 ```
 
-The suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, notation delimiter stripping, allophony parsing/order/surface forms, feature allophones and off-chart surface synthesis, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration, and the Markdown/HTML report builders.
+The suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, notation delimiter stripping, allophony parsing/order/surface forms, feature allophones and off-chart surface synthesis, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration, the Markdown/HTML report builders, plus segment-level diff alignment, rule-inertness explanations and top-level conflict detection, and the lexicon analytics computations.
 
 ## Project layout
 
@@ -315,7 +320,10 @@ language-tree/
       ├─ features.js       # IPA feature table, overrides, bundles, α-notation
       ├─ phonology.js      # sound-change parser, allophony engine, derivation
       ├─ phonotactics.js   # syllable template parser and word checker
+      ├─ diff.js           # minimal segment alignment for comparing forms
+      ├─ analytics.js      # lexicon/inventory analytics computations
       ├─ search.js         # Ctrl+K quick search palette
+      ├─ autocomplete.js   # chart-class autocomplete for rule fields
       ├─ bulk.js           # vocabulary import/export parsing and writers
       ├─ report.js         # Markdown/HTML family report + JSON backup
       ├─ ui.js             # icons, modals, menus, toasts
@@ -327,6 +335,7 @@ language-tree/
          ├─ soundchanges.js
          ├─ allophony.js
          ├─ vocabulary.js
+         ├─ analytics.js
          └─ cognates.js
 ```
 
