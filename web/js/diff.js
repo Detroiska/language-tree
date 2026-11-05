@@ -15,19 +15,27 @@ import { esc } from "./ui.js";
 // in display order: { left, right, kind }, where exactly one side may be
 // null (a deletion on the left side or an insertion on the right side) and
 // kind is "equal" | "sub" | "del" | "ins".
-export function alignSegments(leftTokens = [], rightTokens = []) {
+//
+// `edgeBias` makes a small allowance for gaps at the first or last segment.
+// Correspondence tables use it so `pata → fas` reads as final-a loss
+// (`t→s, a→∅`) rather than medial-t loss (`t→∅, a→s`) when both alignments
+// cost the same. Diff coloring keeps the default, where a diagonal
+// substitution is preferred.
+export function alignSegments(leftTokens = [], rightTokens = [], { edgeBias = false } = {}) {
   const rows = leftTokens.length;
   const cols = rightTokens.length;
+  const unit = 1000;
+  const gapCost = (atEdge) => (edgeBias ? unit + (atEdge ? -1 : 1) : unit);
   // dp[i][j] = cost of aligning left[0..i) with right[0..j)
   const dp = [];
   for (let i = 0; i <= rows; i += 1) dp.push(new Array(cols + 1).fill(0));
-  for (let j = 1; j <= cols; j += 1) dp[0][j] = j;
-  for (let i = 1; i <= rows; i += 1) dp[i][0] = i;
+  for (let j = 1; j <= cols; j += 1) dp[0][j] = dp[0][j - 1] + gapCost(j === 1 || j === cols);
+  for (let i = 1; i <= rows; i += 1) dp[i][0] = dp[i - 1][0] + gapCost(i === 1 || i === rows);
   for (let i = 1; i <= rows; i += 1) {
     for (let j = 1; j <= cols; j += 1) {
-      const substitute = dp[i - 1][j - 1] + (leftTokens[i - 1] === rightTokens[j - 1] ? 0 : 1);
-      const remove = dp[i - 1][j] + 1;
-      const insert = dp[i][j - 1] + 1;
+      const substitute = dp[i - 1][j - 1] + (leftTokens[i - 1] === rightTokens[j - 1] ? 0 : unit);
+      const remove = dp[i - 1][j] + gapCost(i === 1 || i === rows);
+      const insert = dp[i][j - 1] + gapCost(j === 1 || j === cols);
       dp[i][j] = Math.min(substitute, remove, insert);
     }
   }
@@ -37,7 +45,11 @@ export function alignSegments(leftTokens = [], rightTokens = []) {
   let i = rows;
   let j = cols;
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && dp[i][j] === dp[i - 1][j - 1] + (leftTokens[i - 1] === rightTokens[j - 1] ? 0 : 1)) {
+    if (
+      i > 0 &&
+      j > 0 &&
+      dp[i][j] === dp[i - 1][j - 1] + (leftTokens[i - 1] === rightTokens[j - 1] ? 0 : unit)
+    ) {
       ops.unshift({
         left: leftTokens[i - 1],
         right: rightTokens[j - 1],
@@ -45,7 +57,7 @@ export function alignSegments(leftTokens = [], rightTokens = []) {
       });
       i -= 1;
       j -= 1;
-    } else if (i > 0 && dp[i][j] === dp[i - 1][j] + 1) {
+    } else if (i > 0 && dp[i][j] === dp[i - 1][j] + gapCost(i === 1 || i === rows)) {
       ops.unshift({ left: leftTokens[i - 1], right: null, kind: "del" });
       i -= 1;
     } else if (j > 0) {

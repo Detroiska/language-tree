@@ -5173,6 +5173,203 @@ th:hover > .axis-menu,
 }
 
 /* ------------------------------------------------------------------ */
+/* Sound correspondences                                               */
+/* ------------------------------------------------------------------ */
+
+.correspondence-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 18px 0;
+}
+
+.correspondence-summary .inventory-summary {
+  justify-content: flex-start;
+}
+
+.correspondence-mode-note {
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.correspondence-table {
+  min-width: 480px;
+}
+
+.correspondence-table th.correspondence-source-col {
+  width: 18%;
+  min-width: 112px;
+}
+
+.correspondence-table th.correspondence-lang-col {
+  min-width: 92px;
+  border-top: 0;
+  line-height: 1.35;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--ink-soft);
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+.correspondence-source {
+  white-space: nowrap;
+}
+
+.correspondence-source > .ipa {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.correspondence-position {
+  margin-left: 5px;
+  color: var(--faint);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.correspondence-occurrences {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.correspondence-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.correspondence-reflex {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.correspondence-reflex > .ipa {
+  font-size: 13px;
+}
+
+.correspondence-count {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.correspondence-variants {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding-left: 4px;
+  border-left: 1px solid var(--line);
+}
+
+.correspondence-variants .correspondence-reflex {
+  color: var(--muted);
+}
+
+.correspondence-variants .correspondence-reflex.is-irregular {
+  padding: 0 3px;
+  color: var(--gold);
+  background: var(--gold-soft);
+  border-radius: 3px;
+}
+
+.correspondence-missing {
+  color: var(--faint);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.correspondence-findings {
+  padding: 4px 18px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.correspondence-subsection {
+  margin-top: 14px;
+}
+
+.correspondence-subsection h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.correspondence-subcount {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.correspondence-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.correspondence-finding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.correspondence-finding .muted {
+  font-size: 10px;
+}
+
+.correspondence-arrow {
+  color: var(--faint);
+}
+
+.correspondence-irregular-reflex {
+  padding: 0 3px;
+  color: var(--gold);
+  background: var(--gold-soft);
+  border-radius: 3px;
+}
+
+.correspondence-warning {
+  margin: 14px 18px 0;
+}
+
+.correspondence-derived-note {
+  margin-top: 14px;
+}
+
+/* ------------------------------------------------------------------ */
 /* Phoneme keyboard                                                     */
 /* ------------------------------------------------------------------ */
 
