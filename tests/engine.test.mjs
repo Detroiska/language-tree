@@ -24,6 +24,7 @@ import {
   contextForInventory,
   contextForLanguage,
   compileRule,
+  compileRuleStages,
   applyRule,
   compileChainFrom,
   deriveForm,
@@ -48,9 +49,13 @@ import {
 import { compilePhonotactics } from "../web/js/phonotactics.js";
 import { createPhonotacticsChecker, stressMarkedForm } from "../web/js/phonotacticsCheck.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
+import { isHeavySyllable, normalizeStressSystem, stressIndexOf, stressLabel } from "../web/js/prosody.js";
 import { decodeHashPart } from "../web/js/routes.js";
 import { alignSegments, diffPairMarkup, formDiffMarkup } from "../web/js/diff.js";
 import { analyzeLexicon } from "../web/js/analytics.js";
+import { alignCognate, buildCorrespondences } from "../web/js/correspondences.js";
+import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } from "../web/js/reconstruction.js";
+import { subgroupingEvidence } from "../web/js/subgrouping.js";
 import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
 
 let passed = 0;
@@ -421,6 +426,410 @@ equal(
   "vata"
 );
 
+/* ---- reconstruction helper ---------------------------------------------- */
+
+const invert = (notation, form) => {
+  const compiled = compileRule(notation, ctx);
+  if (!compiled.ok) return { error: compiled.error };
+  return invertRule(ctx.tokenize(form), compiled.rule, ctx);
+};
+const inverseTexts = (result) => result.candidates.map((candidate) => candidate.tokens.join(""));
+
+equal(
+  "a one-to-one change keeps the unchanged source as an alternative",
+  inverseTexts(invert("p > f", "afa")),
+  ["afa", "apa"]
+);
+equal(
+  "an environment can stop an inversion",
+  inverseTexts(invert("p > f / V _ V", "fa")),
+  ["fa"]
+);
+equal(
+  "a merger reports the unchanged source and every changed source",
+  inverseTexts(invert("[p t k] > ʔ", "ʔa")),
+  ["ʔa", "pa", "ta", "ka"]
+);
+equal(
+  "an insertion keeps the unchanged form and removes the inserted segment",
+  inverseTexts(invert("∅ > ʔ / V _ V", "aʔa")),
+  ["aʔa", "aa"]
+);
+
+const reconstructAffricateConsonants = makeChart(
+  ["Affricate"],
+  ["Alveolar", "Velar"],
+  [
+    ["Affricate", "Alveolar", ["n͜d"]],
+    ["Affricate", "Velar", ["ŋ͡g"]],
+  ]
+);
+const reconstructAffricateCtx = contextForInventory({
+  consonants: reconstructAffricateConsonants,
+  vowels,
+});
+const reconstructAffricateRule = compileRule("ŋ͡g > n͜d / _ a", reconstructAffricateCtx);
+const affricateInverse = invertRule(
+  reconstructAffricateCtx.tokenize("n͜da"),
+  reconstructAffricateRule.rule,
+  reconstructAffricateCtx
+);
+equal(
+  "a rule output does not exclude the unchanged inheritance",
+  inverseTexts(affricateInverse),
+  ["n͜da", "ŋ͡ga"]
+);
+
+const deletionInverse = invert("s > ∅ / _ #", "kasa");
+equal(
+  "a deletion offers both the unchanged form and the restored consonant",
+  inverseTexts(deletionInverse),
+  ["kasa", "kasas"]
+);
+truthy(
+  "the restored deletion candidate is marked lossy",
+  deletionInverse.candidates.find((candidate) => candidate.tokens.join("") === "kasas")?.loss === 1
+);
+equal(
+  "a vowel deletion offers the unchanged form and every possible vowel",
+  inverseTexts(invert("V > ∅ / _ #", "kas")),
+  ["kas", "kasi", "kasu", "kasa", "kasɑ"]
+);
+
+const sequentialInverse = invertRules(
+  ctx.tokenize("vata"),
+  compileRuleStages(
+    [
+      { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+      { id: "c1", notation: "f > v", note: "", enabled: true, parentId: "r1" },
+    ],
+    ctx
+  ),
+  ctx
+);
+equal(
+  "a sequential chain reports every possible ancestor",
+  sequentialInverse.candidates.map((candidate) => candidate.tokens.join("")),
+  ["vata", "fata", "pata"]
+);
+
+const parallelInverse = invertRules(
+  ctx.tokenize("vata"),
+  compileRuleStages(
+    [
+      { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+      { id: "r2", notation: "f > v", note: "", enabled: true, parentId: null },
+    ],
+    ctx
+  ),
+  ctx
+);
+equal(
+  "parallel rules report the unchanged form and every valid source",
+  parallelInverse.candidates.map((candidate) => candidate.tokens.join("")),
+  ["vata", "fata"]
+);
+
+const noInverse = invert("a > e", "aka");
+equal("a form the rules cannot produce has no inverse", noInverse.candidates, []);
+
+const voicedConsonants = makeChart(
+  ["Plosive"],
+  ["Bilabial", "Alveolar"],
+  [
+    ["Plosive", "Bilabial", ["p", "b"]],
+    ["Plosive", "Alveolar", ["t", "d"]],
+  ]
+);
+const voicedCtx = contextForInventory({ consonants: voicedConsonants, vowels });
+const voicedRule = compileRule("t > [+voice] / V _ V", voicedCtx);
+const voicedInverse = invertRule(voicedCtx.tokenize("ada"), voicedRule.rule, voicedCtx);
+equal(
+  "a feature change keeps the unchanged source as an alternative",
+  voicedInverse.candidates.map((candidate) => candidate.tokens.join("")),
+  ["ada", "ata"]
+);
+
+const reconstructionProject = stagedProject([
+  { id: "r1", notation: "p > f / V _ V", note: "", enabled: true, parentId: null },
+]);
+const reconstruction = reconstructForm("afa", reconstructionProject, "child");
+equal("reconstruction names the immediate ancestor", reconstruction.parent?.id, "root");
+equal("reconstruction prefers the unchanged form", reconstruction.text, "afa");
+equal(
+  "reconstruction alternatives include the unchanged and changed forms",
+  reconstructionAlternatives(reconstruction),
+  ["afa", "apa"]
+);
+equal("a root language has nothing to reconstruct", reconstructForm("kasa", project, "root").reason, "root");
+equal("an empty form is not reconstructed", reconstructForm("", project, "child").reason, "empty");
+const mergerProject = stagedProject([
+  { id: "r1", notation: "[p t k] > ʔ", note: "", enabled: true, parentId: null },
+]);
+const mergerReconstruction = reconstructForm("ʔa", mergerProject, "child");
+truthy("reconstructForm flags merger ambiguity", mergerReconstruction.ambiguous);
+truthy("reconstructForm keeps the unchanged merger source", mergerReconstruction.unchanged);
+equal(
+  "reconstructForm surfaces the unchanged source and every merger alternative",
+  mergerReconstruction.candidates.map((candidate) => candidate.text),
+  ["ʔa", "pa", "ta", "ka"]
+);
+
+const affricateBase = {
+  inventory: { consonants: reconstructAffricateConsonants, vowels },
+  phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+};
+const affricateProject = {
+  title: "Affricates",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...affricateBase, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...affricateBase,
+      soundChanges: [
+        { id: "r1", notation: "ŋ͡g > n͜d / _ a", note: "", enabled: true, parentId: null },
+      ],
+      vocabulary: [],
+    },
+  ],
+};
+const affricateReconstruction = reconstructForm("n͜da", affricateProject, "child");
+equal(
+  "a rule output does not make the unchanged form impossible",
+  affricateReconstruction.candidates.map((candidate) => candidate.text),
+  ["n͜da", "ŋ͡ga"]
+);
+truthy("reconstructForm flags inherited/derived ambiguity", affricateReconstruction.ambiguous);
+truthy("reconstructForm marks the unchanged candidate", affricateReconstruction.unchanged);
+
+const parentEvidenceProject = {
+  title: "Parent evidence",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      ...affricateBase,
+      soundChanges: [],
+      vocabulary: [{ id: "w1", gloss: "you (sg.)", form: "ŋ͡ga", note: "" }],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...affricateBase,
+      soundChanges: [
+        { id: "r1", notation: "ŋ͡g > n͜d / _ a", note: "", enabled: true, parentId: null },
+      ],
+      vocabulary: [],
+    },
+  ],
+};
+const parentGlossEvidence = reconstructForm("n͜da", parentEvidenceProject, "child", {
+  gloss: "you (sg.)",
+});
+equal(
+  "a parent gloss match outranks a lower-cost reconstruction",
+  parentGlossEvidence.text,
+  "ŋ͡ga"
+);
+equal(
+  "parent gloss evidence is recorded on the candidate",
+  parentGlossEvidence.candidates[0].parentMatch,
+  "gloss"
+);
+equal(
+  "parent evidence still lists every exact alternative",
+  parentGlossEvidence.candidates.map((candidate) => candidate.text),
+  ["ŋ͡ga", "n͜da"]
+);
+
+const punctuationEvidence = reconstructForm("n͜da", parentEvidenceProject, "child", {
+  gloss: "You (sg)",
+});
+equal(
+  "punctuation drift in a gloss still counts as a parent gloss match",
+  punctuationEvidence.candidates[0].parentMatch,
+  "gloss"
+);
+equal("punctuation drift uses the parent gloss wording", punctuationEvidence.candidates[0].parentGloss, "you (sg.)");
+
+const parentFormEvidence = reconstructForm("n͜da", parentEvidenceProject, "child");
+equal("a parent form match is also evidence", parentFormEvidence.text, "ŋ͡ga");
+equal(
+  "form-only parent evidence is weaker than a gloss match but still recorded",
+  parentFormEvidence.candidates[0].parentMatch,
+  "form"
+);
+
+parentEvidenceProject.languages[1].vocabulary.push({
+  id: "w_child",
+  gloss: "you (sg.)",
+  form: "n͜da",
+  note: "",
+});
+const inferredGlossEvidence = reconstructForm("n͜da", parentEvidenceProject, "child");
+equal(
+  "reconstruction infers the gloss from the daughter lexicon",
+  inferredGlossEvidence.gloss,
+  "you (sg.)"
+);
+equal("inferred gloss uses the parent lexicon", inferredGlossEvidence.text, "ŋ͡ga");
+
+const subgroupProject = {
+  title: "Subgrouping",
+  languages: [
+    { id: "root", name: "Root", parentId: null, soundChanges: [] },
+    {
+      id: "x",
+      name: "X",
+      parentId: "root",
+      soundChanges: [
+        { id: "x1", notation: "p > f", note: "", enabled: true },
+        { id: "x2", notation: "a > e", note: "", enabled: true },
+      ],
+    },
+    {
+      id: "a",
+      name: "A",
+      parentId: "x",
+      soundChanges: [
+        { id: "a1", notation: "t > s", note: "", enabled: true },
+        { id: "a2", notation: "m > n", note: "", enabled: false },
+      ],
+    },
+    { id: "single", name: "Single", parentId: "a", soundChanges: [] },
+    {
+      id: "b",
+      name: "B",
+      parentId: "x",
+      soundChanges: [
+        { id: "b1", notation: "t  >  s", note: "", enabled: true },
+        { id: "b2", notation: "k > g", note: "", enabled: true },
+      ],
+    },
+    {
+      id: "c",
+      name: "C",
+      parentId: "root",
+      soundChanges: [{ id: "c1", notation: "k > g", note: "", enabled: true }],
+    },
+    {
+      id: "d",
+      name: "D",
+      parentId: "root",
+      soundChanges: [{ id: "d1", notation: "p > f", note: "", enabled: true }],
+    },
+  ],
+};
+const subgroup = subgroupingEvidence(subgroupProject);
+const subgroupRoot = subgroup.nodes.find((node) => node.language.id === "root");
+const subgroupX = subgroup.nodes.find((node) => node.language.id === "x");
+equal("subgrouping tests only nodes with two or more daughters", subgroup.tested, 2);
+truthy(
+  "a node with one daughter is not a subgrouping test",
+  !subgroup.nodes.some((node) => node.language.id === "single")
+);
+equal("a clade with shared branch innovations is supported", subgroupX.status, "supported");
+equal(
+  "branch innovations are listed on the node",
+  subgroupX.ancestral.map((rule) => rule.key),
+  ["p > f", "a > e"]
+);
+equal(
+  "the same change on every descendant branch is shared",
+  subgroupX.shared.map((rule) => rule.key),
+  ["t > s"]
+);
+truthy("a shared change can be unique to the clade", subgroupX.shared[0].unique);
+equal(
+  "support counts unique branch and shared rules",
+  subgroupX.support,
+  2
+);
+truthy(
+  "a branch rule also recorded outside the clade is not unique",
+  subgroupX.ancestral.find((rule) => rule.key === "p > f")?.unique === false
+);
+equal("a clade with no shared change is unsupported", subgroupRoot.status, "unsupported");
+truthy(
+  "an unsupported node explains why",
+  subgroupRoot.warning.includes("No shared sound change")
+);
+truthy(
+  "partially shared changes are still listed",
+  subgroupRoot.partial.some(
+    (rule) => rule.key === "p > f" && rule.count === 2 && rule.sources.join(",") === "X,D"
+  )
+);
+truthy(
+  "rules below a daughter branch are not counted at the parent node",
+  !subgroupRoot.partial.some((rule) => rule.key === "t > s")
+);
+truthy(
+  "disabled rules are ignored",
+  ![...subgroupX.ancestral, ...subgroupX.shared, ...subgroupRoot.partial].some(
+    (rule) => rule.key === "m > n"
+  )
+);
+equal(
+  "subgrouping summary counts supported and unsupported nodes",
+  [subgroup.supported, subgroup.unsupported],
+  [1, 1]
+);
+equal(
+  "a family with no branching node has nothing to test",
+  subgroupingEvidence({
+    languages: [{ id: "lonely", name: "Lonely", parentId: null, soundChanges: [] }],
+  }).tested,
+  0
+);
+
+const weakSubgroupProject = {
+  title: "Weak subgrouping",
+  languages: [
+    { id: "root", name: "Root", parentId: null, soundChanges: [] },
+    { id: "x", name: "X", parentId: "root", soundChanges: [] },
+    {
+      id: "a",
+      name: "A",
+      parentId: "x",
+      soundChanges: [{ id: "a1", notation: "t > s", note: "", enabled: true }],
+    },
+    {
+      id: "b",
+      name: "B",
+      parentId: "x",
+      soundChanges: [{ id: "b1", notation: "t > s", note: "", enabled: true }],
+    },
+    {
+      id: "c",
+      name: "C",
+      parentId: "root",
+      soundChanges: [{ id: "c1", notation: "t > s", note: "", enabled: true }],
+    },
+  ],
+};
+const weakSubgroup = subgroupingEvidence(weakSubgroupProject);
+const weakX = weakSubgroup.nodes.find((node) => node.language.id === "x");
+equal(
+  "a shared change found outside the clade does not uniquely support it",
+  weakX.status,
+  "weak"
+);
+truthy(
+  "weak support explains the outgroup match",
+  weakX.warning.includes("outside this clade")
+);
+equal(
+  "weak support still lists the shared change",
+  weakX.shared.map((rule) => rule.key),
+  ["t > s"]
+);
+truthy("the weak shared change is marked non-unique", weakX.shared[0].unique === false);
+
 const chainConsonants = makeChart(
   ["Plosive", "Nasal"],
   ["Bilabial", "Alveolar", "Velar"],
@@ -628,6 +1037,160 @@ truthy(
 truthy(
   "words still validate while forbidden sets are broken",
   brokenForbiddenSet.validate("kasa").ok,
+);
+
+/* ---- stress and syllable notation -------------------------------------- */
+
+const stressCtx = contextForInventory(inventory, null, { stress: "initial" });
+const finalCtx = contextForInventory(inventory, null, { stress: "final" });
+const stressApply = (context, notation, form) => {
+  const compiled = compileRule(notation, context);
+  if (!compiled.ok) return { error: compiled.error };
+  return { out: applyRule(context.tokenize(form), compiled.rule, context).tokens.join("") };
+};
+
+const parsedStress = ctx.tokenizeWithStress("ˌka.sa");
+equal("stress marks are not segments", parsedStress.tokens, ["k", "a", "s", "a"]);
+equal("a stress mark belongs to the next segment", parsedStress.stress, ["ˌ", "", "", ""]);
+equal("explicit stress is reported", parsedStress.explicit, true);
+equal("plain tokenize ignores stress and dots", ctx.tokenize("ˈka.sa"), ["k", "a", "s", "a"]);
+
+const light = () => ({ nucleus: ["a"], coda: [] });
+const heavy = () => ({ nucleus: ["a"], coda: ["n"] });
+const long = () => ({ nucleus: ["aː"], coda: [] });
+const diphthong = () => ({ nucleus: ["a", "i"], coda: [] });
+equal("initial stress", stressIndexOf([light(), light(), light()], "initial"), 0);
+equal("final stress", stressIndexOf([light(), light(), light()], "final"), 2);
+equal("penultimate stress", stressIndexOf([light(), light(), light()], "penult"), 1);
+equal("antepenultimate stress", stressIndexOf([light(), light(), light(), light()], "antepenult"), 1);
+equal("weight stress takes a heavy penult", stressIndexOf([light(), heavy(), light()], "weight"), 1);
+equal("weight stress falls back to the antepenult", stressIndexOf([light(), light(), light()], "weight"), 0);
+equal("weight stress falls back to the initial in a short word", stressIndexOf([light(), light()], "weight"), 0);
+truthy("a closed syllable is heavy", isHeavySyllable(heavy()));
+truthy("a long nucleus is heavy", isHeavySyllable(long()));
+truthy("a diphthong is heavy", isHeavySyllable(diphthong()));
+truthy("an open short syllable is light", !isHeavySyllable(light()));
+equal("unknown stress systems normalize to none", normalizeStressSystem("loud"), "none");
+equal("stress labels read naturally", stressLabel("weight"), "Weight-sensitive (penult if heavy)");
+equal("missing stress defaults to none", migratedPhonotactics.stress, "none");
+
+const initialChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "initial" },
+});
+const initialWord = initialChecker.validate("kasa");
+equal("validation reports the stress display", initialWord.displayText, "ˈka.sa");
+equal("validation exposes the stress index", initialWord.stressIndex, 0);
+equal("mark stress helper writes the predicted mark", stressMarkedForm("kasa", initialChecker), "ˈkasa");
+equal(
+  "a daughter inherits the stress system",
+  createLanguage("Daughter", "only", inventory, {
+    ...language.phonotactics,
+    stress: "initial",
+  }).phonotactics.stress,
+  "initial"
+);
+
+const weightChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "weight" },
+});
+equal("a heavy penult is stressed", weightChecker.validate("kasantan").displayText, "ka.ˈsan.tan");
+equal("a light penult falls back to the antepenult", weightChecker.validate("kasantaka").displayText, "ka.ˈsan.ta.ka");
+
+equal("stress-conditioned rule targets the stressed syllable", stressApply(stressCtx, "a > ə / ˈ _", "kasa"), { out: "kəsa" });
+equal("stress-conditioned rule ignores unstressed syllables", stressApply(finalCtx, "a > ə / ˈ _", "kasa"), { out: "kasə" });
+equal("right syllable edge matches a coda", stressApply(stressCtx, "s > z / _ .", "kas"), { out: "kaz" });
+equal("right syllable edge rejects an onset", stressApply(stressCtx, "s > z / _ .", "kasa"), { out: "kasa" });
+equal("left syllable edge matches an onset", stressApply(stressCtx, "s > z / . _", "kasa"), { out: "kaza" });
+equal("sigma is an alias for the syllable edge", stressApply(stressCtx, "s > z / _ σ", "kas"), { out: "kaz" });
+
+const targetStress = compileRule("ˈ > ∅", stressCtx);
+truthy(
+  "stress marks are rejected in the input",
+  !targetStress.ok && /only work in the environment/.test(targetStress.error)
+);
+const targetDot = compileRule(". > z", stressCtx);
+truthy(
+  "syllable edges are rejected in the input",
+  !targetDot.ok && /only work in the environment/.test(targetDot.error)
+);
+const noStressRule = compileRule("a > ə / ˈ _", ctx);
+truthy(
+  "a stress environment warns when the language has no stress system",
+  noStressRule.ok && noStressRule.warnings.some((warning) => warning.includes("no stress system"))
+);
+
+const stressProject = ensureProject({
+  title: "Stress display",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      phonotactics: { ...language.phonotactics, stress: "initial" },
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+const stressSurface = surfaceForForm("kasa", stressProject, "only");
+equal("surface display includes stress and syllables", stressSurface.display, "ˈka.sa");
+equal("surface text remains bare segments", stressSurface.text, "kasa");
+
+const stressChangeProject = ensureProject({
+  title: "Stress changes",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory,
+      phonotactics: { ...language.phonotactics, stress: "none" },
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      inventory,
+      phonotactics: { ...language.phonotactics, stress: "initial" },
+      soundChanges: [{ id: "r1", notation: "a > ə / ˈ _", note: "", enabled: true }],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+equal("sound changes can condition on stress", deriveForm("kasa", stressChangeProject, "child").text, "kəsa");
+equal(
+  "stress marks in a stored form do not affect derivation",
+  deriveForm("ˈkasa", stressChangeProject, "child").text,
+  "kəsa"
+);
+
+const stressAllophonyProject = ensureProject({
+  title: "Stress allophony",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      phonotactics: { ...language.phonotactics, stress: "final" },
+      soundChanges: [],
+      allophony: [{ id: "a1", notation: "a > ə / ˈ _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "allophony can condition on stress",
+  surfaceForForm("kasa", stressAllophonyProject, "only").text,
+  "kasə"
 );
 
 /* ---- notation ----------------------------------------------------------- */
@@ -910,6 +1473,131 @@ equal("an allophony rule feeds the next rule's input", fedSurface.text, "ab");
 truthy(
   "a fed surface symbol is not reported as uncharted",
   fedSurface.compiled[1].ok && !(fedSurface.compiled[1].warnings || []).some((warning) => warning.includes("pʰ")),
+);
+
+const harmonyLanguage = (allophony) => ({
+  title: "Harmony",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony,
+      vocabulary: [],
+    },
+  ],
+});
+const iterativeProject = ensureProject(
+  harmonyLanguage([
+    {
+      id: "h1",
+      notation: "a > u / u _",
+      note: "",
+      enabled: true,
+      iterative: true,
+      repeatLimit: 12,
+      domain: "adjacent",
+    },
+  ])
+);
+const iterativeSurface = surfaceForForm("uaa", iterativeProject, "only");
+equal("a repeating rule feeds its own environment", iterativeSurface.text, "uuu");
+equal("the tester counts repeat passes", iterativeSurface.steps[0].passes, 2);
+equal("a converged repeat rule reports no warnings", iterativeSurface.warnings, []);
+iterativeProject.languages[0].allophony[0].iterative = false;
+equal("without repeat the rule applies once", surfaceForForm("uaa", iterativeProject, "only").text, "uua");
+iterativeProject.languages[0].allophony[0].iterative = true;
+
+const wordDomainProject = ensureProject(
+  harmonyLanguage([
+    {
+      id: "h2",
+      notation: "a > u / u _",
+      note: "",
+      enabled: true,
+      iterative: true,
+      repeatLimit: 12,
+      domain: "word",
+    },
+  ])
+);
+equal(
+  "word-domain harmony skips intervening consonants",
+  surfaceForForm("ukata", wordDomainProject, "only").text,
+  "ukutu"
+);
+
+const syllableDomainProject = ensureProject(
+  harmonyLanguage([
+    {
+      id: "h3",
+      notation: "a > i / k _",
+      note: "",
+      enabled: true,
+      iterative: false,
+      repeatLimit: 12,
+      domain: "syllable",
+    },
+  ])
+);
+const syllableSurface = surfaceForForm("kata", syllableDomainProject, "only");
+const syllableContext = contextForAllophony(syllableDomainProject, "only");
+equal(
+  "the fixture syllabifies as ka.ta",
+  syllableContext
+    .prosodyFor(syllableContext.tokenize("kata"))
+    .syllables.map((syllable) => syllable.tokens.join("")),
+  ["ka", "ta"]
+);
+equal("a syllable domain does not cross a syllable edge", syllableSurface.text, "kita");
+syllableDomainProject.languages[0].allophony[0].domain = "word";
+equal("the same rule reaches across the word", surfaceForForm("kata", syllableDomainProject, "only").text, "kiti");
+
+const runawayProject = ensureProject(
+  harmonyLanguage([
+    {
+      id: "h4",
+      notation: "∅ > a / # _",
+      note: "",
+      enabled: true,
+      iterative: true,
+      repeatLimit: 3,
+      domain: "adjacent",
+    },
+  ])
+);
+const runawaySurface = surfaceForForm("k", runawayProject, "only");
+equal("a runaway repeat stops at its pass limit", runawaySurface.text, "aaak");
+equal("the runaway step records the limit", runawaySurface.steps[0].passes, 3);
+truthy("a still-changing rule is marked runaway", runawaySurface.steps[0].runaway === true);
+truthy(
+  "a runaway repeat warns instead of looping",
+  runawaySurface.warnings.some((warning) => warning.includes("Stopped after 3 passes"))
+);
+
+const repeatDefaults = ensureProject(
+  harmonyLanguage([
+    {
+      id: "h5",
+      notation: "a > u",
+      note: "",
+      enabled: true,
+      iterative: true,
+      repeatLimit: 999,
+      domain: "over-the-hill",
+    },
+  ])
+);
+equal(
+  "allophony repeat fields are normalized on load",
+  [
+    repeatDefaults.languages[0].allophony[0].repeatLimit,
+    repeatDefaults.languages[0].allophony[0].domain,
+    repeatDefaults.languages[0].allophony[0].iterative,
+  ],
+  [100, "adjacent", true]
 );
 
 const table = allophoneTable(allophonyProject, "child");
@@ -1654,8 +2342,15 @@ truthy(
 );
 truthy("HTML report formats lexical forms as phonemic", allophonyHtml.includes("/kasa/"));
 
-const overrideMarkdown = buildMarkdown(featureProject);
+stressProject.languages[0].vocabulary.push({ id: "w1", gloss: "hand", form: "kasa", note: "" });
+const stressMarkdown = buildMarkdown(stressProject);
 truthy(
+  "report records the stress system",
+  stressMarkdown.includes("Stress") && stressMarkdown.includes("Initial")
+);
+truthy("report surface forms include stress and syllable dots", stressMarkdown.includes("ˈka.sa"));
+
+const overrideMarkdown = buildMarkdown(featureProject);truthy(
   "Markdown report includes feature overrides",
   overrideMarkdown.includes("Feature overrides") && overrideMarkdown.includes(customSymbol)
 );
@@ -1912,6 +2607,228 @@ equal(
   ).map((item) => item.ref),
   ["plain", "plain.extra", "series.plain"]
 );
+
+/* ---- correspondence tables ---------------------------------------------- */
+
+equal(
+  "alignment keeps a deleted source segment as ∅",
+  alignCognate(["p", "a", "t", "a"], ["f", "a", "s"]).positions.map((position) => position.reflex),
+  ["f", "a", "s", "∅"]
+);
+equal(
+  "alignment marks a deleted source position",
+  alignCognate(["p", "a", "t", "a"], ["f", "a", "s"]).positions[3].deleted,
+  true
+);
+equal(
+  "inserted segments are separated from source positions",
+  alignCognate(["a", "p", "a"], ["a", "ʔ", "p", "a"]).insertions,
+  [{ boundary: 1, after: "a", before: "p", reflex: "ʔ" }]
+);
+
+const corrConsonants = makeChart(
+  ["Plosive", "Fricative", "Nasal"],
+  ["Bilabial", "Alveolar", "Velar"],
+  [
+    ["Plosive", "Bilabial", ["p", "b"]],
+    ["Plosive", "Alveolar", ["t", "d"]],
+    ["Plosive", "Velar", ["k"]],
+    ["Fricative", "Bilabial", ["f", "v"]],
+    ["Fricative", "Alveolar", ["s"]],
+    ["Nasal", "Bilabial", ["m"]],
+    ["Nasal", "Alveolar", ["n"]],
+  ]
+);
+const corrVowels = makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]);
+const corrBase = {
+  inventory: { consonants: corrConsonants, vowels: corrVowels },
+  phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+  allophony: [],
+  featureOverrides: {},
+};
+const correspondenceProject = {
+  title: "Correspondence fixture",
+  languages: [
+    {
+      id: "corr_root",
+      name: "Proto",
+      parentId: null,
+      ...corrBase,
+      soundChanges: [],
+      vocabulary: [
+        { id: "cw1", gloss: "two", form: "pata", note: "" },
+        { id: "cw2", gloss: "father", form: "papa", note: "" },
+        { id: "cw3", gloss: "five", form: "paka", note: "" },
+        { id: "cw4", gloss: "four", form: "pasa", note: "" },
+        { id: "cw5", gloss: "night", form: "sata", note: "" },
+      ],
+    },
+    {
+      id: "corr_a",
+      name: "Daughter A",
+      parentId: "corr_root",
+      ...corrBase,
+      soundChanges: [
+        { id: "ca1", notation: "p > f", note: "", enabled: true },
+        { id: "ca2", notation: "t > s", note: "", enabled: true },
+        { id: "ca3", notation: "V > ∅ / _ #", note: "", enabled: true },
+      ],
+      vocabulary: [
+        { id: "caw1", gloss: "two", form: "fas", note: "" },
+        { id: "caw2", gloss: "father", form: "faf", note: "" },
+        { id: "caw3", gloss: "five", form: "fak", note: "" },
+        { id: "caw4", gloss: "four", form: "vas", note: "" },
+        { id: "caw5", gloss: "night", form: "sas", note: "" },
+      ],
+    },
+    {
+      id: "corr_b",
+      name: "Daughter B",
+      parentId: "corr_root",
+      ...corrBase,
+      soundChanges: [
+        { id: "cb1", notation: "p > b", note: "", enabled: true },
+        { id: "cb2", notation: "t > d", note: "", enabled: true },
+      ],
+      vocabulary: [
+        { id: "cbw1", gloss: "two", form: "bada", note: "" },
+        { id: "cbw2", gloss: "father", form: "baba", note: "" },
+        { id: "cbw3", gloss: "five", form: "baka", note: "" },
+        { id: "cbw5", gloss: "night", form: "sada", note: "" },
+      ],
+    },
+    {
+      id: "corr_out",
+      name: "Outsider",
+      parentId: null,
+      ...corrBase,
+      soundChanges: [],
+      vocabulary: [{ id: "cow1", gloss: "two", form: "pata", note: "" }],
+    },
+  ],
+};
+
+const recordedTable = buildCorrespondences(correspondenceProject, "corr_root");
+equal(
+  "only descendants of the chosen source enter the table",
+  recordedTable.languages.map((language) => language.name),
+  ["Daughter A", "Daughter B"]
+);
+equal(
+  "correspondence rows group initial before medial before final",
+  recordedTable.rows.map((row) => `${row.segment}/${row.position}`),
+  [
+    "p/initial",
+    "s/initial",
+    "a/medial",
+    "t/medial",
+    "p/medial",
+    "k/medial",
+    "s/medial",
+    "a/final",
+  ]
+);
+
+const pInitial = recordedTable.rows.find((row) => row.segment === "p" && row.position === "initial");
+const pInitialA = pInitial.cells.find((cell) => cell.languageId === "corr_a");
+const pInitialB = pInitial.cells.find((cell) => cell.languageId === "corr_b");
+equal("a source position counts each occurrence once", pInitial.occurrences, 4);
+equal(
+  "the dominant reflex carries its count",
+  [pInitialA.dominant.reflex, pInitialA.dominant.count],
+  ["f", 3]
+);
+equal(
+  "a singleton reflex is marked as irregular",
+  pInitialA.irregular.map((item) => [item.reflex, item.expected, item.glosses]),
+  [["v", "f", ["four"]]]
+);
+equal("missing recorded forms leave a coverage gap", [pInitialB.total, pInitialB.missing], [3, 1]);
+equal(
+  "coverage is reported per descendant",
+  recordedTable.coverage.languages.map((language) => [language.name, language.glosses]),
+  [
+    ["Daughter A", 5],
+    ["Daughter B", 4],
+  ]
+);
+equal(
+  "irregular correspondences name the source segment and exceptional gloss",
+  recordedTable.irregularities.map((item) => [
+    item.segment,
+    item.position,
+    item.languageName,
+    item.reflex,
+    item.expected,
+    item.glosses[0],
+  ]),
+  [["p", "initial", "Daughter A", "v", "f", "four"]]
+);
+
+const finalA = recordedTable.rows.find((row) => row.segment === "a" && row.position === "final");
+equal(
+  "a deleted final vowel is a regular ∅ reflex",
+  [finalA.cells[0].dominant.reflex, finalA.cells[0].dominant.count],
+  ["∅", 5]
+);
+equal(
+  "the other daughter retains the final vowel",
+  [finalA.cells[1].dominant.reflex, finalA.cells[1].dominant.count],
+  ["a", 4]
+);
+
+const derivedTable = buildCorrespondences(correspondenceProject, "corr_root", { mode: "derived" });
+const derivedPInitial = derivedTable.rows.find((row) => row.segment === "p" && row.position === "initial");
+equal(
+  "derived mode replays each descendant's rule chain",
+  derivedPInitial.cells.find((cell) => cell.languageId === "corr_a").counts.map((item) => [item.reflex, item.count]),
+  [["f", 4]]
+);
+equal(
+  "derived mode fills glosses that were never recorded",
+  [
+    derivedPInitial.cells.find((cell) => cell.languageId === "corr_b").total,
+    derivedPInitial.cells.find((cell) => cell.languageId === "corr_b").missing,
+  ],
+  [4, 0]
+);
+equal("derived correspondence tables have no recorded singletons", derivedTable.irregularities, []);
+equal(
+  "derived mode reports no rule errors for a clean fixture",
+  derivedTable.coverage.languages.flatMap((language) => language.errors),
+  []
+);
+
+const corrInsertionProject = {
+  title: "Insertion fixture",
+  languages: [
+    {
+      id: "ins_root",
+      name: "Root",
+      parentId: null,
+      ...corrBase,
+      soundChanges: [],
+      vocabulary: [{ id: "iw1", gloss: "road", form: "paa", note: "" }],
+    },
+    {
+      id: "ins_child",
+      name: "Child",
+      parentId: "ins_root",
+      ...corrBase,
+      soundChanges: [{ id: "ir1", notation: "∅ > ʔ / V _ V", note: "", enabled: true }],
+      vocabulary: [{ id: "iw2", gloss: "road", form: "paʔa", note: "" }],
+    },
+  ],
+};
+const insertionTable = buildCorrespondences(corrInsertionProject, "ins_root");
+equal(
+  "inserted segments are listed with their boundary",
+  insertionTable.insertions.map((item) => [item.languageName, item.reflex, item.after, item.before, item.gloss]),
+  [["Child", "ʔ", "a", "a", "road"]]
+);
+
+const missingSource = buildCorrespondences(correspondenceProject, "no_such_language");
+equal("an unknown source returns an empty table", [missingSource.source, missingSource.rows.length], [null, 0]);
 
 /* ---- summary ------------------------------------------------------------- */
 
