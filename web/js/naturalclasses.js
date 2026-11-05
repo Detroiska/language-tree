@@ -264,3 +264,36 @@ export function suggestClassRefs(index) {
   }
   return [...suggestions.values()].filter((item) => !item.empty);
 }
+
+// ---- typed-query policy ---------------------------------------------------
+//
+// Pure helpers for the rule-field class autocomplete, kept here so the
+// trigger and matching policy is DOM-free and covered by the engine tests;
+// the DOM wiring in autocomplete.js stays thin.
+
+// A rule-field token is worth suggesting against when it could plausibly be
+// a class reference: at least two characters (a single letter is an ordinary
+// phoneme in rule text, so typing a rule must never open the list by itself),
+// containing only letters, digits and the dots and dashes labels use.
+// Notation pieces — `>`, `[`, `#`, spaces — never suggest; the return value
+// is "" when the token should not trigger.
+export function suggestQuery(tokenText) {
+  const query = String(tokenText ?? "").normalize("NFC").trim().toLowerCase();
+  if (!query || query.length < 2) return "";
+  if (/[^a-z\p{L}\p{N}.\-]/u.test(query)) return "";
+  return query;
+}
+
+// A reference matches when it starts with the query, or when the query
+// matches a later dotted segment — typing `.pl` still finds `plosive.plain`.
+export function matchesQuery(ref, query) {
+  const lower = String(ref ?? "").toLowerCase();
+  if (lower.startsWith(query)) return true;
+  return lower.split(".").some((part) => part.startsWith(query));
+}
+
+// The displayed list: matched references, capped. Kept here with the rest of
+// the policy so the cap and the ordering live in one place.
+export function filterSuggestions(suggestions, query, limit = 8) {
+  return suggestions.filter((item) => matchesQuery(item.ref, query)).slice(0, limit);
+}

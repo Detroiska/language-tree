@@ -1,6 +1,11 @@
 import { store } from "./store.js";
 import { findLanguage, getLineage } from "./model.js";
-import { buildClassIndex, suggestClassRefs } from "./naturalclasses.js";
+import {
+  buildClassIndex,
+  filterSuggestions,
+  suggestClassRefs,
+  suggestQuery,
+} from "./naturalclasses.js";
 import { decodeHashPart } from "./routes.js";
 import { esc, icon } from "./ui.js";
 
@@ -8,13 +13,17 @@ import { esc, icon } from "./ui.js";
 // and allophony).
 //
 // Chart classes are the most open-ended notation in rule text: `plosive.plain`
-// only works when it is spelled the way the chart spells it. This module
-// watches the token being typed (letters, dots and dashes between notation
-// breaks), matches it against `suggestClassRefs()` for the current language's
-// charts, and offers a small insertable list — keyboard navigable, caret
-// preserved on acceptance. Accepting fires a synthetic input event so every
-// existing listener (rule status, tester re-run, autosave, undo) treats it
-// exactly like typing.
+// only works when it is spelled the way the chart spells it. While a rule
+// field holds a token that could plausibly be a class reference (two
+// characters or more — a single letter is an ordinary phoneme, so typing a
+// rule never opens the list by itself), this module offers the matching
+// `suggestClassRefs()` entries of the current lineage: keyboard navigable,
+// caret preserved on acceptance. Enter accepts, Escape dismisses, and Tab is
+// never intercepted so focus navigation keeps its usual meaning. Accepting
+// fires a synthetic input event so every existing listener (rule status,
+// tester re-run, autosave, undo) treats it exactly like typing. The query
+// and matching policy lives in naturalclasses.js, DOM-free and covered by
+// the engine tests.
 
 const TARGET_SELECTOR = ".rule-input";
 
@@ -32,9 +41,9 @@ const state = {
   token: { start: 0, end: 0, text: "" },
   items: [],
   active: 0,
-  // Guards against the insertion's own synthetic input event reopening the
-  // list (as well as events inserted by the phoneme keyboard until the user
-  // really types).
+  // Guards against the just-accepted insertion's own synthetic input event
+  // re-running the trigger check. Single-phoneme insertions from the
+  // phoneme keyboard are kept out by the two-letter trigger instead.
   busy: false,
 };
 
@@ -71,13 +80,6 @@ function tokenAt(input) {
   let end = caret;
   while (end < value.length && !TOKEN_BREAK.test(value[end])) end += 1;
   return { start, end, text: value.slice(start, end) };
-}
-
-function matchesQuery(ref, query) {
-  const lower = ref.toLowerCase();
-  if (lower.startsWith(query)) return true;
-  // Typing a later segment ("… .pl") should still find `plosive.plain`.
-  return lower.split(".").some((part) => part.startsWith(query));
 }
 
 function itemMarkup(item, index) {
@@ -144,7 +146,10 @@ function close() {
   state.items = [];
 }
 
-// Recompute the suggestion list from the field's current text and caret.
+// Recompute the suggestion list from the field's current text and caret,
+// then render and position the (possibly rebuilt) menu. Returned early when
+// the field is gone or the token stopped looking like a class query — the
+// list is never left stale or invisible.
 function refreshForTarget() {
   if (!state.open || !isTarget(state.target)) {
     close();
@@ -152,19 +157,23 @@ function refreshForTarget() {
   }
   const token = tokenAt(state.target);
   state.token = token;
-  const query = token.text.normalize("NFC").trim().toLowerCase();
-  if (!query || /[^a-z\p{L}\p{N}.\-]/u.test(query)) {
+  const query = suggestQuery(token.text);
+  if (!query) {
     close();
     return;
   }
-  const all = suggestionsFor();
-  state.items = all.filter((item) => matchesQuery(item.ref, query)).slice(0, MAX_ITEMS);
-  state.active = Math.min(state.active, Math.max(0, state.items.length - 1));
+  state.items = filterSuggestions(suggestionsFor(), query, MAX_ITEMS);
+  // The list was rebuilt, so the highlight restarts: a clamped stale index
+  // would accept a different row than the arrow keys had shown.
+  state.active = 0;
   // Silence beats a permanent "no matches" nag: the popup is only worth its
   // screen space while it has something to offer.
   if (!state.items.length) {
     close();
+    return;
   }
+  refreshMenu();
+  positionMenu();
 }
 
 function setActive(next) {
@@ -202,8 +211,12 @@ function onInput(event) {
   const element = event.target;
   if (!isTarget(element)) return;
   if (!state.open) {
-    // Typing a letter-combo is the only trigger; pasting an arrow or deleting
-    // never opens anything.
+    // The trigger is the token, not the keystroke: only a token that could
+    // plausibly be a class reference (two characters or more — one letter is
+    // an ordinary phoneme) opens the list. Deleting letters inside a longer
+    // token can reach that too; single-phoneme insertions from the phoneme
+    // keyboard never do.
+    if (!suggestQuery(tokenAt(element).text)) return;
     open(element);
   } else if (state.target !== element) {
     state.target = element;
@@ -220,12 +233,13 @@ function onKeyDown(event) {
   } else if (event.key === "ArrowUp") {
     event.preventDefault();
     setActive(state.active - 1);
-  } else if ((event.key === "Enter" || event.key === "Tab") && state.open && state.items.length) {
+  } else if (event.key === "Enter" && state.items.length) {
     event.preventDefault();
     accept(state.active);
   } else if (event.key === "Escape") {
     close();
   }
+  // Tab is never intercepted: leaving the field keeps its usual behavior.
 }
 
 function onPointerDown(event) {

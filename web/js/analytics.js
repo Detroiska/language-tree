@@ -30,30 +30,48 @@ function normalizedLabel(value) {
   return String(value || "").trim();
 }
 
-// Voice symmetry: a voiced sound with no voiceless counterpart (and the
-// mirror case) is the classic inventory-gap check. Counterpart bundles flip
-// exactly the voice feature; an exact bundle match on the chart closes the
-// gap, so `p` answers `b` only when they otherwise agree (place, manner, …).
+// Voice symmetry: a voiceless obstruent with no voiced twin — and the
+// mirror case — inside a manner series that already contrasts voice. `t`
+// missing `d` matters once `p`/`b` exists; `s` alone, or a sonorant without
+// a voiceless twin (sonorants are voiced by definition, so /m/ lacking /m̥/
+// is typology), is not a gap. Counterpart bundles flip exactly the voice
+// feature; an exact bundle match on the chart closes the gap, so `p` answers
+// `b` only when they otherwise agree (place, manner, …).
 function voicingFindings(language) {
   const consonants = [...new Set(chartPhonemeList(language.inventory.consonants))];
   const resolver = createFeatureResolver(normalizeFeatureOverrides(language.featureOverrides));
-  const bundles = new Map();
+  const obstruents = [];
   for (const sound of consonants) {
     const bundle = resolver.bundleFor(sound);
-    if (bundle && typeof bundle.voice === "boolean") bundles.set(sound, bundle);
+    if (!bundle || typeof bundle.voice !== "boolean" || bundle.sonorant === true) continue;
+    obstruents.push({ sound, bundle });
   }
-  const findCounterpart = (bundle) => {
-    const flipped = { ...bundle, voice: !bundle.voice };
-    for (const [sound, candidate] of bundles) {
-      if (featureDistance(candidate, flipped) === 0) return sound;
-    }
-    return null;
+  // Only obstruent manners reaching voice contrast (plosive, affricate,
+  // fricative) are examined, one series at a time.
+  const mannerKey = (bundle) => [bundle.continuant, bundle.delayed_release, bundle.trill, bundle.tap].join(",");
+  const byManner = new Map();
+  for (const entry of obstruents) {
+    const key = mannerKey(entry.bundle);
+    if (!byManner.has(key)) byManner.set(key, []);
+    byManner.get(key).push(entry);
+  }
+  const findCounterpart = (entry) => {
+    const flipped = { ...entry.bundle, voice: !entry.bundle.voice };
+    return obstruents.find((candidate) => featureDistance(candidate.bundle, flipped) === 0) || null;
   };
   const voicedWithoutVoiceless = [];
   const voicelessWithoutVoiced = [];
-  for (const [sound, bundle] of bundles) {
-    if (bundle.voice && !findCounterpart(bundle)) voicedWithoutVoiceless.push(sound);
-    if (!bundle.voice && !findCounterpart(bundle)) voicelessWithoutVoiced.push(sound);
+  for (const pool of byManner.values()) {
+    // A manner that never pairs sounds by voice has not demonstrated a voice
+    // series, so flagging each member would claim a gap in every stop-only
+    // or fricative-only inventory. The demand for a counterpart comes from
+    // the series itself.
+    if (!pool.some((candidate) => findCounterpart(candidate))) continue;
+    for (const entry of pool) {
+      if (findCounterpart(entry)) continue;
+      if (entry.bundle.voice) voicedWithoutVoiceless.push(entry.sound);
+      else voicelessWithoutVoiced.push(entry.sound);
+    }
   }
   return { voicedWithoutVoiceless, voicelessWithoutVoiced };
 }
@@ -116,11 +134,13 @@ export function analyzeLexicon(project, language) {
   let vowelTokens = 0;
   let tokenTotal = 0;
 
-  const onsets = new Map([["∅", 0]]);
-  const codas = new Map([["∅", 0]]);
+  // No ∅ seed: a real empty onset increments the key itself, and only when
+  // something actually syllabifies — an unconditional seed would keep a
+  // meaningless "∅ ×0" row alive and suppress the panel's empty state.
+  const onsets = new Map();
+  const codas = new Map();
   let syllablesTotal = 0;
   let parseableWords = 0;
-  let onsetTotal = 0;
 
   // Surface symbols the allophony rules can produce. A *stored phonemic form*
   // that contains one of them (and only them — the chart never lists it) is a
@@ -128,6 +148,9 @@ export function analyzeLexicon(project, language) {
   const ruleOutputs = new Set();
   const hasAllophony = allophonyRules(language.allophony).length > 0;
   if (hasAllophony) {
+    // Known blind spot: candidates are lexical chunks, so a multi-segment
+    // output such as "ks" can never match the k + s a stored form tokenizes
+    // into. Single-symbol outputs — the realistic leak — are caught.
     for (const chunk of allophoneCandidates(allophonyRules(language.allophony))) {
       if (chunk && chunk !== "∅") ruleOutputs.add(chunk);
     }

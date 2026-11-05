@@ -114,7 +114,7 @@ function balancePanel(analysis) {
     .map(
       (gap) =>
         `<li><span class="gap-manner">${esc(gap.manner)}</span><span class="gap-missing">${gap.missing
-          .map((place) => `<code class="ipa">${esc(place)}</code>`)
+          .map((place) => `<code>${esc(place)}</code>`)
           .join(" ")}<span class="muted"> lacking</span></span></li>`
     )
     .join("");

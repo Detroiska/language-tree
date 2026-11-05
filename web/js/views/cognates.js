@@ -168,11 +168,13 @@ function pathMarkup(row) {
   return `<span class="cognate-path">via ${esc(row.path.map((item) => item.name).join(" › "))}</span>`;
 }
 
-function stepsMarkup(cell) {
+function stepsMarkup(cell, row = null) {
   return derivationStepsMarkup(cell.steps, {
     hideEmpty: true,
     showLanguage: true,
-    emptyText: "No rules change this form — it passes through unchanged.",
+    emptyText: row?.isSource
+      ? "This is the source language — the trail starts here: its rules are already baked into every daughter's chain, so its own step list is empty."
+      : "No rules change this form — it passes through unchanged.",
   });
 }
 
@@ -306,7 +308,7 @@ function traceMarkup(project, source, word, rows) {
           </td>
         </tr>
         <tr class="cognate-detail" data-detail-row="${esc(row.language.id)}" hidden>
-          <td colspan="${showSurface ? 7 : 6}">${stepsMarkup(cell)}</td>
+          <td colspan="${showSurface ? 7 : 6}">${stepsMarkup(cell, row)}</td>
         </tr>`;
     })
     .join("");

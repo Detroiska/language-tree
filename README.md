@@ -130,7 +130,7 @@ Template syntax:
 - Inside compact template runs the class comes after the leading atoms: `CV.back` is a consonant plus a back vowel, `T.velar` is a T sound followed by a velar sound.
 - Classes work in sets and forbidden sequences too: `[back t]`, `[^back]`, `[plosive.plain]#` (bans a final plain stop), `[back][plosive.plain]` (a back vowel before a plain stop).
 
-While typing in a sound-change or allophony rule field, a small **class autocomplete** lists the class references the current lineage's charts actually support, with their member counts; choose one with ↑/↓ and Enter or Tab, or click it, and it is inserted at the caret. It only opens when there is something to suggest, so ordinary sound typing is never interrupted.
+While typing in a sound-change or allophony rule field, a small **class autocomplete** lists the class references the current lineage's charts actually support, with their member counts; choose one with ↑/↓ and Enter, or click it, and it is inserted at the caret. The list opens only when the token being typed could plausibly be a class reference — two characters or more — and closes when nothing matches, so a single phoneme letter never opens it, and `Tab` keeps its usual focus behavior.
 
 Constraints are optional lists:
 

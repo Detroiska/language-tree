@@ -50,6 +50,7 @@ import { buildHtml, buildMarkdown } from "../web/js/report.js";
 import { decodeHashPart } from "../web/js/routes.js";
 import { alignSegments, diffPairMarkup, formDiffMarkup } from "../web/js/diff.js";
 import { analyzeLexicon } from "../web/js/analytics.js";
+import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
 
 let passed = 0;
 const failures = [];
@@ -1717,12 +1718,14 @@ truthy(
 /* ---- lexicon analytics ---------------------------------------------------- */
 
 const analyticsChart = makeChart(
-  ["Plosive", "Nasal"],
-  ["Bilabial", "Velar"],
+  ["Plosive", "Nasal", "Fricative"],
+  ["Bilabial", "Alveolar", "Velar"],
   [
     ["Plosive", "Bilabial", ["p", "b"]],
+    ["Plosive", "Alveolar", ["t"]],
     ["Plosive", "Velar", ["k"]],
     ["Nasal", "Bilabial", ["m"]],
+    ["Fricative", "Alveolar", ["s"]],
   ]
 );
 const analyticsLanguage = {
@@ -1744,7 +1747,7 @@ equal("analytics counts every recorded token", analysis.frequency[0], { value: "
 equal(
   "analytics lists charted sounds with no tokens",
   [...analysis.neverUsed].sort(),
-  ["ɑ", "b", "i", "u"].sort()
+  ["ɑ", "b", "i", "s", "t", "u"].sort()
 );
 equal("analytics reports uncharted tokens", analysis.uncharted, [{ value: "θ", count: 1 }]);
 equal("analytics counts consonant and vowel tokens", [analysis.consonantTokens, analysis.vowelTokens], [4, 6]);
@@ -1757,12 +1760,22 @@ truthy(
   analysis.onsets.some((row) => row.value === "∅" && row.count === 1)
 );
 equal("analytics counts codas", analysis.codas, [{ value: "∅", count: 4 }]);
-truthy(
-  "analytics flags sounds missing their voicing counterpart",
-  analysis.voicelessWithoutVoiced.includes("k") && analysis.voicedWithoutVoiceless.includes("m")
+equal(
+  "analytics flags voiceless stops missing voiced twins in a series that contrasts voice",
+  [...analysis.voicelessWithoutVoiced].sort(),
+  ["k", "t"].sort()
+);
+equal(
+  "analytics never flags sonorants or unpaired manners as voicing gaps",
+  analysis.voicedWithoutVoiceless,
+  []
 );
 const nasalGap = analysis.gaps.find((gap) => gap.manner === "Nasal");
-equal("analytics names the missing place in a manner row", nasalGap?.missing, ["Velar"]);
+equal(
+  "analytics names the missing places in a manner row",
+  [...(nasalGap?.missing || [])].sort(),
+  ["Alveolar", "Velar"].sort()
+);
 equal("analytics sees no allophony to leak", [analysis.hasAllophony, analysis.leaks.length], [false, 0]);
 
 allophonyFor(["s > θ / V _ V"]);
@@ -1774,6 +1787,38 @@ truthy(
     leakAnalysis.leaks.some((leak) => leak.gloss === "asthma" && leak.symbols.includes("θ"))
 );
 syntheticLanguage.vocabulary = [];
+
+const quietLanguage = {
+  ...analyticsLanguage,
+  id: "quiet",
+  name: "Quiet",
+  vocabulary: [{ id: "w0", gloss: "dud", form: "aθa", notes: "" }],
+};
+const quietAnalysis = analyzeLexicon({ title: "Quiet", languages: [quietLanguage] }, quietLanguage);
+equal("a lexicon nothing syllabifies leaves no onset rows", quietAnalysis.onsets, []);
+equal("a lexicon nothing syllabifies leaves no coda rows", quietAnalysis.codas, []);
+
+/* ---- class autocomplete policy ------------------------------------------- */
+
+equal("a single letter never triggers class suggestions", suggestQuery("V"), "");
+truthy("two letters are a plausible class query", suggestQuery("ve") === "ve");
+truthy("a dotted fragment triggers suggestions", suggestQuery("plosive.") === "plosive.");
+equal("queries fold case before matching", suggestQuery("V.b"), "v.b");
+truthy(
+  "notation pieces never trigger suggestions",
+  suggestQuery("[+na") === "" && suggestQuery("p >") === "" && suggestQuery("") === ""
+);
+truthy(
+  "refs match by prefix and by later dotted segment",
+  matchesQuery("plosive.plain", "plosive.") &&
+    matchesQuery("plosive.plain", "plain") &&
+    !matchesQuery("plosive.plain", "xyz")
+);
+equal(
+  "filterSuggestions filters and caps the list",
+  filterSuggestions([{ ref: "velar" }, { ref: "back" }, { ref: "voiced" }], "v", 2).map((item) => item.ref),
+  ["velar", "voiced"]
+);
 
 /* ---- summary ------------------------------------------------------------- */
 

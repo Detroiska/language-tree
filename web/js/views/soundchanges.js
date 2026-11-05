@@ -17,7 +17,7 @@ import {
 import { formatPhonemic, formatPhonetic } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
-import { esc, icon, toast } from "../ui.js";
+import { debounce, esc, icon, toast } from "../ui.js";
 
 // The tester input is re-created on every view render (which edits trigger),
 // so the typed form is remembered per language — otherwise adding a rule or
@@ -527,6 +527,14 @@ export function renderChanges(container, ctx) {
     if (checkSummary) checkSummary.textContent = data.summary;
   };
 
+  // Typing a rule re-derives the tester *and* whole parent lexicon here; on
+  // the keystroke path the inherited check waits for a 200 ms pause so a
+  // large ancestor lexicon does not run per character. Actions that finish a
+  // change (record, undo, initial render) call refreshCheck() directly.
+  const refreshCheckSoon = debounce(() => {
+    refreshCheck();
+  }, 200);
+
   if (testInput) {
     // The derivation updates live on every keystroke (and Enter re-runs it),
     // so no explicit Apply control is needed.
@@ -610,7 +618,7 @@ export function renderChanges(container, ctx) {
       ctx.touch({ label: "Edit rule" });
       updateRuleStatus(card, context, rule, parentDisabled);
       runTest();
-      refreshCheck();
+      refreshCheckSoon();
     });
     note.addEventListener("input", () => {
       rule.note = note.value;
