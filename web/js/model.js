@@ -17,6 +17,26 @@ export function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// Ids reach HTML attributes, hash routes, and querySelector arguments, so a
+// file-sourced id is only trusted after it passes this slug check. Numeric ids
+// from hand-edited files are coerced (a stored 7 must keep matching the "7"
+// the UI compares against), anything malformed or duplicated is regenerated,
+// and `remap` records old-to-new ids so parent links survive the repair.
+const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+function normalizeId(value, seen, prefix, remap = null) {
+  let id = typeof value === "number" && Number.isFinite(value) ? String(value) : value;
+  if (typeof id !== "string" || !id || !SAFE_ID.test(id) || seen.has(id)) {
+    const original = id;
+    id = uid(prefix);
+    if (remap && typeof original === "string" && original && !seen.has(original) && !remap.has(original)) {
+      remap.set(original, id);
+    }
+  }
+  seen.add(id);
+  return id;
+}
+
 function axisNode(label, kind, children = []) {
   return {
     id: uid(kind === "row" ? "row" : "col"),
@@ -379,6 +399,65 @@ export function groupAllophonyRules(language, selectedIds) {
   return "ok";
 }
 
+function clampInsertIndex(index, length) {
+  const parsed = Number.isInteger(index) ? index : length;
+  return Math.max(0, Math.min(parsed, length));
+}
+
+// Toast undos restore by identity and insert at a clamped position instead of
+// splicing a captured index+span. Edits made while the toast is visible can
+// move or remove neighbouring entries; a blind span splice would overwrite
+// whatever now occupies those slots. Returning false means the target is
+// already back (for example because Ctrl+Z restored it first).
+export function restoreAllophonyGroup(language, group, index) {
+  const items = language?.allophony;
+  if (!Array.isArray(items) || !isAllophonyGroup(group)) return false;
+  if (items.some((item) => isAllophonyGroup(item) && item.id === group.id)) return false;
+  items.splice(clampInsertIndex(index, items.length), 0, group);
+  return true;
+}
+
+// Undo of "Ungroup": gather only the group's surviving top-level rules and
+// rebuild the group around them. Rules deleted during the window stay deleted,
+// and rules the user has since moved into another group are left there.
+export function restoreUngroupedAllophonyRules(language, group, index, rules) {
+  const items = language?.allophony;
+  if (!Array.isArray(items) || !isAllophonyGroup(group)) return false;
+  if (items.some((item) => isAllophonyGroup(item) && item.id === group.id)) return false;
+  const expected = Array.isArray(rules) ? rules : group.rules;
+  const ids = new Set((Array.isArray(expected) ? expected : []).map((rule) => rule?.id).filter(Boolean));
+  const surviving = [];
+  let insertAt = null;
+  for (let position = 0; position < items.length; ) {
+    const item = items[position];
+    if (!isAllophonyGroup(item) && ids.has(item?.id)) {
+      if (insertAt === null) insertAt = position;
+      surviving.push(item);
+      items.splice(position, 1);
+    } else {
+      position += 1;
+    }
+  }
+  group.rules = surviving;
+  items.splice(insertAt === null ? clampInsertIndex(index, items.length) : insertAt, 0, group);
+  return true;
+}
+
+// Undo of a rule delete. The captured parent group may be detached after a
+// global undo/redo, so resolve the current group by id and fall back to the
+// top level when it is gone.
+export function restoreAllophonyRule(language, rule, parentGroup, index) {
+  const items = language?.allophony;
+  if (!Array.isArray(items) || !rule?.id) return false;
+  if (allophonyRules(items).some((item) => item.id === rule.id)) return false;
+  const group = parentGroup
+    ? items.find((item) => isAllophonyGroup(item) && item.id === parentGroup.id)
+    : null;
+  const collection = group && Array.isArray(group.rules) ? group.rules : items;
+  collection.splice(clampInsertIndex(index, collection.length), 0, rule);
+  return true;
+}
+
 function ensurePhonotactics(value) {
   const defaults = defaultPhonotactics();
   const base = value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -418,11 +497,10 @@ export function ensureProject(raw) {
   project.version = 1;
 
   const ids = new Set();
+  const idRemap = new Map();
   project.languages = project.languages.filter((language) => {
     if (!language || typeof language !== "object" || Array.isArray(language) || !language.name) return false;
-    if (typeof language.id === "number") language.id = String(language.id);
-    if (typeof language.id !== "string" || !language.id || ids.has(language.id)) language.id = uid("lang");
-    ids.add(language.id);
+    language.id = normalizeId(language.id, ids, "lang", idRemap);
     return true;
   });
 
@@ -430,23 +508,36 @@ export function ensureProject(raw) {
     language.name = String(language.name).trim() || "Untitled language";
     language.notes = typeof language.notes === "string" ? language.notes : "";
     if (typeof language.parentId === "number") language.parentId = String(language.parentId);
+    if (typeof language.parentId === "string" && idRemap.has(language.parentId)) {
+      language.parentId = idRemap.get(language.parentId);
+    }
     language.parentId = typeof language.parentId === "string" ? language.parentId : null;
     if (language.parentId && !ids.has(language.parentId)) language.parentId = null;
     language.inventory = language.inventory && typeof language.inventory === "object" && !Array.isArray(language.inventory) ? language.inventory : {};
     language.inventory.consonants = ensureChart(language.inventory.consonants, defaultConsonantChart, "row");
     language.inventory.vowels = ensureChart(language.inventory.vowels, defaultVowelChart, "col");
     language.phonotactics = ensurePhonotactics(language.phonotactics);
+    const ruleIds = new Set();
+    const ruleRemap = new Map();
     language.soundChanges = Array.isArray(language.soundChanges)
       ? language.soundChanges
           .filter((rule) => rule && typeof rule === "object")
           .map((rule) => ({
-            id: rule.id || uid("rule"),
+            id: normalizeId(rule.id, ruleIds, "rule", ruleRemap),
             notation: typeof rule.notation === "string" ? rule.notation : "",
             note: typeof rule.note === "string" ? rule.note : "",
             enabled: rule.enabled !== false,
-            parentId: typeof rule.parentId === "string" ? rule.parentId : null,
+            parentId:
+              typeof rule.parentId === "number"
+                ? String(rule.parentId)
+                : typeof rule.parentId === "string"
+                  ? rule.parentId
+                  : null,
           }))
       : [];
+    for (const rule of language.soundChanges) {
+      if (rule.parentId && ruleRemap.has(rule.parentId)) rule.parentId = ruleRemap.get(rule.parentId);
+    }
     // Sequential rules are children of a top-level rule. Only one level of
     // nesting is supported: a parent must itself be a top-level rule.
     const topLevelRuleIds = new Set(
@@ -458,11 +549,12 @@ export function ensureProject(raw) {
     language.soundChanges = normalizeRuleOrder(language.soundChanges);
     language.allophony = ensureAllophony(language.allophony);
     language.featureOverrides = normalizeFeatureOverrides(language.featureOverrides);
+    const wordIds = new Set();
     language.vocabulary = Array.isArray(language.vocabulary)
       ? language.vocabulary
           .filter((entry) => entry && typeof entry === "object")
           .map((entry) => ({
-            id: entry.id || uid("word"),
+            id: normalizeId(entry.id, wordIds, "word"),
             gloss: typeof entry.gloss === "string" ? entry.gloss : "",
             // A form pasted as /kasa/ or [kʰasa] is still one lexical form.
             // Keep the stored value bare so tokenizing and comparison stay
@@ -607,6 +699,28 @@ export function deleteLanguage(project, id) {
   const ids = new Set([id, ...descendantIds(project, id)]);
   project.languages = project.languages.filter((language) => !ids.has(language.id));
   return ids;
+}
+
+// A toast undo after "Delete language" restores only the branch it removed.
+// Replacing the whole languages array would discard languages created or
+// deleted during the undo window, and would resurrect entries deleted after
+// the snapshot was taken. Each entry is { language, index } from before the
+// deletion; entries whose id is already present are skipped.
+export function restoreDeletedLanguages(project, entries) {
+  if (!project || !Array.isArray(project.languages) || !Array.isArray(entries)) return 0;
+  const existing = new Set(project.languages.map((language) => language.id));
+  const ordered = entries
+    .filter((entry) => entry?.language?.id)
+    .slice()
+    .sort((left, right) => (left.index ?? 0) - (right.index ?? 0));
+  let restored = 0;
+  for (const entry of ordered) {
+    if (existing.has(entry.language.id)) continue;
+    project.languages.splice(clampInsertIndex(entry.index, project.languages.length), 0, entry.language);
+    existing.add(entry.language.id);
+    restored += 1;
+  }
+  return restored;
 }
 
 export function depthOf(project, id) {

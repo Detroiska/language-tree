@@ -253,6 +253,9 @@ function onInput(event) {
 }
 
 function onKeyDown(event) {
+  // Let the IME consume arrows and Enter/Escape that commit or cancel a
+  // composition; only keys pressed after composition belong to the app.
+  if (event.isComposing) return;
   if (!state.open || !isTarget(event.target)) return;
   if (state.target !== event.target) return;
   if (event.key === "ArrowDown") {
@@ -298,13 +301,16 @@ function onFocusIn(event) {
 }
 
 function onFocusOut(event) {
-  if (state.open && isTarget(event.target)) {
-    // Keep the list while the pointer travels to it (mousedown already
-    // prevents the caret from leaving, so this is just tidiness).
-    window.setTimeout(() => {
-      if (state.open && !isTarget(state.target)) close();
-    }, 0);
-  }
+  if (!state.open || !isTarget(event.target)) return;
+  // Keep the list while the pointer travels to it (mousedown already keeps
+  // focus in the field), but close once focus has actually left both the field
+  // and the listbox. Checking state.target alone never fired on Tab-away: the
+  // old field stays connected and still matches the target selector.
+  window.setTimeout(() => {
+    if (!state.open) return;
+    const active = document.activeElement;
+    if (active !== state.target && !state.menu?.contains(active)) close();
+  }, 0);
 }
 
 export function initClassAutocomplete() {

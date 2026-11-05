@@ -504,10 +504,10 @@ function allophonePanelMarkup(ctx) {
             <h2>Allophones</h2>
             <p>Surface variants that are not phonemes live here, not on the charts.</p>
           </div>
-          <a class="button button-quiet button-small" href="#/language/${ctx.language.id}/allophony">${icon("sound")}Allophony rules</a>
+          <a class="button button-quiet button-small" href="#/language/${encodeURIComponent(ctx.language.id)}/allophony">${icon("sound")}Allophony rules</a>
         </header>
         <div class="panel-body">
-          <div class="inline-empty">${icon("info")}<span>No surface allophones are active yet. Add a synchronic rule in Allophony.</span><a class="text-button" href="#/language/${ctx.language.id}/allophony">Open Allophony</a></div>
+          <div class="inline-empty">${icon("info")}<span>No surface allophones are active yet. Add a synchronic rule in Allophony.</span><a class="text-button" href="#/language/${encodeURIComponent(ctx.language.id)}/allophony">Open Allophony</a></div>
         </div>
       </section>`;
   }
@@ -529,7 +529,7 @@ function allophonePanelMarkup(ctx) {
           <h2>Allophones</h2>
           <p>Surface variants produced by this language's allophony rules.</p>
         </div>
-        <a class="button button-quiet button-small" href="#/language/${ctx.language.id}/allophony">${icon("sound")}Allophony rules</a>
+        <a class="button button-quiet button-small" href="#/language/${encodeURIComponent(ctx.language.id)}/allophony">${icon("sound")}Allophony rules</a>
       </header>
       <div class="table-scroll">
         <table class="data-table allophone-table">
@@ -815,7 +815,7 @@ export function renderInventory(container, ctx) {
         <div>
           <p class="eyebrow">Phonology</p>
           <h2>Phonemic inventory</h2>
-          <p class="section-copy">Lay out contrastive sounds on a chart. Charts are independent per language; when you create a daughter, it starts with a copy of its ancestor’s chart. How those sounds combine into syllables is set in <a href="#/language/${language.id}/phonotactics">Phonotactics</a>.</p>
+          <p class="section-copy">Lay out contrastive sounds on a chart. Charts are independent per language; when you create a daughter, it starts with a copy of its ancestor’s chart. How those sounds combine into syllables is set in <a href="#/language/${encodeURIComponent(language.id)}/phonotactics">Phonotactics</a>.</p>
         </div>
         <div class="inventory-summary">
           <span><strong>${new Set(chartPhonemeList(consonants)).size}</strong> consonants</span>

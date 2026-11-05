@@ -7,6 +7,7 @@ import {
 import { store } from "./store.js";
 import {
   closeMenu,
+  confirmDialog,
   esc,
   hydrateIcons,
   icon,
@@ -385,14 +386,17 @@ function setSaveState(state, error) {
   if (state === "saving") label.textContent = "Saving…";
   else if (state === "pending") label.textContent = "Unsaved changes";
   else if (state === "error") label.textContent = "Save failed";
+  else if (state === "conflict") label.textContent = "Save conflict";
   else if (state === "loading") label.textContent = "Loading…";
   else label.textContent = store.lastSavedAt ? `Saved · ${new Date(store.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved";
   saveState.title =
-    state === "error"
-      ? `${error || "Could not save"} — click to retry`
-      : state === "saved"
-        ? "All changes are written to data/project.json"
-        : "Changes are written automatically";
+    state === "conflict"
+      ? `${error || "The project was changed by another tab or window"} — click to resolve`
+      : state === "error"
+        ? `${error || "Could not save"} — click to retry`
+        : state === "saved"
+          ? "All changes are written to data/project.json"
+          : "Changes are written automatically";
 }
 
 async function boot() {
@@ -412,14 +416,22 @@ async function init() {
   hydrateIcons();
   store.onStatus(setSaveState);
   store.onHistory(updateHistoryControls);
+  // When another tab saved a newer document and this tab was clean, the store
+  // reloads it in place; re-render the current view so the newer data shows.
+  store.onResync(() => {
+    if (!booted || !store.project) return;
+    render({ preserveScroll: true });
+    toast("Reloaded the newer project — another tab or window saved changes.", { type: "info", duration: 3200 });
+  });
   projectName.addEventListener("click", async () => {
+    if (!store.project) return;
     const title = await promptDialog({
       title: "Rename project",
       label: "Project title",
       value: store.project.title,
       confirmLabel: "Rename",
     });
-    if (!title || title === store.project.title) return;
+    if (!title || !store.project || title === store.project.title) return;
     store.project.title = title;
     store.touch({ label: "Rename project" });
     renderSidebar(currentRoute);
@@ -431,7 +443,23 @@ async function init() {
     if (!button) return;
     store.navigate(`#/language/${button.dataset.sidebarLang}/overview`);
   });
-  saveState.addEventListener("click", () => {
+  saveState.addEventListener("click", async () => {
+    if (store.saveState === "conflict") {
+      // Another tab saved over this tab's baseline. Both exits are destructive
+      // to one side, so spell them out and let the user pick.
+      const choice = await confirmDialog(
+        "Save conflict",
+        "The project file was changed by another tab or window after this tab last saved. “Save anyway” overwrites the file with this tab's version. “Reload page” discards this tab's unsaved edits and loads the newer version.",
+        { confirmLabel: "Save anyway", cancelLabel: "Reload page", danger: true }
+      );
+      if (choice === true) {
+        store.flush({ force: true });
+        toast("Overwriting the newer project with this tab's version…", { type: "info", duration: 2200 });
+      } else if (choice === false) {
+        window.location.reload();
+      }
+      return;
+    }
     if (store.saveState === "error" || store.dirty) {
       store.flush();
       toast("Retrying save…", { type: "info", duration: 1800 });
@@ -476,6 +504,7 @@ async function init() {
     if (event.key === "Escape") document.body.classList.remove("sidebar-open");
   });
   window.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === "k") {

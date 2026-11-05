@@ -94,7 +94,16 @@ export function toast(message, options = {}) {
   return { close: remove };
 }
 
+let activeModalKeyHandler = null;
+
 function closeModal() {
+  // Every close path — Escape, the ✕ button, backdrop clicks, Cancel and
+  // confirm buttons — goes through here, so this is the only place the
+  // dialog's window listener needs to be detached.
+  if (activeModalKeyHandler) {
+    window.removeEventListener("keydown", activeModalKeyHandler);
+    activeModalKeyHandler = null;
+  }
   const root = document.getElementById("modal-root");
   const backdrop = root.querySelector(".modal-backdrop");
   if (!backdrop) return;
@@ -107,6 +116,11 @@ function closeModal() {
 
 export function openModal({ title, body, footer = "", width = "medium", onMount = null }) {
   const root = document.getElementById("modal-root");
+  // Replacing a dialog without closing it first must not strand its listener.
+  if (activeModalKeyHandler) {
+    window.removeEventListener("keydown", activeModalKeyHandler);
+    activeModalKeyHandler = null;
+  }
   root.innerHTML = `
     <div class="modal-backdrop" data-modal-backdrop>
       <section class="modal modal-${width}" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -127,12 +141,13 @@ export function openModal({ title, body, footer = "", width = "medium", onMount 
   });
   root.querySelector(".modal-close").addEventListener("click", close);
   const keyHandler = (event) => {
+    if (event.isComposing) return; // Escape first cancels the IME composition.
     if (event.key === "Escape") {
       event.preventDefault();
       close();
-      window.removeEventListener("keydown", keyHandler);
     }
   };
+  activeModalKeyHandler = keyHandler;
   window.addEventListener("keydown", keyHandler);
   const focusable = root.querySelector("input, textarea, select, button:not(.modal-close)");
   if (focusable) window.setTimeout(() => focusable.focus(), 30);
@@ -168,14 +183,17 @@ export function confirmDialog(title, message, options = {}) {
         });
         const backdrop = root.querySelector(".modal-backdrop");
         backdrop.addEventListener("pointerdown", (event) => {
-          if (event.target === backdrop) finish(false);
+          if (event.target === backdrop) finish(null);
         });
         window.setTimeout(() => root.querySelector("[data-confirm]")?.focus(), 40);
       },
     });
     const observer = new MutationObserver(() => {
       if (!document.getElementById("modal-root").querySelector(".modal-backdrop")) {
-        finish(false);
+        // Escape, the close button, and backdrop clicks dismiss without an
+        // answer. Callers that treat false as an explicit choice (such as the
+        // save-conflict dialog) must be able to tell the two apart.
+        finish(null);
         observer.disconnect();
       }
     });
@@ -286,6 +304,7 @@ export function openMenu(anchor, items) {
     if (!menu.contains(event.target)) closeMenu();
   };
   const onKey = (event) => {
+    if (event.isComposing) return;
     if (event.key === "Escape") closeMenu();
   };
   const onScroll = () => closeMenu();

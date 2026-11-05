@@ -30,12 +30,23 @@ export function stressLabel(system) {
 // segment (a diphthong). The engine's tokenizer keeps length marks with the
 // vowel when they are charted and otherwise leaves them as a following coda,
 // so both spellings count.
+//
+// Long nuclei are written with the IPA length marks ː/ˑ or with a macron:
+// precomposed ā (U+0101) and the decomposed a + U+0304 spell the same length
+// (features.js marks both long), so NFD decomposition — which contains the
+// combining macron for every precomposed macron vowel — decides weight.
+const LENGTH_MARKS = /[ːˑ]/u;
+
+function isLongNucleus(token) {
+  return LENGTH_MARKS.test(token) || token.normalize("NFD").includes("\u0304");
+}
+
 export function isHeavySyllable(syllable) {
   if (!syllable) return false;
   if (syllable.coda?.length) return true;
   const nucleus = syllable.nucleus || [];
   if (nucleus.length > 1) return true;
-  return nucleus.some((token) => /[ːˑ]/u.test(token));
+  return nucleus.some(isLongNucleus);
 }
 
 // "weight" follows the Latin-style default: stress the penult if it is heavy,

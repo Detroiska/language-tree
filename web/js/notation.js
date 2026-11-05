@@ -24,6 +24,12 @@ export function normalizeForm(value) {
   return String(value || "").normalize("NFC");
 }
 
+// Search and filters compare bare segment strings: level delimiters and stress
+// marks are presentation, so a stored kaˈsa still matches a typed kasa.
+export function normalizeSearchText(value) {
+  return stripStressMarks(stripLevelMarks(value)).normalize("NFC").toLowerCase();
+}
+
 export function formatPhonemic(value) {
   const text = stripLevelMarks(value);
   return text ? `/${text}/` : "";

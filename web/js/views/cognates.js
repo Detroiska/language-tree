@@ -652,7 +652,7 @@ export function renderCognates(container, ctx) {
 
   container.querySelectorAll("[data-toggle-steps]").forEach((button) => {
     button.addEventListener("click", () => {
-      const detailRow = container.querySelector(`[data-detail-row="${button.dataset.toggleSteps}"]`);
+      const detailRow = container.querySelector(`[data-detail-row="${CSS.escape(button.dataset.toggleSteps)}"]`);
       if (!detailRow) return;
       const open = !detailRow.hidden;
       detailRow.hidden = open;

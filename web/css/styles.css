@@ -415,7 +415,8 @@ code {
   cursor: default;
 }
 
-.save-state[data-state="error"] {
+.save-state[data-state="error"],
+.save-state[data-state="conflict"] {
   color: #e6aaa2;
   cursor: pointer;
 }
@@ -437,7 +438,8 @@ code {
   animation: pulse 1s ease-in-out infinite;
 }
 
-.save-state[data-state="error"] .save-dot {
+.save-state[data-state="error"] .save-dot,
+.save-state[data-state="conflict"] .save-dot {
   background: #d67d72;
 }
 

@@ -11,6 +11,7 @@ import {
   findLanguage,
   getLineage,
   languageStats,
+  restoreDeletedLanguages,
   setParent,
 } from "../model.js";
 import {
@@ -43,7 +44,9 @@ function tabId(value) {
 }
 
 function languageTabHref(language, tab) {
-  return `#/language/${language.id}/${tab}`;
+  // Ids are percent-encoded so a hand-edited id can never break out of the
+  // href attribute; parseRoute() decodes each segment again.
+  return `#/language/${encodeURIComponent(language.id)}/${tab}`;
 }
 
 function headerActions(ctx) {
@@ -144,7 +147,10 @@ async function deleteCurrent(ctx) {
   });
   if (!confirmed) return;
   const parentId = ctx.language.parentId;
-  const snapshot = [...ctx.project.languages];
+  const branchIds = new Set([ctx.language.id, ...descendantIds(ctx.project, ctx.language.id)]);
+  const removed = ctx.project.languages
+    .map((item, index) => ({ language: item, index }))
+    .filter(({ language: item }) => branchIds.has(item.id));
   deleteLanguage(ctx.project, ctx.language.id);
   ctx.touch({ label: `Delete language ${languageName}` });
   ctx.refresh();
@@ -156,7 +162,7 @@ async function deleteCurrent(ctx) {
     action: {
       label: "Undo",
       onClick: () => {
-        ctx.project.languages = snapshot;
+        if (!restoreDeletedLanguages(ctx.project, removed)) return;
         ctx.touch({ label: `Restore language ${languageName}` });
         ctx.refresh();
         toast(`Restored ${languageName}.`, { type: "success" });

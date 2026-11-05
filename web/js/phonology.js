@@ -1107,6 +1107,16 @@ export function compileRule(notation, context) {
   const targetText = source.slice(0, arrowIndex).trim();
   const rightSide = source.slice(arrowIndex + arrow[0].length).trim();
   if (!targetText) return { ok: false, error: "The input side of the rule is empty." };
+  // A second arrow is a chained rule, not part of the output. Without this
+  // guard "a > b > c" compiles as the literal output "b → c" and silently
+  // produces an uncharted segment in every test.
+  if (/→|->|>/u.test(rightSide)) {
+    return {
+      ok: false,
+      error:
+        "Use exactly one arrow between the input and the output. Split chained changes into separate rules (a > b, then b > c), not a > b > c.",
+    };
+  }
 
   let outputText = rightSide;
   let environment = null;
@@ -1132,6 +1142,7 @@ export function compileRule(notation, context) {
   warnings.push(...(target.warnings || []));
 
   let replacement = [];
+  let outputPattern = [];
   let featureOutput = null;
   if (outputText && outputText !== "∅" && outputText !== "0") {
     const parsedOutput = parsePattern(outputText, context, {
@@ -1172,6 +1183,7 @@ export function compileRule(notation, context) {
       }
       featureOutput = featureAtoms[0];
     } else {
+      outputPattern = parsedOutput.pattern;
       replacement = parsedOutput.pattern.map((item) => item.value);
     }
   }
@@ -1299,7 +1311,7 @@ export function compileRule(notation, context) {
   // it actually receives. Compact template writing makes this easy to hit:
   // "CV > x" reads here as the literal sounds C and V, while phonotactics
   // templates treat the same letters as classes. Chart classes already fail
-  // loudly; literal inputs get a warning.
+  // loudly; literal inputs and outputs get a warning.
   const known = new Set(context.known);
   const unchartedOf = (pattern) => {
     const found = new Set();
@@ -1311,6 +1323,7 @@ export function compileRule(notation, context) {
   };
   const unchartedInput = unchartedOf(target.pattern);
   const unchartedEnv = new Set([...unchartedOf(left), ...unchartedOf(right)]);
+  const unchartedOutput = unchartedOf(outputPattern);
   if (unchartedInput.size) {
     const list = [...unchartedInput].map((sound) => `“${sound}”`).join(", ");
     let message = `The input ${unchartedInput.size === 1 ? "sound" : "sounds"} ${list} ${
@@ -1328,6 +1341,21 @@ export function compileRule(notation, context) {
       `The environment ${unchartedEnv.size === 1 ? "sound" : "sounds"} ${list} ${
         unchartedEnv.size === 1 ? "is" : "are"
       } not in the charted ancestry, so the rule cannot apply to a charted form.`
+    );
+  }
+  // Outputs need the same check: an uncharted literal silently creates a
+  // segment no chart contains, so "p > θ" looks valid but yields off-chart
+  // phonemes. The input warning already names a sound that appears on both
+  // sides, so only report output-only additions here.
+  const unchartedNewOutput = [...unchartedOutput].filter((sound) => !unchartedInput.has(sound));
+  if (unchartedNewOutput.length) {
+    const list = unchartedNewOutput.map((sound) => `“${sound}”`).join(", ");
+    warnings.push(
+      `The output ${unchartedNewOutput.length === 1 ? "sound" : "sounds"} ${list} ${
+        unchartedNewOutput.length === 1 ? "is" : "are"
+      } not in the charted ancestry, so the rule would produce an uncharted segment. Add ${
+        unchartedNewOutput.length === 1 ? "it" : "them"
+      } to a Phonology chart, or check the spelling.`
     );
   }
 

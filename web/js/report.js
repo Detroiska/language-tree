@@ -177,7 +177,7 @@ function vocabularyTable(project, language) {
 function mdCell(value) {
   return String(value ?? "")
     .replace(/\\/g, "\\\\")
-    .replace(/([|*_~[\]`])/g, "\\$1")
+    .replace(/([|*_~[\]`<>])/g, "\\$1")
     .replace(/\r?\n/g, " ")
     .trim();
 }

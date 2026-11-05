@@ -3,10 +3,14 @@ import {
   allophonyEntries,
   allophonyRules,
   ancestorsOf,
+  findLanguage,
   groupAllophonyRules,
   isAllophonyGroup,
   normalizeAllophonyDomain,
   normalizeAllophonyRepeatLimit,
+  restoreAllophonyGroup,
+  restoreAllophonyRule,
+  restoreUngroupedAllophonyRules,
   uid,
 } from "../model.js";
 import {
@@ -492,7 +496,7 @@ export function renderAllophony(container, ctx) {
       ctx.touch({ label: "Add allophony group" });
       ctx.refresh();
       window.setTimeout(() => {
-        document.querySelector(`[data-allo-group-id="${group.id}"] .allo-group-name`)?.focus();
+        document.querySelector(`[data-allo-group-id="${CSS.escape(group.id)}"] .allo-group-name`)?.focus();
       }, 0);
     });
   });
@@ -512,7 +516,7 @@ export function renderAllophony(container, ctx) {
       ctx.touch({ label: "Add allophony rule" });
       ctx.refresh();
       window.setTimeout(() => {
-        document.querySelector(`[data-allo-rule-id="${rule.id}"] .rule-input`)?.focus();
+        document.querySelector(`[data-allo-rule-id="${CSS.escape(rule.id)}"] .rule-input`)?.focus();
       }, 0);
     });
   });
@@ -554,7 +558,7 @@ export function renderAllophony(container, ctx) {
         ctx.touch({ label: "Add allophony rule" });
         ctx.refresh();
         window.setTimeout(() => {
-          document.querySelector(`[data-allo-rule-id="${rule.id}"] .rule-input`)?.focus();
+          document.querySelector(`[data-allo-rule-id="${CSS.escape(rule.id)}"] .rule-input`)?.focus();
         }, 0);
       });
     });
@@ -597,8 +601,8 @@ export function renderAllophony(container, ctx) {
           action: {
             label: "Undo",
             onClick: () => {
-              language.allophony.splice(index, rules.length);
-              language.allophony.splice(index, 0, group);
+              const current = findLanguage(ctx.project, language.id);
+              if (!current || !restoreUngroupedAllophonyRules(current, group, index, rules)) return;
               ctx.touch({ label: "Restore allophony group" });
               ctx.refresh();
             },
@@ -623,7 +627,8 @@ export function renderAllophony(container, ctx) {
           action: {
             label: "Undo",
             onClick: () => {
-              language.allophony.splice(index, 0, removed);
+              const current = findLanguage(ctx.project, language.id);
+              if (!current || !restoreAllophonyGroup(current, removed, index)) return;
               ctx.touch({ label: "Restore allophony group" });
               ctx.refresh();
             },
@@ -724,7 +729,8 @@ export function renderAllophony(container, ctx) {
         action: {
           label: "Undo",
           onClick: () => {
-            collection.splice(Math.min(index, collection.length), 0, removed);
+            const current = findLanguage(ctx.project, language.id);
+            if (!current || !restoreAllophonyRule(current, removed, parentGroup, index)) return;
             ctx.touch({ label: "Restore allophony rule" });
             ctx.refresh();
           },

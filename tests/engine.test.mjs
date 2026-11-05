@@ -13,8 +13,13 @@ import {
   createLanguage,
   createSibling,
   defaultInventory,
+  deleteLanguage,
   ensureProject,
   groupAllophonyRules,
+  restoreAllophonyGroup,
+  restoreAllophonyRule,
+  restoreDeletedLanguages,
+  restoreUngroupedAllophonyRules,
   ruleNumberMap,
 } from "../web/js/model.js";
 import {
@@ -33,7 +38,7 @@ import {
   normalizeAllophonyNotation,
   surfaceForForm,
 } from "../web/js/phonology.js";
-import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../web/js/notation.js";
+import { formatPhonemic, formatPhonetic, normalizeSearchText, stripLevelMarks } from "../web/js/notation.js";
 import { compileClasses } from "../web/js/categories.js";
 import {
   IPA_FEATURES,
@@ -57,6 +62,7 @@ import { alignCognate, buildCorrespondences } from "../web/js/correspondences.js
 import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } from "../web/js/reconstruction.js";
 import { subgroupingEvidence } from "../web/js/subgrouping.js";
 import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
+import { applyWordList, rowStatus } from "../web/js/bulk.js";
 
 let passed = 0;
 const failures = [];
@@ -135,6 +141,16 @@ equal("set deletion", apply("[td] > ∅ / _ #", "kat"), { out: "ka" });
 equal("cluster simplification", apply("C > ∅ / _ C", "akta"), { out: "ata" });
 equal("arrow variant ->", apply("p -> f", "apa"), { out: "afa" });
 equal("arrow variant →", apply("p → f", "apa"), { out: "afa" });
+const chainedArrow = compileRule("a → b → c", ctx);
+truthy(
+  "a second arrow is rejected instead of becoming literal output",
+  !chainedArrow.ok && /exactly one arrow/u.test(chainedArrow.error)
+);
+const chainedAsciiArrow = compileRule("a -> b -> c", ctx);
+truthy(
+  "a second ASCII arrow is rejected too",
+  !chainedAsciiArrow.ok && /exactly one arrow/u.test(chainedAsciiArrow.error)
+);
 equal("zero as deletion", apply("a > 0 / _ #", "kasa"), { out: "kas" });
 equal("multi-segment input", apply("ai > e", "kai"), { out: "ke" });
 equal("non-overlapping matches", apply("aa > b", "aaa"), { out: "ba" });
@@ -232,13 +248,21 @@ truthy(
 );
 const uncharted = compileRule("q > k", ctx);
 truthy("uncharted input warns", uncharted.ok && uncharted.warnings?.length > 0);
-const charted = compileRule("p > f", ctx);
-truthy("charted input does not warn", charted.ok && !(charted.warnings?.length > 0));
+const charted = compileRule("p > s", ctx);
+truthy("charted input and output do not warn", charted.ok && !(charted.warnings?.length > 0));
+const unchartedOutput = compileRule("t > θ", ctx);
+truthy(
+  "uncharted output sounds warn like uncharted inputs",
+  unchartedOutput.ok &&
+    unchartedOutput.warnings?.some(
+      (warning) => warning.includes("output") && warning.includes("θ")
+    )
+);
 const aspiratedOnlyCtx = contextForInventory({
   consonants: makeChart(["Plosive"], ["Bilabial"], [["Plosive", "Bilabial", ["pʰ"]]]),
   vowels: makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]),
 });
-const bareBase = compileRule("p > f", aspiratedOnlyCtx);
+const bareBase = compileRule("p > pʰ", aspiratedOnlyCtx);
 truthy(
   "a bare base of a charted aspirate counts as a known sound",
   bareBase.ok && !(bareBase.warnings?.length > 0)
@@ -994,6 +1018,61 @@ equal(
   ["", ""],
 );
 
+/* ---- id normalization ---------------------------------------------------- */
+
+const hostileId = 'x" onmouseover="alert(1) t="';
+const idProject = ensureProject({
+  title: "Ids",
+  languages: [
+    {
+      id: 5,
+      name: "Numeric",
+      parentId: 5,
+      soundChanges: [
+        { id: 1, notation: "p > f" },
+        { id: 2, notation: "b > v / V _ V", parentId: 1 },
+      ],
+      vocabulary: [{ id: 7, gloss: "x", form: "y" }],
+    },
+    { id: hostileId, name: "Crafted", parentId: 5 },
+    { id: "ok", name: "Fine", parentId: hostileId },
+    { id: "ok", name: "Duplicate", parentId: null },
+  ],
+});
+const [numericId, craftedId, fineId, duplicateId] = idProject.languages;
+equal("numeric language ids become strings", numericId.id, "5");
+truthy("a self-parent is detached", numericId.parentId === null);
+equal(
+  "rule ids become strings and keep their parent link",
+  [numericId.soundChanges[0].id, numericId.soundChanges[1].id, numericId.soundChanges[1].parentId],
+  ["1", "2", "1"]
+);
+equal("word ids become strings", numericId.vocabulary[0].id, "7");
+truthy(
+  "an unsafe id is regenerated",
+  craftedId.id !== hostileId && /^[A-Za-z0-9_-]+$/.test(craftedId.id)
+);
+equal("parent links follow a regenerated id", fineId.parentId, craftedId.id);
+truthy("duplicate ids get a fresh id", duplicateId.id !== "ok" && duplicateId.id !== craftedId.id);
+const dupWordProject = ensureProject({
+  title: "Dup",
+  languages: [
+    {
+      id: "L",
+      name: "L",
+      vocabulary: [
+        { id: "w", gloss: "a", form: "p" },
+        { id: "w", gloss: "b", form: "q" },
+      ],
+    },
+  ],
+});
+truthy(
+  "duplicate word ids are deduped",
+  dupWordProject.languages[0].vocabulary[0].id === "w" &&
+    dupWordProject.languages[0].vocabulary[1].id !== "w"
+);
+
 const cyclic = createPhonotacticsChecker({
   ...language,
   phonotactics: {
@@ -1070,6 +1149,27 @@ truthy("a closed syllable is heavy", isHeavySyllable(heavy()));
 truthy("a long nucleus is heavy", isHeavySyllable(long()));
 truthy("a diphthong is heavy", isHeavySyllable(diphthong()));
 truthy("an open short syllable is light", !isHeavySyllable(light()));
+const macron = () => ({ nucleus: ["ā"], coda: [] });
+const combiningMacron = () => ({ nucleus: ["a\u0304"], coda: [] });
+truthy("a precomposed macron nucleus is heavy", isHeavySyllable(macron()));
+truthy("a combining macron nucleus is heavy", isHeavySyllable(combiningMacron()));
+equal("weight stress takes a macron penult", stressIndexOf([light(), macron(), light()], "weight"), 1);
+equal(
+  "weight stress treats a macron like a length mark",
+  stressIndexOf([light(), macron(), light()], "weight"),
+  stressIndexOf([light(), long(), light()], "weight")
+);
+const macronVowels = makeChart(["Open"], ["Front"], [["Open", "Front", ["a", "aː", "ā"]]]);
+const macronChecker = createPhonotacticsChecker({
+  inventory: { consonants: makeChart(["Plosive"], ["Bilabial"], [["Plosive", "Bilabial", ["p"]]]), vowels: macronVowels },
+  phonotactics: { template: "CV(C)", stress: "weight" },
+});
+equal("macron penult is stressed end to end", macronChecker.validate("papāpa").displayText, "pa.ˈpā.pa");
+equal(
+  "macron and length-mark penults stress the same syllable",
+  macronChecker.validate("papāpa").stressIndex,
+  macronChecker.validate("papaːpa").stressIndex
+);
 equal("unknown stress systems normalize to none", normalizeStressSystem("loud"), "none");
 equal("stress labels read naturally", stressLabel("weight"), "Weight-sensitive (penult if heavy)");
 equal("missing stress defaults to none", migratedPhonotactics.stress, "none");
@@ -1203,6 +1303,9 @@ equal("a lone slash is not a delimiter", stripLevelMarks("/"), "/");
 equal("format phonemic", formatPhonemic("kasa"), "/kasa/");
 equal("format phonetic replaces existing level marks", formatPhonetic("/kʰasa/"), "[kʰasa]");
 equal("format empty form", formatPhonemic("  "), "");
+equal("search normalization ignores stress marks", normalizeSearchText("kaˈsa"), "kasa");
+equal("search normalization ignores level marks and case", normalizeSearchText("/KaˈSa/"), "kasa");
+equal("search normalization keeps ordinary forms", normalizeSearchText("kasa"), "kasa");
 
 /* ---- allophony ---------------------------------------------------------- */
 
@@ -1449,6 +1552,88 @@ equal(
   "grouping across two groups preserves order and numbers",
   allophonyEntries(suffixGrouping.allophony).map((entry) => [entry.number, entry.rule.id]),
   [["1.1", "a"], ["2.1", "b"], ["2.2", "c"], ["3.1", "d"]]
+);
+
+// Toast undo must survive edits made while the toast is visible. In this
+// scenario a group was ungrouped, then one of its rules was deleted before
+// Undo; the old index+span splice removed the adjacent rule instead.
+const ungroupUndo = {
+  allophony: [
+    { id: "ug", type: "group", name: "G", collapsed: false, enabled: true, rules: [groupRule("a"), groupRule("b")] },
+    groupRule("c"),
+  ],
+};
+const ungroupedGroup = ungroupUndo.allophony[0];
+const ungroupedRules = [...ungroupedGroup.rules];
+ungroupUndo.allophony.splice(0, 1, ...ungroupedRules);
+ungroupUndo.allophony.splice(1, 1); // delete "b" during the undo window
+truthy(
+  "ungroup undo restores the group instead of a stale span",
+  restoreUngroupedAllophonyRules(ungroupUndo, ungroupedGroup, 0, ungroupedRules)
+);
+equal(
+  "ungroup undo keeps the deleted rule deleted and the neighbour present",
+  allophonyEntries(ungroupUndo.allophony).map((entry) => entry.rule.id),
+  ["a", "c"]
+);
+equal(
+  "ungroup undo rebuilds the group around the surviving rules",
+  ungroupedGroup.rules.map((rule) => rule.id),
+  ["a"]
+);
+truthy(
+  "a second ungroup undo does not duplicate the group",
+  !restoreUngroupedAllophonyRules(ungroupUndo, ungroupedGroup, 0, ungroupedRules)
+);
+
+const groupUndo = { allophony: [groupRule("a"), groupRule("c")] };
+const deletedGroup = { id: "dg", type: "group", name: "D", collapsed: false, enabled: true, rules: [groupRule("b")] };
+truthy("group undo inserts by identity", restoreAllophonyGroup(groupUndo, deletedGroup, 1));
+equal(
+  "group undo does not remove the rules now at the captured index",
+  allophonyEntries(groupUndo.allophony).map((entry) => entry.rule.id),
+  ["a", "b", "c"]
+);
+truthy("a second group undo is a no-op", !restoreAllophonyGroup(groupUndo, deletedGroup, 1));
+
+const detachedRuleUndo = { allophony: [groupRule("a"), groupRule("c")] };
+truthy(
+  "rule undo falls back to the top level when its group is gone",
+  restoreAllophonyRule(detachedRuleUndo, groupRule("b"), { id: "gone", type: "group", rules: [] }, 1)
+);
+equal(
+  "rule undo restores only the missing rule",
+  allophonyEntries(detachedRuleUndo.allophony).map((entry) => entry.rule.id),
+  ["a", "b", "c"]
+);
+
+const languageUndo = {
+  title: "Undo",
+  languages: [
+    { id: "a", name: "A", parentId: null },
+    { id: "b", name: "B", parentId: "a" },
+    { id: "c", name: "C", parentId: null },
+  ],
+};
+const removedBranch = languageUndo.languages
+  .map((language, index) => ({ language, index }))
+  .filter(({ language }) => language.id === "b");
+deleteLanguage(languageUndo, "b");
+languageUndo.languages.push({ id: "new", name: "New", parentId: null });
+equal(
+  "language undo restores only the deleted branch",
+  restoreDeletedLanguages(languageUndo, removedBranch),
+  1
+);
+equal(
+  "language undo preserves languages created during the window",
+  languageUndo.languages.map((language) => language.id),
+  ["a", "b", "c", "new"]
+);
+equal(
+  "language undo leaves an already-restored branch alone",
+  restoreDeletedLanguages(languageUndo, removedBranch),
+  0
 );
 
 const fedAllophony = ensureProject({
@@ -2327,6 +2512,21 @@ truthy("markdown notes keep line-start syntax inside the blockquote", noteMarkdo
 truthy("markdown notes escape a leading table pipe", noteMarkdown.includes("> \\| table \\|"));
 truthy("markdown notes escape a leading code span", noteMarkdown.includes("> \\`code\\`"));
 
+const htmlNoteProject = {
+  ...noteProject,
+  languages: [
+    {
+      ...noteProject.languages[0],
+      notes: '<img src=x onerror="alert(1)">',
+    },
+  ],
+};
+const htmlNoteMarkdown = buildMarkdown(htmlNoteProject);
+truthy(
+  "markdown notes escape raw HTML tags",
+  htmlNoteMarkdown.includes('> \\<img src=x onerror="alert(1)"\\>')
+);
+
 const allophonyMarkdown = buildMarkdown(allophonyProject);
 truthy("report formats lexical forms as phonemic", allophonyMarkdown.includes("/kasa/"));
 truthy(
@@ -2550,6 +2750,31 @@ equal(
   analysis.voicedWithoutVoiceless,
   []
 );
+const exoticChart = makeChart(
+  ["Plosive", "Click"],
+  ["Bilabial", "Alveolar"],
+  [
+    ["Plosive", "Bilabial", ["p", "b", "ɓ"]],
+    ["Plosive", "Alveolar", ["t", "d"]],
+    ["Click", "Bilabial", ["ʘ"]],
+  ]
+);
+const exoticLanguage = {
+  ...analyticsLanguage,
+  id: "exotic",
+  name: "Exotic",
+  inventory: { consonants: exoticChart, vowels },
+  vocabulary: [],
+};
+const exoticAnalysis = analyzeLexicon(
+  { title: "Exotic", languages: [exoticLanguage] },
+  exoticLanguage
+);
+equal(
+  "implosives and clicks do not pool with pulmonic stops as voicing gaps",
+  [exoticAnalysis.voicedWithoutVoiceless, exoticAnalysis.voicelessWithoutVoiced],
+  [[], []]
+);
 const nasalGap = analysis.gaps.find((gap) => gap.manner === "Nasal");
 equal(
   "analytics names the missing places in a manner row",
@@ -2577,6 +2802,27 @@ const quietLanguage = {
 const quietAnalysis = analyzeLexicon({ title: "Quiet", languages: [quietLanguage] }, quietLanguage);
 equal("a lexicon nothing syllabifies leaves no onset rows", quietAnalysis.onsets, []);
 equal("a lexicon nothing syllabifies leaves no coda rows", quietAnalysis.codas, []);
+
+/* ---- bulk import duplicate handling -------------------------------------- */
+
+const duplicateLanguage = {
+  vocabulary: [
+    { id: "dup1", gloss: "house", form: "kasa", note: "" },
+    { id: "dup2", gloss: " House ", form: "toma", note: "" },
+  ],
+};
+const duplicateRow = { gloss: "house", form: "pere", note: "" };
+equal(
+  "update mode previews a duplicate gloss as an update",
+  rowStatus(duplicateRow, duplicateLanguage, "update").status,
+  "update"
+);
+const duplicateSummary = applyWordList(duplicateLanguage, [duplicateRow], "update");
+equal(
+  "update mode overwrites the same last duplicate the preview targets",
+  [duplicateSummary.updated, duplicateLanguage.vocabulary.map((word) => word.form)],
+  [1, ["kasa", "pere"]]
+);
 
 /* ---- class autocomplete policy ------------------------------------------- */
 

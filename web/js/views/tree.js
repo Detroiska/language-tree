@@ -8,6 +8,7 @@ import {
   descendantsCount,
   formatDate,
   languageStats,
+  restoreDeletedLanguages,
   rootLanguages,
 } from "../model.js";
 import { confirmDialog, esc, icon, openMenu, promptDialog, toast } from "../ui.js";
@@ -202,7 +203,9 @@ async function removeLanguage(ctx, language) {
     danger: true,
   });
   if (!confirmed) return;
-  const snapshot = [...ctx.project.languages];
+  const removed = ctx.project.languages
+    .map((item, index) => ({ language: item, index }))
+    .filter(({ language: item }) => branchIds.has(item.id));
   deleteLanguage(ctx.project, language.id);
   ctx.touch({ label: `Delete language ${language.name}` });
   ctx.refresh();
@@ -213,7 +216,7 @@ async function removeLanguage(ctx, language) {
     action: {
       label: "Undo",
       onClick: () => {
-        ctx.project.languages = snapshot;
+        if (!restoreDeletedLanguages(ctx.project, removed)) return;
         ctx.touch({ label: `Restore language ${language.name}` });
         ctx.refresh();
         toast(`Restored ${language.name}.`, { type: "success" });

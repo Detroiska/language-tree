@@ -46,7 +46,10 @@ def host_name_of(headers) -> str:
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    # updatedAt doubles as the optimistic-concurrency revision, so two saves in
+    # the same second must not share a stamp. Microseconds keep the value
+    # human-readable and backward-compatible with existing project files.
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def read_project() -> dict:
@@ -166,9 +169,33 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
 
-        project["updatedAt"] = utc_now()
+        # The client may send the updatedAt stamp of the document it last saw
+        # (X-Base-Revision). A mismatch means another tab or window saved in
+        # the meantime: without this check the stale tab's whole-file PUT
+        # would silently overwrite the newer work (last-write-wins). Answer
+        # 409 and let the client offer reload or overwrite. Requests without
+        # the header (older clients, force-saves) keep the old behavior.
+        base_revision = (self.headers.get("X-Base-Revision") or "").strip()
         try:
             with SAVE_LOCK:
+                if base_revision:
+                    try:
+                        current = read_project()
+                    except (OSError, json.JSONDecodeError):
+                        current = None
+                    current_revision = str(current.get("updatedAt") or "") if isinstance(current, dict) else ""
+                    if current_revision != base_revision:
+                        self.send_json(
+                            {
+                                "error": "The project was saved by another tab or window after this one last saved. Reload the newer version, or save again to overwrite it.",
+                                "currentRevision": current_revision,
+                            },
+                            HTTPStatus.CONFLICT,
+                        )
+                        return
+                # Stamp only after the revision check, under the same lock as
+                # the write, so concurrent force-saves cannot share a stamp.
+                project["updatedAt"] = utc_now()
                 write_project(project)
         except OSError as exc:
             self.send_json({"error": f"Could not save project: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)

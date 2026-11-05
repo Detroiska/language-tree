@@ -261,7 +261,8 @@ function toggle() {
 function onEscape(event) {
   // Capture phase: the palette claims Escape before the modal handler, the
   // chart cell editor, or the sidebar so a single press closes only itself.
-  if (event.key !== "Escape") return;
+  // During IME composition Escape belongs to the input method, not the palette.
+  if (event.isComposing || event.key !== "Escape") return;
   event.preventDefault();
   event.stopPropagation();
   close();

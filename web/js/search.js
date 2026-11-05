@@ -1,5 +1,5 @@
 import { allophonyEntries, getLineage, ruleNumberMap } from "./model.js";
-import { formatPhonemic, stripLevelMarks } from "./notation.js";
+import { formatPhonemic, normalizeSearchText } from "./notation.js";
 import { esc, icon } from "./ui.js";
 
 // The command palette: Ctrl+K opens a searchable index of the whole project —
@@ -63,7 +63,7 @@ function indexEntries(project) {
         languageId: language.id,
         title: word.gloss || "(no gloss)",
         subtitle: `${formatPhonemic(word.form) || "∅"} · ${language.name}`,
-        searchText: `${word.gloss} ${word.form} ${word.note} ${language.name}`,
+        searchText: `${word.gloss} ${normalizeSearchText(word.form)} ${word.note} ${language.name}`,
         hash: `#/language/${encodeURIComponent(language.id)}/vocabulary`,
         focus: { kind: "word", id: word.id },
       });
@@ -146,6 +146,8 @@ export function createQuickSearch({ getProject, openResult }) {
   let results = [];
   let active = 0;
   let restoreFocusTo = null;
+  let keyHandler = null;
+  let focusInHandler = null;
 
   const isOpen = () => Boolean(overlay);
 
@@ -180,7 +182,12 @@ export function createQuickSearch({ getProject, openResult }) {
     });
 
     input.addEventListener("input", () => refresh());
-    input.addEventListener("keydown", (event) => {
+    // The palette owns the keyboard while it is open, wherever focus sits
+    // inside it. Binding to the input alone stranded Escape, arrows and Enter
+    // as soon as a click or Tab moved focus to a result.
+    keyHandler = (event) => {
+      if (!overlay || event.isComposing) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === "Escape") {
         event.preventDefault();
         close();
@@ -197,10 +204,21 @@ export function createQuickSearch({ getProject, openResult }) {
         return;
       }
       if (event.key === "Enter") {
+        // A focused result button activates itself through the native click;
+        // synthesizing another activation would open the highlighted row too.
+        if (event.target instanceof Element && event.target.closest("[data-index]")) return;
         event.preventDefault();
         activate(active);
       }
-    });
+    };
+    window.addEventListener("keydown", keyHandler);
+    // Tabbing or clicking out of the palette can leave it visible over the
+    // page; close it rather than trapping keyboard handling behind it.
+    focusInHandler = (event) => {
+      if (overlay && event.target instanceof Node && overlay.contains(event.target)) return;
+      close();
+    };
+    document.addEventListener("focusin", focusInHandler);
     refresh();
     input.focus();
     return true;
@@ -209,7 +227,7 @@ export function createQuickSearch({ getProject, openResult }) {
   function refresh() {
     const project = getProject();
     if (!project) return;
-    const query = stripLevelMarks(input.value.trim()).toLowerCase();
+    const query = normalizeSearchText(input.value.trim());
     const entries = indexEntries(project);
     // With no query the palette is a jump list: the global views plus every
     // language. Typed queries search the whole index.
@@ -276,6 +294,14 @@ export function createQuickSearch({ getProject, openResult }) {
   }
 
   function close() {
+    if (keyHandler) {
+      window.removeEventListener("keydown", keyHandler);
+      keyHandler = null;
+    }
+    if (focusInHandler) {
+      document.removeEventListener("focusin", focusInHandler);
+      focusInHandler = null;
+    }
     overlay?.remove();
     overlay = null;
     input = null;

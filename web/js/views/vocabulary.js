@@ -1,7 +1,7 @@
 import { allophonyRules, ancestorsOf, uid } from "../model.js";
 import { applyWordList, copyWords, downloadWords, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
 import { deriveForm, hasSurfaceDisplay, surfaceForForm } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, stripLevelMarks, stripStressMarks } from "../notation.js";
+import { formatPhonemic, formatPhonetic, normalizeSearchText, stripLevelMarks, stripStressMarks } from "../notation.js";
 import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
 import { esc, icon, openModal, toast } from "../ui.js";
 
@@ -344,7 +344,7 @@ export function renderVocabulary(container, ctx) {
         <div>
           <p class="eyebrow">Lexicon</p>
           <h2>Vocabulary</h2>
-          <p class="section-copy">Lexical forms are phonemic, written <code>/…/</code>. ${hasParent ? `They are compared with the phonemic output of this language’s sound changes applied to ${esc(parent.name)} words with the same gloss.` : "Add words here; daughter languages can use them to test inherited forms."} Each form is checked against the inventory and <a href="#/language/${language.id}/phonotactics">phonotactics</a>; any surface allophones appear in <code>[ … ]</code> below the form.${allophonyRules(language.allophony).length ? "" : " Add synchronic rules in <a href=\"#/language/" + language.id + "/allophony\">Allophony</a> to see surface forms."}</p>
+          <p class="section-copy">Lexical forms are phonemic, written <code>/…/</code>. ${hasParent ? `They are compared with the phonemic output of this language’s sound changes applied to ${esc(parent.name)} words with the same gloss.` : "Add words here; daughter languages can use them to test inherited forms."} Each form is checked against the inventory and <a href="#/language/${encodeURIComponent(language.id)}/phonotactics">phonotactics</a>; any surface allophones appear in <code>[ … ]</code> below the form.${allophonyRules(language.allophony).length ? "" : " Add synchronic rules in <a href=\"#/language/" + encodeURIComponent(language.id) + "/allophony\">Allophony</a> to see surface forms."}</p>
         </div>
         <div class="inventory-summary">
           <span><strong>${words.length}</strong> ${words.length === 1 ? "word" : "words"}</span>
@@ -424,13 +424,13 @@ export function renderVocabulary(container, ctx) {
   const issueStatuses = new Set(["draft", "invalid", "differs", "error"]);
 
   const applyFilters = () => {
-    const query = lexiconFilter.text.trim().toLowerCase();
+    const query = normalizeSearchText(lexiconFilter.text.trim());
     const filtering = Boolean(query) || lexiconFilter.status !== "all";
     let visible = 0;
     container.querySelectorAll("[data-word-id]").forEach((row) => {
       const word = language.vocabulary.find((entry) => entry.id === row.dataset.wordId);
       if (!word) return;
-      const haystack = [word.gloss, word.form, word.note].join(" ").toLowerCase();
+      const haystack = [word.gloss, word.form, word.note].map((value) => normalizeSearchText(value)).join(" ");
       const matchesText = !query || haystack.includes(query);
       const status = wordStatus(word);
       const statusFilter = lexiconFilter.status;
@@ -460,7 +460,7 @@ export function renderVocabulary(container, ctx) {
     ctx.touch({ label: "Add word" });
     ctx.refresh();
     window.setTimeout(() => {
-      const row = document.querySelector(`[data-word-id="${word.id}"]`);
+      const row = document.querySelector(`[data-word-id="${CSS.escape(word.id)}"]`);
       row?.querySelector('[data-word-field="gloss"]')?.focus();
     }, 0);
   };
@@ -498,7 +498,7 @@ export function renderVocabulary(container, ctx) {
       input.addEventListener("input", () => {
         const field = input.dataset.wordField;
         word[field] = field === "form" ? stripLevelMarks(input.value) : input.value;
-        ctx.touch({ label: "Edit word" });
+        ctx.touch({ label: "Edit word", coalesceKey: word.id });
         if (field === "gloss" || field === "form") updateRowCheck(row, ctx, word, parent);
         if (field === "form") {
           const result = checker.validate(word.form);

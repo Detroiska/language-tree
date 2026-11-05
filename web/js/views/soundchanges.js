@@ -491,7 +491,7 @@ function conflictFixMarkup(ctx, conflict) {
   const blocked = secondGroup.children.length > 0;
   const reason = blocked
     ? `${conflict.secondLabel} already has sequential children, so it cannot be moved — restructure those rules by hand first.`
-    : `${conflict.secondLabel} (${esc(secondGroup.rule.notation) || "empty rule"}) then runs after ${conflict.firstLabel} (${esc(firstGroup.rule.notation) || "empty rule"}) instead of matching the same spot in parallel.`;
+    : `${conflict.secondLabel} (${secondGroup.rule.notation || "empty rule"}) then runs after ${conflict.firstLabel} (${firstGroup.rule.notation || "empty rule"}) instead of matching the same spot in parallel.`;
   return `
     <p class="tester-conflict-copy">${icon("warning")}<strong>Top-level conflict.</strong> ${esc(reason)}</p>
     <button class="button button-quiet button-small" type="button" data-conflict-fix ${blocked ? "disabled" : ""}>
@@ -753,7 +753,7 @@ export function renderChanges(container, ctx) {
     ctx.touch({ label: "Add rule" });
     ctx.refresh();
     window.setTimeout(() => {
-      document.querySelector(`[data-rule-id="${child.id}"] .rule-input`)?.focus();
+      document.querySelector(`[data-rule-id="${CSS.escape(child.id)}"] .rule-input`)?.focus();
     }, 0);
   };
 
@@ -764,7 +764,7 @@ export function renderChanges(container, ctx) {
       ctx.touch({ label: "Add rule" });
       ctx.refresh();
       window.setTimeout(() => {
-        document.querySelector(`[data-rule-id="${rule.id}"] .rule-input`)?.focus();
+        document.querySelector(`[data-rule-id="${CSS.escape(rule.id)}"] .rule-input`)?.focus();
       }, 0);
     });
   });

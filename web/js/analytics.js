@@ -47,8 +47,18 @@ function voicingFindings(language) {
     obstruents.push({ sound, bundle });
   }
   // Only obstruent manners reaching voice contrast (plosive, affricate,
-  // fricative) are examined, one series at a time.
-  const mannerKey = (bundle) => [bundle.continuant, bundle.delayed_release, bundle.trill, bundle.tap].join(",");
+  // fricative) are examined, one series at a time. Airstream distinctions are
+  // part of the manner: an implosive or click is not the voiced/voiceless twin
+  // of a pulmonic stop that happens to share continuancy and release.
+  const mannerKey = (bundle) =>
+    [
+      bundle.continuant,
+      bundle.delayed_release,
+      bundle.trill,
+      bundle.tap,
+      bundle.click,
+      bundle.implosive,
+    ].join(",");
   const byManner = new Map();
   for (const entry of obstruents) {
     const key = mannerKey(entry.bundle);
