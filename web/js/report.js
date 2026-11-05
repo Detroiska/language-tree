@@ -10,6 +10,7 @@ import {
   ruleNumberMap,
 } from "./model.js";
 import { allophoneTable, surfaceForForm } from "./phonology.js";
+import { describeBundle } from "./features.js";
 import { formatPhonemic, formatPhonetic } from "./notation.js";
 import { esc, openMenu, toast } from "./ui.js";
 
@@ -136,6 +137,12 @@ function phonotacticsRows(language) {
   return rows;
 }
 
+function featureOverrideRows(language) {
+  return Object.entries(language.featureOverrides || {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([sound, bundle]) => [sound, describeBundle(bundle, { full: true }).join(" ")]);
+}
+
 function surfaceOf(project, language, form) {
   const result = surfaceForForm(form, project, language.id);
   return result.errors.length ? "" : result.text;
@@ -223,6 +230,16 @@ function mdLanguageSection(project, language) {
     if (!table.rows.length && table.headers.length === 1) continue;
     parts.push(`${sub} ${title}\n\n${mdTable(table.headers, table.rows)}`);
     if (table.notes.trim()) parts.push(`*${title} notes: ${table.notes.trim()}*`);
+  }
+
+  const overrides = featureOverrideRows(language);
+  if (overrides.length) {
+    parts.push(
+      `${sub} Feature overrides\n\n_Complete per-language bundles; rules that query these sounds depend on them._\n\n${mdTable(
+        ["Sound", "Bundle"],
+        overrides
+      )}`
+    );
   }
 
   const phonotactics = phonotacticsRows(language);
@@ -338,6 +355,15 @@ function htmlLanguageSection(project, language, index) {
     })
     .join("");
 
+  const overrideRows = featureOverrideRows(language);
+  const overridesHtml = overrideRows.length
+    ? `<h3>Feature overrides</h3><p class="chart-note">Complete per-language bundles; rules that query these sounds depend on them.</p>${htmlTable(
+        ["Sound", "Bundle"],
+        overrideRows,
+        { formColumns: [0, 1] }
+      )}`
+    : "";
+
   const phonoRows = phonotacticsRows(language);
   const phonotacticsHtml = phonoRows.length
     ? htmlTable(["Setting", "Value"], phonoRows, { formColumns: [] })
@@ -378,7 +404,7 @@ function htmlLanguageSection(project, language, index) {
       <h2>${esc(language.name)}</h2>
       <p class="report-lineage">${lineage} <span class="report-stats">· ${stats.consonants} C · ${stats.vowels} V · ${stats.changes} ${plural(stats.changes, "rule")} · ${stats.allophony} allophony ${plural(stats.allophony, "rule")} · ${stats.words} ${plural(stats.words, "word")}</span></p>
       ${String(language.notes || "").trim() ? `<blockquote>${esc(language.notes).replace(/\r?\n/g, "<br>")}</blockquote>` : ""}
-      <div class="report-block"><h3 class="block-title">Phonology</h3>${charts}</div>
+      <div class="report-block"><h3 class="block-title">Phonology</h3>${charts}${overridesHtml}</div>
       ${phonotacticsHtml ? `<div class="report-block"><h3 class="block-title">Phonotactics</h3>${phonotacticsHtml}</div>` : ""}
       ${rulesHtml ? `<div class="report-block"><h3 class="block-title">Sound changes</h3>${rulesHtml}</div>` : ""}
       ${allophonyHtml ? `<div class="report-block"><h3 class="block-title">Allophony</h3>${allophonyHtml}</div>` : ""}

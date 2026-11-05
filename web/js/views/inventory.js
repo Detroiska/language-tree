@@ -665,7 +665,7 @@ function featurePanelMarkup(ctx) {
               </details>`
             : ""
         }
-        <p class="table-foot">A feature bundle is tri-state: +, −, or not applicable. Place is categorical; coronal, dorsal, labial, and radical are derived from it. Feature changes resolve back to the current chart, so a mutation that lands off-chart fails loudly.</p>
+        <p class="table-foot">A feature bundle is tri-state: +, −, or not applicable. Place is categorical; coronal, dorsal, labial, and radical are derived from it. Sound-change outputs resolve back to the current chart, so an off-chart mutation fails loudly. Allophony may instead synthesize a conservative surface symbol from this curated table and its documented diacritics.</p>
       </div>
     </section>`;
 }

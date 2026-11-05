@@ -248,8 +248,12 @@ export function canonicalizeBundle(input, explicit = null) {
     bundle.anterior = null;
   }
 
-  if (bundle.central === true) bundle.back = false;
-  if (bundle.back === true && bundle.central === true) bundle.central = false;
+  // Central and back describe the same axis. An explicit back assignment must
+  // win over an inherited central value: without the `explicit` guard,
+  // `ə > [+back]` set back=true and then erased it because central was still
+  // true from the input. An explicit [+central] likewise clears back.
+  if (bundle.central === true && explicit?.back !== true) bundle.back = false;
+  else if (bundle.back === true) bundle.central = false;
 
   return bundle;
 }
@@ -396,6 +400,11 @@ function v(height, backness, rounded, patch = {}) {
   return vowel({ ...base, ...rest });
 }
 
+// A few pairs intentionally share a bundle because they are glyph or
+// notational variants that this feature inventory does not distinguish:
+// ɐ/ᴀ, ɘ/ᴇ, ɪ/ɩ, ʊ/ɷ, g/ɡ, and the apical-vowel pairs ɿ/ʅ and ʮ/ʯ.
+// Charting both members still makes a feature target ambiguous; prefer one
+// spelling or give one of them an override when a real contrast is intended.
 export const IPA_FEATURES = {
   // Stops.
   p: stop("bilabial"),
@@ -442,8 +451,8 @@ export const IPA_FEATURES = {
   z: fricative("alveolar", true),
   ʃ: fricative("postalveolar"),
   ʒ: fricative("postalveolar", true),
-  ɕ: fricative("postalveolar"),
-  ʑ: fricative("postalveolar", true),
+  ɕ: fricative("postalveolar", false, { palatalized: true }),
+  ʑ: fricative("postalveolar", true, { palatalized: true }),
   ʂ: fricative("retroflex"),
   ʐ: fricative("retroflex", true),
   ç: fricative("palatal"),
@@ -484,8 +493,8 @@ export const IPA_FEATURES = {
   "d͡z": affricate("alveolar", true),
   "t͡ʃ": affricate("postalveolar"),
   "d͡ʒ": affricate("postalveolar", true),
-  "t͡ɕ": affricate("postalveolar"),
-  "d͡ʑ": affricate("postalveolar", true),
+  "t͡ɕ": affricate("postalveolar", false, { palatalized: true }),
+  "d͡ʑ": affricate("postalveolar", true, { palatalized: true }),
   "ʈ͡ʂ": affricate("retroflex"),
   "ɖ͡ʐ": affricate("retroflex", true),
   "t͡θ": affricate("dental"),
@@ -553,12 +562,12 @@ export const IPA_FEATURES = {
   "ɬʼ": ejective("alveolar", { lateral: true }),
   "çʼ": ejective("palatal"),
   "ʂʼ": ejective("retroflex"),
-  "ɕʼ": ejective("postalveolar"),
+  "ɕʼ": ejective("postalveolar", { palatalized: true }),
   "t͡sʼ": ejective("alveolar", { delayed_release: true }),
   "t͡ʃʼ": ejective("postalveolar", { delayed_release: true }),
   "t͡θʼ": ejective("dental", { delayed_release: true }),
   "t͡ɬʼ": ejective("alveolar", { delayed_release: true, lateral: true }),
-  "t͡ɕʼ": ejective("postalveolar", { delayed_release: true }),
+  "t͡ɕʼ": ejective("postalveolar", { delayed_release: true, palatalized: true }),
   "t͡ʂʼ": ejective("retroflex", { delayed_release: true }),
   "k͡xʼ": ejective("velar", { delayed_release: true }),
   "q͡χʼ": ejective("uvular", { delayed_release: true }),
@@ -582,11 +591,11 @@ export const IPA_FEATURES = {
   ə: v("mid", "central", false, { atr: false }),
   ɛ: v("mid", "front", false, { lax: true }),
   œ: v("mid", "front", true, { lax: true }),
-  ɜ: v("mid", "central", false),
-  ɞ: v("mid", "central", true),
-  ʌ: v("mid", "back", false),
+  ɜ: v("mid", "central", false, { lax: true }),
+  ɞ: v("mid", "central", true, { lax: true }),
+  ʌ: v("mid", "back", false, { lax: true }),
   ɔ: v("mid", "back", true),
-  æ: v("low", "front", false),
+  æ: v("low", "front", false, { atr: false }),
   ɐ: v("low", "central", false),
   a: v("low", "front", false),
   ɶ: v("low", "front", true),
@@ -628,7 +637,8 @@ const MODIFIER_DELTAS = {
   "\u032F": { syllabic: false },
   "\u031A": {},
   "\u0330": { constricted_glottis: true },
-  "\u0304": {},
+  // A macron is the common ASCII-friendly way to write a long vowel.
+  "\u0304": { long: true },
   "\u0301": {},
   "\u0300": {},
   "\u030C": {},
@@ -736,7 +746,7 @@ function deriveContour(sound) {
   if (
     first.place &&
     second.place &&
-    ((first.place === "labial" || ["bilabial", "labiodental"].includes(first.place)) &&
+    (["bilabial", "labiodental"].includes(first.place) &&
       ["palatal", "velar", "uvular"].includes(second.place))
   ) {
     return canonicalizeBundle({
@@ -758,6 +768,120 @@ export function deriveIpaFeatures(sound) {
   if (contour) return contour;
   const { base, modifiers } = splitSound(normalized);
   return deriveFromParts(base, modifiers);
+}
+
+// Surface-only fallback: when an allophony rule changes features and the exact
+// bundle is not charted, spell the result with IPA instead of forcing the sound
+// into the phoneme chart. Sound changes keep chart-only resolution; this helper
+// is called only by contexts that explicitly allow surface synthesis.
+//
+// Candidates are conservative. A curated symbol must match the target bundle
+// exactly, and a derived candidate is accepted only when the base plus one or
+// two modifier marks parses back to that same bundle. Nothing is invented
+// outside the curated table and its documented diacritics.
+const SYNTHESIS_MODIFIERS = Object.entries(MODIFIER_DELTAS)
+  .filter(([, delta]) =>
+    Object.keys(delta).some((name) => FEATURE_DEFINITIONS[name]?.type !== "derived")
+  )
+  .map(([char, delta]) => ({ char, delta }));
+
+// Results depend on the resolver's overrides as well as the target bundle, so
+// cache per resolver. Contexts create one resolver each; the WeakMap lets an
+// old language context be collected without leaking its cache.
+const synthesisCaches = new WeakMap();
+const defaultSynthesisCache = new Map();
+
+function synthesisCacheFor(resolver) {
+  if (!resolver) return defaultSynthesisCache;
+  let cache = synthesisCaches.get(resolver);
+  if (!cache) {
+    cache = new Map();
+    synthesisCaches.set(resolver, cache);
+  }
+  return cache;
+}
+
+function modifierFits(bundle, target, delta) {
+  let changes = false;
+  for (const [name, value] of Object.entries(delta)) {
+    const def = FEATURE_DEFINITIONS[name];
+    if (!def || def.type === "derived") continue;
+    if (target[name] !== value) return false;
+    if (bundle[name] !== value) changes = true;
+  }
+  return changes;
+}
+
+function synthesisKey(baseSound, target) {
+  return `${soundKey(baseSound)}\u0000${describeBundle(target, { full: true }).join(" ")}`;
+}
+
+function searchSynthesis(base, bundle, target, modifiers, start, depth) {
+  if (featureDistance(bundle, target) === 0) return base + modifiers.join("");
+  if (depth === 0) return null;
+  for (let index = start; index < SYNTHESIS_MODIFIERS.length; index += 1) {
+    const { char, delta } = SYNTHESIS_MODIFIERS[index];
+    if (!modifierFits(bundle, target, delta)) continue;
+    const next = canonicalizeBundle({ ...bundle, ...delta });
+    if (featureDistance(next, bundle) === 0) continue;
+    const result = searchSynthesis(base, next, target, [...modifiers, char], index, depth - 1);
+    if (result) return result;
+  }
+  return null;
+}
+
+export function synthesizeFeatureSound(baseSound, target, resolver) {
+  if (!target) return null;
+  const sourceKey = soundKey(baseSound);
+  const cache = synthesisCacheFor(resolver);
+  const cacheKey = synthesisKey(sourceKey, target);
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const lookup = (sound) => resolver?.bundleFor(sound) || deriveIpaFeatures(sound);
+
+  // Keep an unchanged segment spelled the way the user wrote it.
+  const sourceBundle = sourceKey ? lookup(sourceKey) : null;
+  if (sourceBundle && featureDistance(sourceBundle, target) === 0) {
+    cache.set(cacheKey, sourceKey);
+    return sourceKey;
+  }
+
+  // Prefer a real symbol from the curated table: s + voice is z, not s̬.
+  const exact = [];
+  for (const sound of Object.keys(IPA_FEATURES)) {
+    const bundle = lookup(sound);
+    if (!bundle || bundle.place !== target.place) continue;
+    if (featureDistance(bundle, target) === 0) exact.push(sound);
+  }
+  if (exact.length) {
+    cache.set(cacheKey, exact[0]);
+    return exact[0];
+  }
+
+  // Otherwise spell it with the base plus modifiers: aspiration is pʰ, a long
+  // nasalized vowel is ãː, a palatalized stop is tʲ. Two marks cover the
+  // common combinations without a combinatorial explosion.
+  const bases = [];
+  if (sourceKey) bases.push(sourceKey);
+  for (const sound of Object.keys(IPA_FEATURES)) {
+    const bundle = lookup(sound);
+    if (!bundle || bundle.place !== target.place) continue;
+    if (bundle.syllabic !== target.syllabic && !SYNTHESIS_MODIFIERS.some(({ delta }) => "syllabic" in delta)) {
+      continue;
+    }
+    bases.push(sound);
+  }
+  for (const base of [...new Set(bases)]) {
+    const bundle = lookup(base);
+    if (!bundle) continue;
+    const result = searchSynthesis(base, bundle, target, [], 0, 2);
+    if (result) {
+      cache.set(cacheKey, result);
+      return result;
+    }
+  }
+  cache.set(cacheKey, null);
+  return null;
 }
 
 export function createFeatureResolver(overrides = {}) {

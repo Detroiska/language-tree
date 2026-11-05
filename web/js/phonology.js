@@ -14,6 +14,7 @@ import {
   classifyFeatureWords,
   createFeatureResolver,
   describeTerms,
+  featureDistance,
   featureMembers,
   isExplicitFeatureSyntax,
   isFeatureBundleText,
@@ -21,6 +22,7 @@ import {
   normalizeFeatureOverrides,
   parseFeatureBundleText,
   resolveFeatureBundle,
+  synthesizeFeatureSound,
 } from "./features.js";
 
 const VOWEL_FALLBACK = new Set([
@@ -79,6 +81,7 @@ export class SegmentContext {
     chart = [],
     featurePhonemes = [],
     featureOverrides = null,
+    allowSyntheticOutputs = false,
   } = {}) {
     this.vowels = new Set(vowels);
     this.consonants = new Set(consonants);
@@ -93,10 +96,13 @@ export class SegmentContext {
     this.categoryErrors = categoryErrors;
     // Feature lookup covers every sound the rule may mention in its input or
     // environment: the current chart plus ancestral sounds. Output resolution
-    // is narrower (`chart`), because a change must land on a sound this
-    // generation actually contrasts.
+    // starts from the narrower `chart`, because a sound change must land on a
+    // phoneme this generation contrasts. Allophony may opt into synthesis.
     this.features = createFeatureResolver(normalizeFeatureOverrides(featureOverrides));
     this.chart = [...new Set(chart.filter(Boolean))];
+    // Sound changes must land on a phoneme this generation contrasts.
+    // Allophony may use the surface-symbol synthesizer for an off-chart bundle.
+    this.allowSyntheticOutputs = allowSyntheticOutputs === true;
     this.featurePhonemes = [
       ...new Set((featurePhonemes.length ? featurePhonemes : [...vowels, ...consonants]).filter(Boolean)),
     ];
@@ -111,8 +117,23 @@ export class SegmentContext {
     return featureMembers(this.featurePhonemes, this.features, terms);
   }
 
-  resolveBundle(bundle) {
-    return resolveFeatureBundle(bundle, this.chart, this.features);
+  resolveBundle(bundle, baseSound = null) {
+    // A no-op delta keeps the existing spelling. This also avoids turning a
+    // duplicate chart glyph into an ambiguity error when nothing changed.
+    if (baseSound) {
+      const current = this.features.bundleFor(baseSound);
+      if (current && featureDistance(current, bundle) === 0) {
+        return { ok: true, sound: baseSound, bundle };
+      }
+    }
+    const resolved = resolveFeatureBundle(bundle, this.chart, this.features);
+    if (resolved.ok || resolved.ambiguity || !this.allowSyntheticOutputs) return resolved;
+    const synthesized = synthesizeFeatureSound(baseSound, bundle, this.features);
+    if (synthesized) return { ok: true, sound: synthesized, bundle, synthetic: true };
+    return {
+      ...resolved,
+      error: `${resolved.error.replace(/ Add the sound to the chart or change the rule\\.?$/u, "")} No IPA symbol could be synthesized for this bundle; add an override or restrict the rule.`,
+    };
   }
 
   isVowel(token) {
@@ -196,7 +217,12 @@ export function contextForInventory(inventory, featureOverrides = null) {
 // still be a valid environment in a later language. Phonotactic checks are
 // about the language's own synchronic inventory, so they use this narrower
 // context instead.
-function buildLanguageContext(project, languageId, extraKnown = []) {
+function buildLanguageContext(
+  project,
+  languageId,
+  extraKnown = [],
+  { allowSyntheticOutputs = false } = {}
+) {
   const lineage = getLineage(project, languageId);
   const known = new Set(extraKnown);
   const vowels = new Set();
@@ -233,7 +259,10 @@ function buildLanguageContext(project, languageId, extraKnown = []) {
         ]),
       ]
     : [...new Set([...vowels, ...consonants])];
-  const featurePhonemes = [...new Set([...vowels, ...consonants])];
+  // Extra known symbols are the literal surface allophones written in rules.
+  // They must be visible to feature queries too, or a rule targeting [+spread
+  // glottis] cannot see the pʰ that an earlier rule produces.
+  const featurePhonemes = [...new Set([...vowels, ...consonants, ...extraKnown])];
   const featureOverrides = language?.featureOverrides || null;
   const base = new SegmentContext({
     known: [...known],
@@ -243,6 +272,7 @@ function buildLanguageContext(project, languageId, extraKnown = []) {
     chart,
     featurePhonemes,
     featureOverrides,
+    allowSyntheticOutputs,
   });
   // Categories are authored on the current language's Phonotactics tab. They
   // are resolved against the lineage context so a rule can still name an
@@ -267,6 +297,7 @@ function buildLanguageContext(project, languageId, extraKnown = []) {
     chart,
     featurePhonemes,
     featureOverrides,
+    allowSyntheticOutputs,
   });
 }
 
@@ -357,7 +388,7 @@ export function contextForAllophony(project, languageId) {
   const surface = allophoneCandidates(allophonyRules(language?.allophony || []));
   // Surface symbols join the tokenizer before categories are compiled, so a
   // category that names an uncharted allophone still reads it as one segment.
-  return buildLanguageContext(project, languageId, surface);
+  return buildLanguageContext(project, languageId, surface, { allowSyntheticOutputs: true });
 }
 
 export function compileAllophonyRule(notation, context) {
@@ -495,7 +526,7 @@ export function allophoneTable(project, languageId) {
         const applied = bundle
           ? applyFeatureTerms(bundle, entry.rule.featureOutput.terms, {})
           : { ok: false };
-        const resolved = applied.ok ? context.resolveBundle(applied.bundle) : { ok: false };
+        const resolved = applied.ok ? context.resolveBundle(applied.bundle, phoneme) : { ok: false };
         allophone = resolved.ok
           ? resolved.sound
           : `[${describeTerms(entry.rule.featureOutput.terms)}]`;
@@ -964,6 +995,7 @@ export function compileRule(notation, context) {
   // application. Class and category inputs may have some candidates that
   // work, so those only warn.
   if (featureOutput && !variableFeatures.size) {
+    const resolutionTarget = context.allowSyntheticOutputs ? "a usable surface sound" : "a charted sound";
     const candidates = targetCandidates(target.pattern[0], context);
     const failures = [];
     for (const sound of candidates) {
@@ -974,26 +1006,40 @@ export function compileRule(notation, context) {
         failures.push({ sound, error: applied.error });
         continue;
       }
-      const resolved = context.resolveBundle(applied.bundle);
+      const resolved = context.resolveBundle(applied.bundle, sound);
       if (!resolved.ok) failures.push({ sound, error: resolved.error });
     }
     if (failures.length && failures.length === candidates.length) {
       return {
         ok: false,
-        error: `The feature change ${describeTerms(featureOutput.terms)} cannot produce a charted sound for any possible input. ${failures[0].error}`,
+        error: `The feature change ${describeTerms(featureOutput.terms)} cannot produce ${resolutionTarget} for any possible input. ${failures[0].error}`,
       };
     }
     if (failures.length && target.pattern[0]?.type === "literal") {
       return {
         ok: false,
-        error: `The feature change ${describeTerms(featureOutput.terms)} on “${target.pattern[0].value}” cannot land on a charted sound. ${failures[0].error}`,
+        error: `The feature change ${describeTerms(featureOutput.terms)} on “${target.pattern[0].value}” cannot land on ${resolutionTarget}. ${failures[0].error}`,
       };
     }
     if (failures.length) {
       warnings.push(
-        `The feature change ${describeTerms(featureOutput.terms)} has no charted result for ${failures
+        `The feature change ${describeTerms(featureOutput.terms)} has no result for ${failures
           .map((failure) => `“${failure.sound}”`)
           .join(", ")}. ${failures[0].error}`
+      );
+    }
+  }
+
+  // Feature queries enumerate charted sounds with a known bundle. A custom
+  // symbol without an override is silently invisible to them, which is easy to
+  // mistake for "the rule does not apply here". Warn once per rule instead.
+  const featureQueries = [...target.pattern, ...left, ...right].filter((atom) => atom.type === "feature");
+  if (featureQueries.length) {
+    const missingBundles = context.chart.filter((sound) => !context.features.bundleFor(sound));
+    if (missingBundles.length) {
+      const list = missingBundles.map((sound) => `“${sound}”`).join(", ");
+      warnings.push(
+        `Feature queries cannot see ${list}: no feature bundle is known. Add an override in Phonology → Features, or name the sound literally.`
       );
     }
   }
@@ -1094,8 +1140,9 @@ export function findRuleMatches(tokens, compiled, context) {
 }
 
 // A feature output is a delta on the matched segment, not a complete bundle.
-// It is resolved against this generation's chart so a change like n > [αplace]
-// can only produce a sound the language actually contrasts.
+// Sound-change contexts resolve it against this generation's chart, so a change
+// like n > [αplace] stays phonemic. Allophony contexts may synthesize an
+// off-chart surface symbol after the chart lookup fails.
 export function replacementForMatch(tokens, match, compiled, context) {
   if (!compiled?.featureOutput) return { ok: true, replacement: match.replacement || compiled?.replacement || [] };
   if (match.end - match.start !== 1) {
@@ -1111,12 +1158,16 @@ export function replacementForMatch(tokens, match, compiled, context) {
   }
   const applied = applyFeatureTerms(bundle, compiled.featureOutput.terms, match.bindings || {});
   if (!applied.ok) return { ok: false, error: applied.error };
-  const resolved = context.resolveBundle(applied.bundle);
+  const resolved = context.resolveBundle(applied.bundle, sound);
   if (!resolved.ok) {
     const label = compiled.source ? `“${compiled.source}”` : "The rule";
     return { ok: false, error: `${label}: “${sound}” → ${resolved.error}` };
   }
   return { ok: true, replacement: [resolved.sound], sound: resolved.sound };
+}
+
+function sameTokens(left, right) {
+  return left.length === right.length && left.every((token, index) => token === right[index]);
 }
 
 export function applyRule(tokens, compiled, context) {
@@ -1131,7 +1182,10 @@ export function applyRule(tokens, compiled, context) {
     cursor = match.end;
   }
   output.push(...tokens.slice(cursor));
-  return { tokens: output, changed: true };
+  // A feature delta can match a segment and leave its bundle unchanged, and a
+  // literal rule can rewrite a sound to itself. Neither is a surface change, so
+  // the derivation should not present it as one.
+  return { tokens: output, changed: !sameTokens(tokens, output) };
 }
 
 export function compileRules(rules, context) {
@@ -1155,16 +1209,6 @@ export function compileRuleStages(rules, context) {
       compiled: compileRule(child.notation, context),
     })),
   }));
-}
-
-export function compileRuleChain(project, languageId) {
-  const context = contextForLanguage(project, languageId);
-  const lineage = getLineage(project, languageId);
-  const stages = lineage.map((language) => ({
-    language,
-    groups: compileRuleStages(language.soundChanges, context),
-  }));
-  return { context, stages, lineage };
 }
 
 // The cognate explorer derives one ancestor word in every language it reaches.
@@ -1236,7 +1280,7 @@ function applyParallel(tokens, groups, context) {
     cursor = change.end;
   }
   output.push(...tokens.slice(cursor));
-  return { ok: true, tokens: output, changed: true, entries };
+  return { ok: true, tokens: output, changed: !sameTokens(tokens, output), entries };
 }
 
 export function deriveStages(inputTokens, stages, context) {
@@ -1291,13 +1335,12 @@ export function deriveStages(inputTokens, stages, context) {
     }
 
     if (usable.length) {
-      const matches = parallel.entries.reduce((total, entry) => total + entry.matches.length, 0);
       steps.push({
         kind: "parallel",
         label: "anc",
         before,
         after: [...parallel.tokens],
-        changed: matches > 0,
+        changed: parallel.changed,
         entries: parallel.entries.map((entry) => ({
           label: entry.group.label,
           notation: entry.group.rule.notation,

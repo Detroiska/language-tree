@@ -1209,6 +1209,74 @@ truthy(
   !offChartFeature.ok && /Nearest charted sounds/.test(offChartFeature.error)
 );
 
+const backedSchwa = applyFeatureTerms(resolver.bundleFor("ə"), [
+  { kind: "bool", feature: "back", value: true },
+]);
+equal(
+  "an explicit back delta clears central instead of erasing itself",
+  [backedSchwa.bundle.back, backedSchwa.bundle.central],
+  [true, false]
+);
+equal(
+  "a backed schwa resolves to the lax back vowel",
+  featureDistance(backedSchwa.bundle, resolver.bundleFor("ʌ")),
+  0
+);
+
+truthy(
+  "the low-front pair is contrastive",
+  featureDistance(resolver.bundleFor("a"), resolver.bundleFor("æ")) > 0
+);
+truthy(
+  "the alveolo-palatal fricatives are contrastive",
+  featureDistance(resolver.bundleFor("ʃ"), resolver.bundleFor("ɕ")) > 0 &&
+    featureDistance(resolver.bundleFor("ʒ"), resolver.bundleFor("ʑ")) > 0
+);
+truthy(
+  "the mid-central tense/lax pair is contrastive",
+  featureDistance(resolver.bundleFor("ɘ"), resolver.bundleFor("ɜ")) > 0
+);
+equal("æ is marked lax", resolver.bundleFor("æ").atr, false);
+equal("ɜ is marked lax", resolver.bundleFor("ɜ").atr, false);
+equal("ɕ is marked palatalized", resolver.bundleFor("ɕ").palatalized, true);
+equal("a macron marks length", resolver.bundleFor("ā").long, true);
+truthy(
+  "macron length is visible to feature changes",
+  featureDistance(resolver.bundleFor("a"), resolver.bundleFor("ā")) > 0
+);
+
+const lowFrontCtx = contextForInventory({
+  consonants: makeChart(["Plosive"], ["Bilabial"], [["Plosive", "Bilabial", ["p"]]]),
+  vowels: makeChart(
+    ["Open"],
+    ["Front", "Back"],
+    [
+      ["Open", "Front", ["a", "æ"]],
+      ["Open", "Back", ["ɑ"]],
+    ]
+  ),
+});
+const lowFrontRule = compileRule("ɑ > [-back]", lowFrontCtx);
+const lowFrontResult = lowFrontRule.ok
+  ? applyRule(lowFrontCtx.tokenize("ɑ"), lowFrontRule.rule, lowFrontCtx)
+  : { error: lowFrontRule.error };
+equal(
+  "a de-duplicated low-front target resolves to one sound",
+  lowFrontResult.error || lowFrontResult.tokens.join(""),
+  "a"
+);
+
+const bundlelessCtx = contextForInventory({
+  consonants: makeChart(["Other"], ["Cell"], [["Other", "Cell", ["Q", "n", "t"]]]),
+  vowels: makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]),
+});
+const bundlelessRule = compileRule("[+nasal] > ∅ / _ #", bundlelessCtx);
+truthy(
+  "a feature query warns when a charted sound has no bundle",
+  bundlelessRule.ok &&
+    bundlelessRule.warnings.some((warning) => warning.includes("Q") && warning.includes("override"))
+);
+
 equal(
   "a reserved bare word stays a chart class",
   classifyFeatureWords(["back"], { isReserved: () => true }).kind,
@@ -1310,6 +1378,112 @@ truthy(
   featureRows.some((row) => row.phoneme === "n" && row.allophone === "[αplace]")
 );
 
+/* ---- surface synthesis in allophony ------------------------------------- */
+
+const syntheticInventory = {
+  consonants: makeChart(
+    ["Plosive", "Nasal", "Fricative"],
+    ["Bilabial", "Alveolar", "Velar", "Glottal"],
+    [
+      ["Plosive", "Bilabial", ["p"]],
+      ["Plosive", "Alveolar", ["t", "d"]],
+      ["Plosive", "Velar", ["k", "g", "ɡ"]],
+      ["Nasal", "Bilabial", ["m"]],
+      ["Nasal", "Alveolar", ["n"]],
+      ["Fricative", "Alveolar", ["s", "z"]],
+      ["Fricative", "Glottal", ["h"]],
+    ]
+  ),
+  vowels: makeChart(
+    ["Close", "Mid", "Open"],
+    ["Front", "Central", "Back"],
+    [
+      ["Close", "Front", ["i"]],
+      ["Mid", "Central", ["ə"]],
+      ["Mid", "Back", ["ɤ"]],
+      ["Open", "Front", ["a", "æ"]],
+      ["Open", "Back", ["ɑ"]],
+    ]
+  ),
+};
+const syntheticProject = ensureProject({
+  title: "Surface synthesis",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory: syntheticInventory,
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+const syntheticLanguage = syntheticProject.languages[0];
+const allophonyFor = (notations) => {
+  syntheticLanguage.allophony = notations.map((notation, index) => ({
+    id: `s${index}`,
+    notation,
+    note: "",
+    enabled: true,
+  }));
+  return syntheticProject;
+};
+
+const aspiratedSurface = surfaceForForm(
+  "pa",
+  allophonyFor(["p > [+spread_glottis] / # _ V"]),
+  "only"
+);
+equal("allophony synthesizes aspiration for an off-chart bundle", aspiratedSurface.text, "pʰa");
+equal("a synthesized allophone is not an error", aspiratedSurface.errors, []);
+truthy(
+  "the allophone table resolves a synthesized feature output",
+  allophoneTable(syntheticProject, "only").rows.some(
+    (row) => row.phoneme === "p" && row.allophone === "pʰ"
+  )
+);
+
+const assimilatedSurface = surfaceForForm(
+  "anka",
+  allophonyFor(["n > [αplace] / _ [αplace]"]),
+  "only"
+);
+equal("allophony synthesizes an off-chart alpha result", assimilatedSurface.text, "aŋka");
+
+const backedSurface = surfaceForForm("ə", allophonyFor(["ə > [+back]"]), "only");
+equal("backing a central vowel is not a silent no-op", backedSurface.text, "ʌ");
+equal(
+  "a real backing step is marked changed",
+  backedSurface.steps.filter((step) => step.changed).length,
+  1
+);
+
+const noOpSurface = surfaceForForm("ag", allophonyFor(["g > [+voice]"]), "only");
+equal("an unchanged feature delta keeps the original glyph", noOpSurface.text, "ag");
+equal(
+  "an unchanged feature delta is not presented as a change",
+  noOpSurface.steps.filter((step) => step.changed).length,
+  0
+);
+
+allophonyFor([
+  "p > pʰ / # _ V",
+  "[+spread_glottis] > [-spread_glottis] / _ #",
+]);
+const featureRuleRows = allophoneTable(syntheticProject, "only").rows;
+truthy(
+  "the allophone table sees a literal surface symbol as a feature target",
+  featureRuleRows.some((row) => row.phoneme === "pʰ" && row.allophone === "p")
+);
+
+const strictSynthesis = compileRule("p > [+spread_glottis] / # _ V", contextForInventory(syntheticInventory));
+truthy(
+  "sound changes remain chart-only while allophony synthesizes",
+  !strictSynthesis.ok && /charted sound/.test(strictSynthesis.error)
+);
+
 const overrideProject = ensureProject({
   title: "Overrides",
   languages: [
@@ -1390,6 +1564,21 @@ truthy(
   allophonyHtml.includes("Allophony") && allophonyHtml.includes("[kʰ]")
 );
 truthy("HTML report formats lexical forms as phonemic", allophonyHtml.includes("/kasa/"));
+
+const overrideMarkdown = buildMarkdown(featureProject);
+truthy(
+  "Markdown report includes feature overrides",
+  overrideMarkdown.includes("Feature overrides") && overrideMarkdown.includes(customSymbol)
+);
+truthy(
+  "Markdown report writes the complete override bundle",
+  overrideMarkdown.includes("+click") && overrideMarkdown.includes("place=bilabial")
+);
+const overrideHtml = buildHtml(featureProject);
+truthy(
+  "HTML report includes feature overrides",
+  overrideHtml.includes("Feature overrides") && overrideHtml.includes(customSymbol)
+);
 
 /* ---- summary ------------------------------------------------------------- */
 
