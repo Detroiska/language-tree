@@ -19,6 +19,7 @@ import { initClassAutocomplete } from "./autocomplete.js";
 import { decodeHashPart } from "./routes.js";
 import { renderCognates } from "./views/cognates.js";
 import { renderLanguage } from "./views/language.js";
+import { renderSubgrouping } from "./views/subgrouping.js";
 import { renderTree } from "./views/tree.js";
 
 const appShell = document.getElementById("app-shell");
@@ -28,6 +29,7 @@ const sidebarCount = document.getElementById("sidebar-count");
 const sidebarAddRoot = document.getElementById("sidebar-add-root");
 const sidebarTreeLink = document.getElementById("sidebar-tree-link");
 const sidebarCognatesLink = document.getElementById("sidebar-cognates-link");
+const sidebarSubgroupingLink = document.getElementById("sidebar-subgrouping-link");
 const projectName = document.getElementById("project-name");
 const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
@@ -58,6 +60,7 @@ function parseRoute() {
       wordId: parts[2] ? decodeHashPart(parts[2]) : null,
     };
   }
+  if (parts[0] === "subgrouping") return { view: "subgrouping" };
   return { view: "tree" };
 }
 
@@ -69,6 +72,7 @@ function routeHash(route) {
     }
     return "#/cognates";
   }
+  if (route.view === "subgrouping") return "#/subgrouping";
   return "#/tree";
 }
 
@@ -107,7 +111,9 @@ function renderSidebar(route) {
     ? `${findLanguage(store.project, route.id).name} · ${store.project.title}`
     : route?.view === "cognates"
       ? `Cognate explorer · ${store.project.title}`
-      : `${store.project.title} · Language Tree`;
+      : route?.view === "subgrouping"
+        ? `Subgrouping evidence · ${store.project.title}`
+        : `${store.project.title} · Language Tree`;
 
   if (!store.project.languages.length) {
     sidebarTree.innerHTML = `<p class="sidebar-empty">No languages yet.</p>`;
@@ -129,6 +135,10 @@ function renderSidebar(route) {
   if (sidebarCognatesLink) {
     sidebarCognatesLink.classList.toggle("is-active", route?.view === "cognates");
     sidebarCognatesLink.setAttribute("aria-current", route?.view === "cognates" ? "page" : "false");
+  }
+  if (sidebarSubgroupingLink) {
+    sidebarSubgroupingLink.classList.toggle("is-active", route?.view === "subgrouping");
+    sidebarSubgroupingLink.setAttribute("aria-current", route?.view === "subgrouping" ? "page" : "false");
   }
 }
 
@@ -316,6 +326,8 @@ function render(options = {}) {
       renderTree(viewRoot, ctx);
     } else if (route.view === "cognates") {
       renderCognates(viewRoot, ctx);
+    } else if (route.view === "subgrouping") {
+      renderSubgrouping(viewRoot, ctx);
     } else {
       renderLanguage(viewRoot, ctx, route.tab);
     }

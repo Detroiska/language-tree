@@ -4,7 +4,7 @@ import { esc, icon } from "./ui.js";
 
 // The command palette: Ctrl+K opens a searchable index of the whole project —
 // languages (by name and by lineage path), words (gloss, form, note), sound
-// changes (notation, note), allophony rules, plus the two global views.
+// changes (notation, note), allophony rules, plus the global views.
 // Results jump straight to the matching tab and highlight the hit.
 const TYPE_META = {
   language: { label: "Language", icon: "language" },
@@ -30,6 +30,14 @@ function indexEntries(project) {
       subtitle: "Follow words through the family",
       searchText: "cognate explorer derivation reflexes compare",
       hash: "#/cognates",
+      focus: null,
+    },
+    {
+      type: "view",
+      title: "Subgrouping evidence",
+      subtitle: "Test clades against shared sound changes",
+      searchText: "subgrouping clade shared innovation support tree evidence",
+      hash: "#/subgrouping",
       focus: null,
     },
   ];
