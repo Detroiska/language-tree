@@ -9,3 +9,4 @@ data/*.tmp
 data/*.bak
 .codex/
 .opencode/
+BACKLOG.md
