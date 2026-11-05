@@ -1,4 +1,12 @@
 const jsonHeaders = { "Content-Type": "application/json" };
+const CAN_GZIP = typeof CompressionStream === "function";
+
+async function gzipBody(text) {
+  const stream = new Blob([text])
+    .stream()
+    .pipeThrough(new CompressionStream("gzip"));
+  return new Response(stream).arrayBuffer();
+}
 
 async function request(url, options = {}) {
   const response = await fetch(url, options);
@@ -25,14 +33,18 @@ export const api = {
   // saw. The server answers 409 when the file has been saved by someone else
   // (another tab) in the meantime, so a stale tab cannot silently overwrite
   // newer work. Omit it to save unconditionally.
-  saveProject(project, baseRevision = null) {
+  async saveProject(project, baseRevision = null) {
     const headers = { ...jsonHeaders };
     if (baseRevision) headers["X-Base-Revision"] = baseRevision;
-    return request("/api/project", {
-      method: "PUT",
-      headers,
-      body: JSON.stringify(project),
-    });
+    let body = JSON.stringify(project);
+    if (CAN_GZIP) {
+      // The server caps the compressed size, so this buys ~6-10x more project
+      // per PUT. The ArrayBuffer keeps Content-Length fixed (a stream body
+      // would switch the request to chunked encoding).
+      body = await gzipBody(body);
+      headers["Content-Encoding"] = "gzip";
+    }
+    return request("/api/project", { method: "PUT", headers, body });
   },
   health() {
     return request("/api/health");

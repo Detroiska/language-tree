@@ -13,6 +13,7 @@ import json
 import os
 import threading
 import webbrowser
+import zlib
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -24,7 +25,8 @@ WEB_DIR = ROOT / "web"
 DATA_DIR = ROOT / "data"
 DATA_FILE = DATA_DIR / "project.json"
 
-MAX_BODY_BYTES = 12 * 1024 * 1024
+MAX_BODY_BYTES = 12 * 1024 * 1024  # Compressed bytes on the wire.
+MAX_JSON_BYTES = 128 * 1024 * 1024  # Decompressed JSON limit.
 SAVE_LOCK = threading.Lock()
 
 # A browser always sends a Host header. When the server is bound to loopback,
@@ -67,6 +69,28 @@ def write_project(project: dict) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, DATA_FILE)
+
+
+class BodyTooLargeError(ValueError):
+    """The decompressed request body exceeds MAX_JSON_BYTES."""
+
+
+def gunzip_limited(data: bytes, limit: int) -> bytes:
+    """Decompress a gzip request body, refusing output larger than `limit`.
+
+    Streaming with max_length means an oversized body is cut off at `limit`
+    bytes of output instead of being expanded into memory first.
+    """
+    decomp = zlib.decompressobj(wbits=31)  # 31 = gzip container + deflate
+    out = decomp.decompress(data, limit + 1)
+    if len(out) > limit or decomp.unconsumed_tail:
+        raise BodyTooLargeError("The decompressed project is too large.")
+    tail = decomp.flush()
+    if len(out) + len(tail) > limit:
+        raise BodyTooLargeError("The decompressed project is too large.")
+    if not decomp.eof:
+        raise ValueError("Truncated gzip request body.")
+    return out + tail
 
 
 def validate_project(project: object) -> None:
@@ -158,14 +182,27 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "Request body is empty or too large."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return
 
+        encoding = (self.headers.get("Content-Encoding") or "").strip().lower()
+        if encoding not in ("", "identity", "gzip"):
+            self.send_json(
+                {"error": f"Unsupported Content-Encoding: {encoding}."},
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+            )
+            return
+
         try:
             raw = self.rfile.read(length)
+            if encoding == "gzip":
+                raw = gunzip_limited(raw, MAX_JSON_BYTES)
             project = json.loads(raw.decode("utf-8"))
             validate_project(project)
+        except BodyTooLargeError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             self.send_json({"error": f"Invalid JSON: {exc}"}, HTTPStatus.BAD_REQUEST)
             return
-        except ValueError as exc:
+        except (zlib.error, ValueError) as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
 
