@@ -228,6 +228,15 @@ const uncharted = compileRule("q > k", ctx);
 truthy("uncharted input warns", uncharted.ok && uncharted.warnings?.length > 0);
 const charted = compileRule("p > f", ctx);
 truthy("charted input does not warn", charted.ok && !(charted.warnings?.length > 0));
+const aspiratedOnlyCtx = contextForInventory({
+  consonants: makeChart(["Plosive"], ["Bilabial"], [["Plosive", "Bilabial", ["pʰ"]]]),
+  vowels: makeChart(["Open"], ["Front"], [["Open", "Front", ["a"]]]),
+});
+const bareBase = compileRule("p > f", aspiratedOnlyCtx);
+truthy(
+  "a bare base of a charted aspirate counts as a known sound",
+  bareBase.ok && !(bareBase.warnings?.length > 0)
+);
 
 /* ---- derivation across a lineage ---------------------------------------- */
 
@@ -878,6 +887,30 @@ equal(
   [["1.1", "a"], ["2.1", "b"], ["2.2", "c"], ["3.1", "d"]]
 );
 
+const fedAllophony = ensureProject({
+  title: "Fed allophony",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [
+        { id: "f1", notation: "/p/ > [pʰ] / _ #", note: "", enabled: true },
+        { id: "f2", notation: "/pʰ/ > [b] / _ #", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const fedSurface = surfaceForForm("ap", fedAllophony, "only");
+equal("an allophony rule feeds the next rule's input", fedSurface.text, "ab");
+truthy(
+  "a fed surface symbol is not reported as uncharted",
+  fedSurface.compiled[1].ok && !(fedSurface.compiled[1].warnings || []).some((warning) => warning.includes("pʰ")),
+);
+
 const table = allophoneTable(allophonyProject, "child");
 equal(
   "allophone table derives phoneme → surface rows",
@@ -1086,6 +1119,57 @@ const featureApply = (notation, form) => {
 };
 
 truthy("the curated IPA table covers common symbols", Object.keys(IPA_FEATURES).length >= 180);
+
+// The feature inventory cannot distinguish every IPA glyph; the pairs that
+// intentionally collapse are documented at the IPA_FEATURES declaration.
+// This audit makes an accidental collapse (such as o/ɔ before ɔ was lax) a
+// test failure instead of a phantom "duplicate" error in someone's chart.
+const documentedIpaCollisions = new Set(
+  [
+    ["g", "ɡ"],
+    ["ʈ͡ʂ", "t͡ʂ"],
+    ["ɖ͡ʐ", "d͡ʐ"],
+    ["ŋ͡g", "ŋ͡ɡ"],
+    ["ɪ", "ɩ"],
+    ["ʊ", "ɷ"],
+    ["ɘ", "ᴇ"],
+    ["ɐ", "ᴀ"],
+    ["ᵻ", "ɿ"],
+    ["ᵻ", "ʅ"],
+    ["ɿ", "ʅ"],
+    ["ᵿ", "ʮ"],
+    ["ᵿ", "ʯ"],
+    ["ʮ", "ʯ"],
+  ].map((pair) => [...pair].sort().join("|"))
+);
+const ipaSymbols = Object.keys(IPA_FEATURES);
+const actualIpaCollisions = [];
+for (let i = 0; i < ipaSymbols.length; i += 1) {
+  for (let j = i + 1; j < ipaSymbols.length; j += 1) {
+    const left = ipaSymbols[i];
+    const right = ipaSymbols[j];
+    if (JSON.stringify(IPA_FEATURES[left]) === JSON.stringify(IPA_FEATURES[right])) {
+      actualIpaCollisions.push([left, right].sort().join("|"));
+    }
+  }
+}
+equal(
+  "only documented IPA glyph variants share a feature bundle",
+  actualIpaCollisions.sort(),
+  [...documentedIpaCollisions].sort()
+);
+truthy(
+  "o and ɔ are distinct vowels",
+  featureDistance(IPA_FEATURES.o, IPA_FEATURES.ɔ) > 0
+);
+truthy(
+  "an ejective stop and an ejective fricative stay distinct",
+  featureDistance(IPA_FEATURES["tʼ"], IPA_FEATURES["sʼ"]) > 0
+);
+truthy(
+  "ʜ and ħ stay distinct",
+  featureDistance(IPA_FEATURES["ʜ"], IPA_FEATURES["ħ"]) > 0
+);
 const resolver = createFeatureResolver();
 const nasalBundle = resolver.bundleFor("n");
 equal(
@@ -1818,6 +1902,14 @@ equal(
   "filterSuggestions filters and caps the list",
   filterSuggestions([{ ref: "velar" }, { ref: "back" }, { ref: "voiced" }], "v", 2).map((item) => item.ref),
   ["velar", "voiced"]
+);
+equal(
+  "filterSuggestions ranks exact and prefix matches above later segments",
+  filterSuggestions(
+    [{ ref: "series.plain" }, { ref: "plain.extra" }, { ref: "plain" }],
+    "plain"
+  ).map((item) => item.ref),
+  ["plain", "plain.extra", "series.plain"]
 );
 
 /* ---- summary ------------------------------------------------------------- */

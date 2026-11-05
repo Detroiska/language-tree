@@ -363,6 +363,13 @@ function ejective(place, patch = {}) {
   return stop(place, false, { constricted_glottis: true, ...patch });
 }
 
+// Ejective fricatives are fricatives with a constricted glottis; using
+// ejective() for them would build a stop and collide with the ejective stop
+// at the same place (sʼ with tʼ, xʼ with kʼ, and so on).
+function ejectiveFricative(place, patch = {}) {
+  return fricative(place, false, { constricted_glottis: true, ...patch });
+}
+
 function vowel(patch = {}) {
   return canonicalizeBundle({
     ...defaultBundle(),
@@ -402,7 +409,10 @@ function v(height, backness, rounded, patch = {}) {
 
 // A few pairs intentionally share a bundle because they are glyph or
 // notational variants that this feature inventory does not distinguish:
-// ɐ/ᴀ, ɘ/ᴇ, ɪ/ɩ, ʊ/ɷ, g/ɡ, and the apical-vowel pairs ɿ/ʅ and ʮ/ʯ.
+// ɐ/ᴀ, ɘ/ᴇ, ɪ/ɩ, ʊ/ɷ, g/ɡ, the affricate glyphs ʈ͡ʂ/t͡ʂ and ɖ͡ʐ/d͡ʐ,
+// the prenasalized glyphs ŋ͡g/ŋ͡ɡ, and the apical vowels, which overlap both
+// each other (ɿ/ʅ, ʮ/ʯ) and the lax near-high vowels (ᵻ/ɿ, ᵻ/ʅ, ᵿ/ʮ,
+// ᵿ/ʯ) because this inventory has no apical or epiglottal features.
 // Charting both members still makes a feature target ambiguous; prefer one
 // spelling or give one of them an override when a real contrast is intended.
 export const IPA_FEATURES = {
@@ -463,8 +473,8 @@ export const IPA_FEATURES = {
   ʁ: fricative("uvular", true),
   ħ: fricative("pharyngeal"),
   ʕ: fricative("pharyngeal", true),
-  ʜ: fricative("pharyngeal"),
-  ʢ: fricative("pharyngeal", true),
+  ʜ: approximant("pharyngeal", { voice: false }),
+  ʢ: approximant("pharyngeal"),
   h: fricative("glottal"),
   ɦ: fricative("glottal", true),
   ɧ: fricative("postalveolar", { labialized: true }),
@@ -553,16 +563,16 @@ export const IPA_FEATURES = {
   "cʼ": ejective("palatal"),
   "kʼ": ejective("velar"),
   "qʼ": ejective("uvular"),
-  "fʼ": ejective("labiodental"),
-  "sʼ": ejective("alveolar"),
-  "ʃʼ": ejective("postalveolar"),
-  "xʼ": ejective("velar"),
-  "ɸʼ": ejective("bilabial"),
-  "θʼ": ejective("dental"),
-  "ɬʼ": ejective("alveolar", { lateral: true }),
-  "çʼ": ejective("palatal"),
-  "ʂʼ": ejective("retroflex"),
-  "ɕʼ": ejective("postalveolar", { palatalized: true }),
+  "fʼ": ejectiveFricative("labiodental"),
+  "sʼ": ejectiveFricative("alveolar"),
+  "ʃʼ": ejectiveFricative("postalveolar"),
+  "xʼ": ejectiveFricative("velar"),
+  "ɸʼ": ejectiveFricative("bilabial"),
+  "θʼ": ejectiveFricative("dental"),
+  "ɬʼ": ejectiveFricative("alveolar", { lateral: true }),
+  "çʼ": ejectiveFricative("palatal"),
+  "ʂʼ": ejectiveFricative("retroflex"),
+  "ɕʼ": ejectiveFricative("postalveolar", { palatalized: true }),
   "t͡sʼ": ejective("alveolar", { delayed_release: true }),
   "t͡ʃʼ": ejective("postalveolar", { delayed_release: true }),
   "t͡θʼ": ejective("dental", { delayed_release: true }),
@@ -591,10 +601,12 @@ export const IPA_FEATURES = {
   ə: v("mid", "central", false, { atr: false }),
   ɛ: v("mid", "front", false, { lax: true }),
   œ: v("mid", "front", true, { lax: true }),
-  ɜ: v("mid", "central", false, { lax: true }),
-  ɞ: v("mid", "central", true, { lax: true }),
+  // The height scale has no open-mid tier: ɜ/ɞ are low + lax so they stay
+  // distinct from ə (mid, −atr) and ɐ (low, +atr), parallel to æ.
+  ɜ: v("low", "central", false, { lax: true }),
+  ɞ: v("low", "central", true, { lax: true }),
   ʌ: v("mid", "back", false, { lax: true }),
-  ɔ: v("mid", "back", true),
+  ɔ: v("mid", "back", true, { lax: true }),
   æ: v("low", "front", false, { atr: false }),
   ɐ: v("low", "central", false),
   a: v("low", "front", false),

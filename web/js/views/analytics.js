@@ -123,7 +123,7 @@ function balancePanel(analysis) {
       <header class="panel-head">
         <div class="panel-title">
           <h2>Inventory balance</h2>
-          <p>Token balance and symmetry gaps the charts and features already imply.</p>
+          <p>Token balance and symmetry gaps the charts and features already imply. The gap list reads the table as drawn — it can also name a rare or unattested cell, so treat it as a chart-completeness hint, not a typological verdict.</p>
         </div>
         <span class="panel-icon">${icon("sliders")}</span>
       </header>
@@ -219,12 +219,12 @@ export function renderAnalytics(container, ctx) {
           ${clusterPanel(
             "Onsets",
             analysis.onsets,
-            "From the phonotactics syllabifier (maximal onset); ∅ marks no onset."
+            "Top 10 by frequency, from the phonotactics syllabifier (maximal onset); ∅ marks no onset."
           )}
           ${clusterPanel(
             "Codas",
             analysis.codas,
-            "From the same syllabified parses; ∅ marks no coda."
+            "Top 10 by frequency, from the same syllabified parses; ∅ marks no coda."
           )}
         </div>
         ${balancePanel(analysis)}

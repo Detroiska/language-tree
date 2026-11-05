@@ -176,6 +176,9 @@ export function analyzeLexicon(project, language) {
         else vowelTokens += 1;
       } else {
         uncharted.set(token, (uncharted.get(token) || 0) + 1);
+        // Charted tokens use the chart's own kind; uncharted tokens fall back
+        // to a feature lookup, and a symbol with no bundle reads as a
+        // consonant.
         if (context.isVowel(token)) vowelTokens += 1;
         else consonantTokens += 1;
       }

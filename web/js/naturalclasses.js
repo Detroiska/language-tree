@@ -219,23 +219,20 @@ export function classForText(text, index) {
 
 // Refs worth offering in the UI: every chart label, plus parent.child
 // pairs where a node is subdivided. Single-label refs always appear;
-// longer refs and chart-pinned variants are dropped when they would
-// resolve to the same members as an entry already listed. Each entry
-// carries its resolved members.
+// chain and chart-pinned variants are dropped when they would resolve to
+// the same members as an entry already listed. Each entry carries its
+// resolved members.
 export function suggestClassRefs(index) {
   const suggestions = new Map();
-  let chainSignatures = null;
+  const signatures = new Set();
 
   const add = (source, display = source, { chain } = {}) => {
     if (!source || suggestions.has(source)) return;
     const result = classForText(source, index);
     if (!result || !result.ok) return;
-    if (chain) {
-      const signature = `${result.ref.chart || ""}\u0001${result.members.join("\u0001")}`;
-      if (chainSignatures === null) chainSignatures = new Set();
-      else if (chainSignatures.has(signature)) return;
-      chainSignatures.add(signature);
-    }
+    const signature = result.members.join("\u0001");
+    if (chain && signatures.has(signature)) return;
+    signatures.add(signature);
     suggestions.set(source, {
       ref: source,
       label: display || source,
@@ -292,8 +289,29 @@ export function matchesQuery(ref, query) {
   return lower.split(".").some((part) => part.startsWith(query));
 }
 
-// The displayed list: matched references, capped. Kept here with the rest of
-// the policy so the cap and the ordering live in one place.
+// Lower is more relevant: exact, then prefix, then a later dotted segment.
+function matchRank(ref, query) {
+  const lower = String(ref ?? "").toLowerCase();
+  if (lower === query) return 0;
+  if (lower.startsWith(query)) return 1;
+  const index = lower.split(".").findIndex((part) => part.startsWith(query));
+  return index === -1 ? Infinity : 2 + index;
+}
+
+// The displayed list: matched references, ranked by match quality (exact
+// before prefix before later segment, shorter labels breaking ties) and then
+// capped. Kept here with the rest of the policy so the cap and the ordering
+// live in one place.
 export function filterSuggestions(suggestions, query, limit = 8) {
-  return suggestions.filter((item) => matchesQuery(item.ref, query)).slice(0, limit);
+  return suggestions
+    .map((item, order) => ({ item, order, rank: matchRank(item.ref, query) }))
+    .filter((entry) => entry.rank !== Infinity)
+    .sort(
+      (left, right) =>
+        left.rank - right.rank ||
+        left.item.ref.length - right.item.ref.length ||
+        left.order - right.order
+    )
+    .slice(0, limit)
+    .map((entry) => entry.item);
 }

@@ -1044,16 +1044,20 @@ export function compileRule(notation, context) {
     }
   }
 
-  // A literal sound that no chart in the context lists can never match a
-  // charted form, so the rule would sit valid-but-inert. Compact template
-  // writing makes this easy to hit: "CV > x" reads here as the literal
-  // sounds C and V, while phonotactics templates treat the same letters as
-  // classes. Chart classes already fail loudly; literal inputs get a warning.
+  // A literal sound that no chart in the context can produce can never match
+  // a charted form, so the rule would sit valid-but-inert. `known` is the
+  // tokenizer's alphabet: chart phonemes plus their bases plus the surface
+  // allophones earlier allophony rules produce, so a fed rule sees the symbol
+  // it actually receives. Compact template writing makes this easy to hit:
+  // "CV > x" reads here as the literal sounds C and V, while phonotactics
+  // templates treat the same letters as classes. Chart classes already fail
+  // loudly; literal inputs get a warning.
+  const known = new Set(context.known);
   const unchartedOf = (pattern) => {
     const found = new Set();
     for (const atom of pattern) {
       if (atom.type !== "literal") continue;
-      if (!context.vowels.has(atom.value) && !context.consonants.has(atom.value)) found.add(atom.value);
+      if (!known.has(atom.value)) found.add(atom.value);
     }
     return found;
   };

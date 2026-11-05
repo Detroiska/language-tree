@@ -311,15 +311,36 @@ function render(options = {}) {
 
   renderSidebar(route);
   const ctx = makeContext(route);
-  if (route.view === "tree") {
-    renderTree(viewRoot, ctx);
-  } else if (route.view === "cognates") {
-    renderCognates(viewRoot, ctx);
-  } else {
-    renderLanguage(viewRoot, ctx, route.tab);
+  try {
+    if (route.view === "tree") {
+      renderTree(viewRoot, ctx);
+    } else if (route.view === "cognates") {
+      renderCognates(viewRoot, ctx);
+    } else {
+      renderLanguage(viewRoot, ctx, route.tab);
+    }
+  } catch (error) {
+    // A view bug should not leave a blank workspace: the project itself is
+    // intact, so replace the partial render with a recoverable notice.
+    console.error(error);
+    renderViewError(error);
   }
   if (!options.preserveScroll) window.scrollTo({ top: 0, behavior: "auto" });
   applySearchFocus();
+}
+
+function renderViewError(error) {
+  viewRoot.innerHTML = `
+    <div class="boot-error">
+      <div class="empty-icon">${icon("warning")}</div>
+      <h1>This view could not be rendered</h1>
+      <p>${esc(error.message || String(error))}</p>
+      <div class="boot-error-actions">
+        <button class="button button-primary" type="button" id="retry-render">${icon("refresh")}Try again</button>
+      </div>
+      <p class="boot-hint">Your project is still saved. Switching tabs may work, or reload the page if the error repeats.</p>
+    </div>`;
+  viewRoot.querySelector("#retry-render").addEventListener("click", () => render());
 }
 
 function bootError(error) {

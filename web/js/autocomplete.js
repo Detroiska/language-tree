@@ -33,6 +33,8 @@ const TARGET_SELECTOR = ".rule-input";
 const TOKEN_BREAK = /[\s>,_#/[\]^|;*(]/u;
 
 const MAX_ITEMS = 8;
+const MENU_ID = "class-complete-listbox";
+const optionId = (index) => `${MENU_ID}-option-${index}`;
 
 const state = {
   open: false,
@@ -40,6 +42,10 @@ const state = {
   target: null,
   token: { start: 0, end: 0, text: "" },
   items: [],
+  // The lineage's suggestions are computed once when the popup opens, not on
+  // every keystroke; typing a rule does not change the charts, so a per-open
+  // cache is enough.
+  suggestions: [],
   active: 0,
   // Guards against the just-accepted insertion's own synthetic input event
   // re-running the trigger check. Single-phoneme insertions from the
@@ -87,7 +93,7 @@ function itemMarkup(item, index) {
   const more = item.members.length > 4 ? ` +${item.members.length - 4}` : "";
   const chart = item.chart ? `${item.chart}·` : "";
   return `
-    <button type="button" class="cc-item ${index === state.active ? "is-active" : ""}" data-cc-index="${index}" role="option" aria-selected="${index === state.active ? "true" : "false"}">
+    <button type="button" class="cc-item ${index === state.active ? "is-active" : ""}" id="${optionId(index)}" data-cc-index="${index}" role="option" aria-selected="${index === state.active ? "true" : "false"}">
       <span class="cc-ref">${esc(chart)}${esc(item.ref)}</span>
       <span class="cc-meta" title="${esc(item.members.join(" "))}">${item.members.length} ${item.members.length === 1 ? "member" : "members"} — ${esc(sample)}${esc(more)}</span>
     </button>`;
@@ -96,6 +102,7 @@ function itemMarkup(item, index) {
 function buildMenu() {
   const menu = document.createElement("div");
   menu.className = "class-complete";
+  menu.id = MENU_ID;
   menu.setAttribute("role", "listbox");
   menu.setAttribute("aria-label", "Chart class suggestions");
   menu.innerHTML = `<div class="cc-head">${icon("grid")}<span>Chart classes</span></div><div class="cc-body" data-cc-body></div>`;
@@ -118,6 +125,11 @@ function refreshMenu() {
   if (!state.menu) return;
   const body = state.menu.querySelector("[data-cc-body]");
   body.innerHTML = state.items.map(itemMarkup).join("");
+  // The active option is what a screen reader announces while focus stays in
+  // the text field; it must always name a row that exists.
+  if (state.target && state.items.length) {
+    state.target.setAttribute("aria-activedescendant", optionId(state.active));
+  }
 }
 
 function positionMenu() {
@@ -136,14 +148,29 @@ function open(target) {
   state.target = target;
   if (!state.menu || !state.menu.isConnected) document.body.appendChild(buildMenu());
   state.open = true;
+  // Cache the lineage's suggestions for this open session; filtering each
+  // keystroke only walks this list.
+  state.suggestions = suggestionsFor();
+  target.setAttribute("role", "combobox");
+  target.setAttribute("aria-autocomplete", "list");
+  target.setAttribute("aria-expanded", "true");
+  target.setAttribute("aria-controls", MENU_ID);
 }
 
 function close() {
   if (!state.open) return;
   state.open = false;
   state.menu?.remove();
+  if (state.target) {
+    state.target.setAttribute("aria-expanded", "false");
+    state.target.removeAttribute("aria-controls");
+    state.target.removeAttribute("aria-activedescendant");
+    state.target.removeAttribute("aria-autocomplete");
+    state.target.removeAttribute("role");
+  }
   state.target = null;
   state.items = [];
+  state.suggestions = [];
 }
 
 // Recompute the suggestion list from the field's current text and caret,
@@ -162,7 +189,7 @@ function refreshForTarget() {
     close();
     return;
   }
-  state.items = filterSuggestions(suggestionsFor(), query, MAX_ITEMS);
+  state.items = filterSuggestions(state.suggestions, query, MAX_ITEMS);
   // The list was rebuilt, so the highlight restarts: a clamped stale index
   // would accept a different row than the arrow keys had shown.
   state.active = 0;
@@ -179,6 +206,7 @@ function refreshForTarget() {
 function setActive(next) {
   if (!state.items.length) return;
   state.active = (next + state.items.length) % state.items.length;
+  state.target?.setAttribute("aria-activedescendant", optionId(state.active));
   state.menu?.querySelectorAll(".cc-item").forEach((element) => {
     const index = Number(element.dataset.ccIndex);
     element.classList.toggle("is-active", index === state.active);

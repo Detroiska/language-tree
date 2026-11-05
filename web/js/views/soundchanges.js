@@ -731,8 +731,4 @@ export function renderChanges(container, ctx) {
       toast(`Recorded “${word.gloss}” as ${derived || "∅"}.`, { type: "success" });
     });
   }
-
-  // Recompute the test as soon as the tab is opened and chart context changes
-  // are reflected by the next render.
-  if (testInput && !testInput.value) runTest();
 }

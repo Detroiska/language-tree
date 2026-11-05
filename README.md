@@ -297,7 +297,7 @@ The parser and derivation engines are plain ES modules without DOM dependencies,
 node tests/engine.test.mjs
 ```
 
-The suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, notation delimiter stripping, allophony parsing/order/surface forms, feature allophones and off-chart surface synthesis, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration, the Markdown/HTML report builders, plus segment-level diff alignment, rule-inertness explanations and top-level conflict detection, and the lexicon analytics computations.
+The suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, the IPA-table collision audit, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, notation delimiter stripping, allophony parsing/order/surface forms, chained allophony feeding, feature allophones and off-chart surface synthesis, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration, the Markdown/HTML report builders, plus segment-level diff alignment, rule-inertness explanations and top-level conflict detection, the lexicon analytics computations, and the class-autocomplete query/ranking policy.
 
 ## Project layout
 
