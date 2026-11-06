@@ -40,6 +40,14 @@ function indexEntries(project) {
       hash: "#/subgrouping",
       focus: null,
     },
+    {
+      type: "view",
+      title: "Timeline",
+      subtitle: "Sound changes ordered by relative stage",
+      searchText: "timeline chronology sound change stages dates relative order undated",
+      hash: "#/timeline",
+      focus: null,
+    },
   ];
 
   for (const language of project.languages) {
