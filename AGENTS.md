@@ -34,12 +34,13 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - Merge with `gh pr merge --squash --delete-branch`, and only when the pull request's CI run is green. Never merge red CI, never push to main directly, never force-push.
 - Fix a red branch with a new commit on the same branch.
 - Never `git add -A`; stage only files you intentionally changed.
+- `BACKLOG.md` is a local planning file (gitignored): edit it freely, but never commit, stage, or push it.
 - One logical change per commit. Message: a capitalized imperative one-liner, e.g. "Add bulk parser tests and document the suite" or "Fix save conflicts, id collisions, and parsing edge cases" — no area prefix, no conventional commits. Read `git log` first and match its style.
 - Changes to data/project.json picked up while testing the app go in their own "Update project data" commit, never mixed with code changes.
 
 ### Do not touch
 - data/*.tmp, data/*.bak, __pycache__/, .venv/ (transient, gitignored)
-- BACKLOG.md, .codex/, .opencode/ (deliberately untracked)
+- .codex/, .opencode/ and other deliberately untracked working files
 - .gitignore and .gitattributes (owner-managed; .bat stays CRLF, everything else LF)
 - Never hand-reformat or rewrite data/project.json; the server owns its formatting (2-space pretty JSON, atomic replace)
 
