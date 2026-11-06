@@ -87,6 +87,7 @@ async function deleteCurrent(ctx) {
   const confirmed = await confirmDialog("Delete this language?", message, {
     confirmLabel: count ? `Delete ${count + 1} languages` : "Delete language",
     danger: true,
+    html: true,
   });
   if (!confirmed) return;
   const parentId = ctx.language.parentId;

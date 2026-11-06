@@ -1,4 +1,4 @@
-import { esc } from "./escape.js";
+import { esc, escapeDialogCopy } from "./escape.js";
 
 export { esc };
 
@@ -154,7 +154,7 @@ export function openModal({ title, body, footer = "", width = "medium", onMount 
 }
 
 export function confirmDialog(title, message, options = {}) {
-  const { confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false } = options;
+  const { confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false, html = false } = options;
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
@@ -165,7 +165,7 @@ export function confirmDialog(title, message, options = {}) {
     openModal({
       title,
       width: "small",
-      body: `<p class="modal-copy">${message}</p>`,
+      body: `<p class="modal-copy">${escapeDialogCopy(message, html)}</p>`,
       footer: `
         <button type="button" class="button button-quiet" data-cancel>${esc(cancelLabel)}</button>
         <button type="button" class="button ${danger ? "button-danger" : "button-primary"}" data-confirm>${esc(confirmLabel)}</button>

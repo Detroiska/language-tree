@@ -151,6 +151,7 @@ async function removeLanguage(ctx, language) {
   const confirmed = await confirmDialog("Delete this language?", message, {
     confirmLabel: descendants ? `Delete ${descendants + 1} languages` : "Delete language",
     danger: true,
+    html: true,
   });
   if (!confirmed) return;
   const removed = ctx.project.languages

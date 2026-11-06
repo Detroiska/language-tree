@@ -10,3 +10,8 @@ export function esc(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+// Dialog copy is plain text unless the caller explicitly opts into markup.
+export function escapeDialogCopy(value, html = false) {
+  return html ? String(value ?? "") : esc(value);
+}

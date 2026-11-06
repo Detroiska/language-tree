@@ -58,7 +58,7 @@ import {
   sameTokens,
   stripLevelMarks,
 } from "../web/js/notation.js";
-import { esc } from "../web/js/escape.js";
+import { esc, escapeDialogCopy } from "../web/js/escape.js";
 import { normalizeGloss } from "../web/js/gloss.js";
 import { compileClasses } from "../web/js/categories.js";
 import {
@@ -1501,6 +1501,8 @@ equal(
 );
 equal("gloss normalization tolerates null", normalizeGloss(null), "");
 equal("escape covers markup characters", esc(`<a href="x">&'`), "&lt;a href=&quot;x&quot;&gt;&amp;&#039;");
+equal("dialog copy escapes markup by default", escapeDialogCopy("<b>x</b>"), "&lt;b&gt;x&lt;/b&gt;");
+equal("dialog copy keeps explicit markup", escapeDialogCopy("<b>x</b>", true), "<b>x</b>");
 
 /* ---- allophony ---------------------------------------------------------- */
 

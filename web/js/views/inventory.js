@@ -406,6 +406,7 @@ function deleteAxisNode(ctx, chart, axis, nodeId) {
   confirmDialog("Delete chart section?", message, {
     confirmLabel: "Delete",
     danger: true,
+    html: true,
   }).then((confirmed) => {
     if (!confirmed) return;
     for (const [key] of Object.entries(chart.cells)) {
