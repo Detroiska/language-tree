@@ -221,14 +221,31 @@ function featureSources(rule, context, outputToken, combos) {
   return sources;
 }
 
-// Invert a substitution or insertion. The search branches between "this token
-// passed through unchanged" and "this token is the output of the rule". Every
-// complete candidate is verified by applying the rule forward again.
+// Invert a substitution. The search branches between "this token passed
+// through unchanged" and "this slice is the output of the rule". Literal
+// outputs spell one constant slice, while echo outputs (V > Vː, C V > V C)
+// spell whatever their matched source produces, so every source carries its
+// own observed output. Each complete candidate is verified by applying the
+// rule forward again.
 function substitutionCandidates(tokens, rule, context, combos, options) {
   const targetJunctures = options.junctures instanceof Set ? options.junctures : new Set(options.junctures || []);
   const feature = Boolean(rule.featureOutput);
-  const replacement = rule.replacement || [];
-  const width = feature ? 1 : replacement.length;
+  const echo = Boolean(rule.echoOutput);
+  // For every concrete input, the tokens the rule would spell for it. Echo
+  // resolution ignores the environment here; the full-word forward check at
+  // the end of this function has the final say.
+  const outputs = feature
+    ? null
+    : combos.map((source) => {
+        if (!echo) return { source, output: rule.replacement || [] };
+        const resolved = replacementForMatch(
+          source,
+          { start: 0, end: source.length, replacement: [], bindings: {} },
+          rule,
+          context
+        );
+        return resolved.ok ? { source, output: resolved.replacement } : { source, output: [] };
+      });
   const results = new Map();
   const bestAt = new Map();
   let truncated = false;
@@ -268,25 +285,32 @@ function substitutionCandidates(tokens, rule, context, combos, options) {
     if (targetJunctures.has(state.index + 1)) untouchedCuts.add(state.pred.length + 1);
     push(state.index + 1, [...state.pred, tokens[state.index]], untouchedCuts, state.score);
 
-    // The token is the rule's output. For a literal output the slice must
-    // match exactly; for a feature output the actually spelled sound varies
-    // with the input and is checked below.
-    let applies = false;
-    if (width > 0 && state.index + width <= tokens.length) {
-      applies = feature || replacement.every((token, offset) => tokens[state.index + offset] === token);
+    // The token is part of the rule's output. For a literal output the slice
+    // must match the constant replacement; for an echo output each source
+    // spells its own slice, so the check runs per source.
+    if (feature) {
+      if (state.index + 1 > tokens.length) continue;
+      const sources = featureSources(rule, context, tokens[state.index], combos);
+      // The search is a LIFO stack; push in reverse so the first target
+      // alternative (for example *p in a p/t/k merger) is processed first.
+      for (const source of [...sources].reverse()) {
+        // A cut inside the rewritten slice has no segment left to separate;
+        // a cut after it moves to the end of the restored source.
+        const cuts = new Set(state.cuts);
+        if (targetJunctures.has(state.index + 1)) cuts.add(state.pred.length + source.length);
+        push(state.index + 1, [...state.pred, ...source], cuts, state.score + 1);
+      }
+      continue;
     }
-    if (!applies) continue;
-    const sources = feature
-      ? featureSources(rule, context, tokens[state.index], combos)
-      : combos;
-    // The search is a LIFO stack; push in reverse so the first target
-    // alternative (for example *p in a p/t/k merger) is processed first.
-    for (const source of [...sources].reverse()) {
-      // A cut inside the rewritten slice has no segment left to separate;
-      // a cut after it moves to the end of the restored source.
+    for (const { source, output } of [...outputs].reverse()) {
+      if (!output.length) continue;
+      if (state.index + output.length > tokens.length) continue;
+      if (!output.every((token, offset) => tokens[state.index + offset] === token)) continue;
       const cuts = new Set(state.cuts);
-      if (targetJunctures.has(state.index + width)) cuts.add(state.pred.length + source.length);
-      push(state.index + width, [...state.pred, ...source], cuts, state.score + 1);
+      if (targetJunctures.has(state.index + output.length)) {
+        cuts.add(state.pred.length + source.length);
+      }
+      push(state.index + output.length, [...state.pred, ...source], cuts, state.score + 1);
     }
   }
 
@@ -397,8 +421,10 @@ function invertRuleAll(tokens, compiled, context, options = {}) {
   }
 
   const feature = Boolean(rule.featureOutput);
+  // Echo outputs never spell a constant replacement (the copied segment comes
+  // from the input), so they are substitutions whatever their atoms spell.
   const replacement = rule.replacement || [];
-  if (!feature && !replacement.length) {
+  if (!feature && !rule.echoOutput && !replacement.length) {
     if (!rule.target.length) {
       return {
         candidates: [identityCandidate(tokens, options.junctures)],
