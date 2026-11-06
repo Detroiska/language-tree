@@ -16,6 +16,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - web/js/              # DOM-free engine ES modules importable from Node (model, notation, naturalclasses, features, categories, phonology, reconstruction, subgrouping, prosody, phonotactics, phonotacticsCheck, diff, correspondences, analytics, bulk, report, routes) plus UI modules (app, store, api, ui, search, autocomplete, keyboard)
 - web/js/views/        # one render module per tab; views/language.js owns the tab bar
 - tests/               # two suites in plain-assertion style that print "N passed, M failed"; engine.test.mjs covers every DOM-free module — not one test file per source module
+- .github/workflows/tests.yml   # CI: runs both suites on every pull request and on main after merge
 - data/project.json    # the complete project document (ships with the demo family). Not generated: ordinary app-edited data, pretty-printed for line-based diffs; the app rewrites it on every save
 
 ## Rules
@@ -28,8 +29,10 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - New persisted fields ship with defaults and migration in `ensureProject()` (model.js), saved through `ctx.touch()` so autosave fires; the JSON document is the boundary between UI and storage (README "Extending it" has the full recipe).
 
 ### Git
-- Never push. I push, after review.
-- Never commit to main; one task = one branch.
+- One task = one branch; never commit to main.
+- Push the branch to origin and open a pull request without asking, once both suites pass locally.
+- Merge with `gh pr merge --squash --delete-branch`, and only when the pull request's CI run is green. Never merge red CI, never push to main directly, never force-push.
+- Fix a red branch with a new commit on the same branch.
 - Never `git add -A`; stage only files you intentionally changed.
 - One logical change per commit. Message: a capitalized imperative one-liner, e.g. "Add bulk parser tests and document the suite" or "Fix save conflicts, id collisions, and parsing edge cases" — no area prefix, no conventional commits. Read `git log` first and match its style.
 - Changes to data/project.json picked up while testing the app go in their own "Update project data" commit, never mixed with code changes.
