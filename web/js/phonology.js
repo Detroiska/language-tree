@@ -829,6 +829,16 @@ export function allophoneTable(project, languageId, options = {}) {
   compiled.forEach((entry, index) => {
     if (!entry.ok || entry.rule?.enabled === false || entry.groupDisabled) return;
     if (entry.rule?.optional === true && !optionalRuleIds.has(entry.rule.id)) return;
+    // Echo rules copy matched segments, so the table previews one only when
+    // every echo binds the rule's single input atom (V > Vː). A metathesis
+    // echo needs the whole matched span; the tester demonstrates those, and
+    // the derived table says nothing that could mislead.
+    if (entry.rule.echoOutput) {
+      const single = (entry.rule.target || []).length === 1;
+      const previewable =
+        single && (entry.rule.echoes || []).every((item) => !item.echo || item.inputIndex === 0);
+      if (!previewable) return;
+    }
     const phonemes = new Set();
     for (const atom of entry.rule.target || []) {
       if (atom.type === "literal") phonemes.add(atom.value);
@@ -845,8 +855,17 @@ export function allophoneTable(project, languageId, options = {}) {
       }
     }
     for (const phoneme of phonemes) {
-      let allophone = (entry.rule.replacement || []).join("") || "∅";
-      if (entry.rule.featureOutput) {
+      let allophone;
+      if (entry.rule.echoOutput) {
+        const resolved = replacementForMatch(
+          [phoneme],
+          { start: 0, end: 1, replacement: [], bindings: {} },
+          entry.rule,
+          context
+        );
+        if (!resolved.ok) continue;
+        allophone = resolved.replacement.join("") || "∅";
+      } else if (entry.rule.featureOutput) {
         const bundle = context.features.bundleFor(phoneme);
         const applied = bundle
           ? applyFeatureTerms(bundle, entry.rule.featureOutput.terms, {})
@@ -855,6 +874,8 @@ export function allophoneTable(project, languageId, options = {}) {
         allophone = resolved.ok
           ? resolved.sound
           : `[${describeTerms(entry.rule.featureOutput.terms)}]`;
+      } else {
+        allophone = (entry.rule.replacement || []).join("") || "∅";
       }
       const key = `${phoneme}\u0000${allophone}\u0000${entry.rule.environment}`;
       if (seen.has(key)) continue;
@@ -981,6 +1002,54 @@ function literalWordWarning(chunk, segments, context) {
     .join(", ")}. If you meant a chart class, check its spelling; if you meant these sounds, separate them with spaces or a leading backslash.`;
 }
 
+// An echo chunk names a matched input segment by class (V, C), category, or
+// chart class, and may glue diacritics onto the copy: the chunk `Vː` in the
+// output emits the matched vowel with the length mark as ONE token. Only
+// diacritic endings glue; letters end the echo, so no ordinary word of
+// segment names turns into one by accident.
+const ECHO_SUFFIX = /^[\p{M}\u02B0-\u02B8\u02BC\u02BE\u02BF\u02C0\u02C1\u02D0\u02D1]+$/u;
+
+function echoKindLabel(atom) {
+  return atom.kind === "set"
+    ? `“${atom.name}”`
+    : atom.kind === "V"
+      ? "a vowel"
+      : "a consonant";
+}
+
+function parseEchoChunk(chunk, context) {
+  if (chunk === "V" || chunk === "C") {
+    return { ok: true, atom: { type: "echo", kind: chunk, name: "", suffix: "" } };
+  }
+  if (/^[VC]/u.test(chunk)) {
+    const suffix = chunk.slice(1);
+    if (!ECHO_SUFFIX.test(suffix)) {
+      return {
+        ok: false,
+        hard: true,
+        error: `“${chunk}” would echo the matched ${chunk[0] === "V" ? "vowel" : "consonant"}, but an echo may only carry diacritics (as in V > Vː). Write the other sounds as their own chunk, for example V > V ${suffix}.`,
+      };
+    }
+    return { ok: true, atom: { type: "echo", kind: chunk[0], name: "", suffix } };
+  }
+  // Named echoes are category or chart-class words (letters and dots). Feature
+  // syntax ([+voice], [-back], αplace) and short literals like ɑ are handled
+  // elsewhere; a single letter is never silently reinterpreted as an echo.
+  if (!/^[\p{L}][\p{L}.]*$/u.test(chunk)) return { ok: false, hard: false };
+  const category = categoryForText(chunk, context);
+  if (category) {
+    if (!category.ok) return { ok: false, hard: true, error: category.error };
+    return { ok: true, atom: { type: "echo", kind: "set", name: chunk, suffix: "" } };
+  }
+  if (chunk.length < 2) return { ok: false, hard: false };
+  const classRef = classForText(chunk, context.classIndex);
+  if (classRef) {
+    if (!classRef.ok) return { ok: false, hard: true, error: classRef.error };
+    return { ok: true, atom: { type: "echo", kind: "set", name: chunk, suffix: "" } };
+  }
+  return { ok: false, hard: false };
+}
+
 function featureBracketFor(inner, context, { negated = false, allowVariables = true } = {}) {
   const words = String(inner || "").split(/[\s,;]+/u).filter(Boolean);
   const classified = classifyFeatureWords(words, {
@@ -1009,6 +1078,7 @@ function parsePattern(text, context, options = {}) {
     allowSet = true,
     allowVariables = true,
     allowProsody = false,
+    allowEcho = false,
     role = "pattern",
   } = options;
   const chunks = chunksOf(text);
@@ -1056,6 +1126,17 @@ function parsePattern(text, context, options = {}) {
   };
 
   for (const chunk of chunks) {
+    if (allowEcho) {
+      // Echo atoms are an output-side shorthand: they copy a segment the input
+      // matched. Anywhere echo parsing is off, the V/C branch below keeps its
+      // "classes need spaces" teaching error.
+      const echo = parseEchoChunk(chunk, context);
+      if (echo.hard) return { ok: false, error: echo.error };
+      if (echo.ok) {
+        pattern.push(echo.atom);
+        continue;
+      }
+    }
     if (chunk === "ˈ" || chunk === "ˌ") {
       if (!allowProsody) {
         return {
@@ -1353,12 +1434,14 @@ export function compileRule(notation, context) {
   let replacement = [];
   let outputPattern = [];
   let featureOutput = null;
+  let echoOutput = false;
   if (outputText && outputText !== "∅" && outputText !== "0") {
     const parsedOutput = parsePattern(outputText, context, {
       allowBoundary: false,
       allowClass: false,
       allowSet: false,
       allowVariables: true,
+      allowEcho: true,
       role: "output",
     });
     if (!parsedOutput.ok) return parsedOutput;
@@ -1368,7 +1451,7 @@ export function compileRule(notation, context) {
         return {
           ok: false,
           error:
-            "A feature change must be the whole output. Write one bundle like [+voice] or [αplace]; sounds and feature changes cannot be combined.",
+            "A feature change must be the whole output. Write one bundle like [+voice] or [αplace]; sounds, echoed classes, and feature changes cannot be combined.",
         };
       }
       if (featureAtoms[0].negated) {
@@ -1393,7 +1476,10 @@ export function compileRule(notation, context) {
       featureOutput = featureAtoms[0];
     } else {
       outputPattern = parsedOutput.pattern;
-      replacement = parsedOutput.pattern.map((item) => item.value);
+      // Echo atoms resolve per match from the tokens their paired input atoms
+      // matched, so a constant replacement exists only for echo-free rules.
+      echoOutput = outputPattern.some((item) => item.type === "echo");
+      if (!echoOutput) replacement = outputPattern.map((item) => item.value);
     }
   }
 
@@ -1448,6 +1534,76 @@ export function compileRule(notation, context) {
     }
   }
   if (variableError) return { ok: false, error: variableError };
+
+  // Echo outputs pair with the input: the k-th output echo of one class,
+  // category, or chart class copies the segment matched by the k-th input atom
+  // of the same kind. Every echo needs an input atom to point at, and a rule
+  // that echoes each match into its own place changes nothing, which is
+  // almost always a confusion worth failing loudly on.
+  const echoes = outputPattern.map((atom) =>
+    atom.type === "echo"
+      ? { echo: atom.kind, name: atom.name || "", suffix: atom.suffix || "", inputIndex: -1 }
+      : { echo: null, value: atom.value }
+  );
+  if (echoOutput) {
+    if (isInsertion) {
+      return {
+        ok: false,
+        error: "An insertion adds segments nothing in the input matched, so it cannot echo. Write the output sounds out instead (∅ > aː).",
+      };
+    }
+    const sourcesByKind = new Map();
+    target.pattern.forEach((atom, index) => {
+      const kind =
+        atom.type === "class"
+          ? atom.value === "V"
+            ? "V"
+            : "C"
+          : atom.type === "set" && (atom.fromCategory || atom.fromRef)
+            ? String(atom.fromCategory || atom.fromRef).toLowerCase()
+            : "";
+      if (!kind) return;
+      if (!sourcesByKind.has(kind)) sourcesByKind.set(kind, []);
+      sourcesByKind.get(kind).push(index);
+    });
+    const cursorByKind = new Map();
+    let previous = -1;
+    let identity = echoes.length === target.pattern.length;
+    for (const [index, atom] of outputPattern.entries()) {
+      if (atom.type !== "echo") {
+        identity = false;
+        continue;
+      }
+      if (atom.suffix) identity = false;
+      const kind = atom.kind === "set" ? (atom.name || "").toLowerCase() : atom.kind;
+      const sources = sourcesByKind.get(kind) || [];
+      if (!sources.length) {
+        return {
+          ok: false,
+          error: `The output echoes ${echoKindLabel(atom)}, but the input never matches one. An echo copies a segment the input matched — write a concrete sound when there is nothing to copy.`,
+        };
+      }
+      const used = cursorByKind.get(kind) || 0;
+      if (used >= sources.length) {
+        return {
+          ok: false,
+          error: `The output echoes ${echoKindLabel(atom)} more often than the input matches it. Echoes pair with class (V, C), category, and chart-class atoms in the input, in order.`,
+        };
+      }
+      const source = sources[used];
+      cursorByKind.set(kind, used + 1);
+      echoes[index].inputIndex = source;
+      if (source <= previous) identity = false;
+      previous = source;
+    }
+    if (identity) {
+      return {
+        ok: false,
+        error:
+          "The output echoes every matched segment in its own place, so the rule changes nothing. To swap two segments of one class, write them out (k t > t k); different classes reorder as C V > V C.",
+      };
+    }
+  }
 
   // A constant feature change on a literal input can be checked now: if the
   // mutated bundle has no exact charted match, the rule would fail on every
@@ -1574,8 +1730,10 @@ export function compileRule(notation, context) {
     rule: {
       source,
       target: target.pattern,
-      replacement,
+      replacement: echoOutput ? null : replacement,
       featureOutput,
+      echoOutput,
+      echoes,
       left,
       right,
       environment: environment ? environment.trim() : "",
@@ -1814,7 +1972,30 @@ export function explainRuleMiss(tokens, compiled, context, junctures = null) {
 // like n > [αplace] stays phonemic. Allophony contexts may synthesize an
 // off-chart surface symbol after the chart lookup fails.
 export function replacementForMatch(tokens, match, compiled, context) {
-  if (!compiled?.featureOutput) return { ok: true, replacement: match.replacement || compiled?.replacement || [] };
+  if (!compiled?.featureOutput) {
+    if (compiled?.echoOutput) {
+      // Echo atoms copy the tokens their paired input atoms matched, gluing
+      // any recorded suffix (the length mark in V > Vː) onto each copy.
+      const replacement = [];
+      for (const echo of compiled.echoes) {
+        if (!echo.echo) {
+          replacement.push(echo.value);
+          continue;
+        }
+        const token = tokens[match.start + echo.inputIndex];
+        if (token == null) {
+          const label = compiled.source ? `“${compiled.source}” ` : "";
+          return {
+            ok: false,
+            error: `${label}The output echoes input segment ${echo.inputIndex + 1}, but the match does not reach it.`,
+          };
+        }
+        replacement.push(echo.suffix ? token + echo.suffix : token);
+      }
+      return { ok: true, replacement };
+    }
+    return { ok: true, replacement: match.replacement || compiled?.replacement || [] };
+  }
   if (match.end - match.start !== 1) {
     return { ok: false, error: "A feature change must apply to exactly one segment." };
   }

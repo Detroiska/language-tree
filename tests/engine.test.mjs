@@ -2376,7 +2376,10 @@ equal(
   "x"
 );
 const categoryOutput = compileRule("a > N", categoryContext);
-truthy("a category is rejected in the output", !categoryOutput.ok && /is a category/.test(categoryOutput.error));
+truthy(
+  "a category with nothing to echo is rejected in the output",
+  !categoryOutput.ok && /echoes/.test(categoryOutput.error)
+);
 equal("a category works in allophony input", surfaceForForm("mi", categoryProject, "child").text, "ɲi");
 equal("a category works in an allophony environment", surfaceForForm("an", categoryProject, "child").text, "en");
 equal("category sound changes still feed derivation", deriveForm("man", categoryProject, "child").text, "ma");
@@ -3786,6 +3789,246 @@ equal(
   ),
   true
 );
+
+/* ---- echo outputs: metathesis, exchange, and lengthening ----------------- */
+
+// Echo outputs copy matched input segments into new positions: the k-th echo
+// of a class, category, or chart class pairs with the k-th input atom of that
+// kind. This gives multi-segment rewrites like metathesis (C V > V C), vowel
+// exchange (a i > i a), and lengthening (V > Vː / _ #) without spelling every
+// alternative out.
+const echoProject = ensureProject({
+  title: "Echo outputs",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory,
+      phonotactics: { classes: [{ name: "N", sounds: "m n" }] },
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      inventory,
+      phonotactics: { classes: [{ name: "N", sounds: "m n" }] },
+      soundChanges: [
+        { id: "s1", notation: "C V > V C", note: "", enabled: true },
+        { id: "s2", notation: "V > Vː / _ #", note: "", enabled: true, parentId: "s1" },
+      ],
+      allophony: [
+        { id: "a1", notation: "p V > V p", note: "", enabled: true },
+        { id: "a2", notation: "V > Vː / _ #", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const echoCtx = contextForLanguage(echoProject, "child");
+const echoApply = (notation, form) => {
+  const compiled = compileRule(notation, echoCtx);
+  if (!compiled.ok) return { error: compiled.error };
+  const result = applyRule(echoCtx.tokenize(form), compiled.rule, echoCtx);
+  return { out: result.tokens.join(""), changed: result.changed };
+};
+
+equal("a literal exchange swaps the matched segments", apply("a i > i a", "tai"), { out: "tia" });
+equal("class metathesis echoes a vowel-consonant pair in reverse", apply("V C > C V", "aki"), {
+  out: "kai",
+});
+equal(
+  "metathesis runs in one left-to-right pass instead of rescanning its output",
+  apply("V C > C V", "akta"),
+  { out: "kata" }
+);
+equal("an echo with a shorter output deletes the unmatched segment", apply("C V > C / _ #", "ta"), {
+  out: "t",
+});
+equal("a chart-class name is a valid echo on both sides", apply("plosive.velar V > V plosive.velar", "ka"), {
+  out: "ak",
+});
+equal("a glide tail glues onto the echoed vowel", apply("V > Vʷ / _ u", "katau"), {
+  out: "kataʷu",
+});
+
+equal("echoing a class more often than it matches is rejected", !compileRule("C > C C", ctx).ok, true);
+truthy(
+  "the over-count error explains the pairing rule",
+  /more often than the input matches it/u.test(compileRule("C > C C", ctx).error)
+);
+truthy(
+  "an echo in an insertion is rejected",
+  /cannot echo/u.test(compileRule("∅ > V / # _", ctx).error)
+);
+equal("an every-place echo rule is rejected as a no-op", !compileRule("C V > C V", ctx).ok, true);
+truthy(
+  "the identity-echo error points at writing the rule out",
+  /in its own place/u.test(compileRule("C V > C V", ctx).error)
+);
+truthy(
+  "letters glued to an echo are rejected as confusion",
+  /diacritics/u.test(compileRule("V > Vd", ctx).error)
+);
+truthy(
+  "echoing a chart class the input never matches is rejected",
+  /the input never matches one/u.test(compileRule("a > fricative", ctx).error)
+);
+
+equal("lengthening echoes the matched vowel", echoApply("V > Vː / _ #", "kasa"), {
+  out: "kasaː",
+  changed: true,
+});
+const lengthenedRule = compileRule("V > Vː / _ #", echoCtx);
+const lengthened = lengthenedRule.ok
+  ? applyRule(echoCtx.tokenize("kasa"), lengthenedRule.rule, echoCtx)
+  : null;
+equal("a glued diacritic stays part of one token", lengthened && lengthened.tokens, [
+  "k",
+  "a",
+  "s",
+  "aː",
+]);
+equal("echo deletion reports a change", echoApply("C V > C / _ #", "ta"), {
+  out: "t",
+  changed: true,
+});
+equal("a category name is a valid echo on both sides", echoApply("N V > V N", "ma"), {
+  out: "am",
+  changed: true,
+});
+
+equal("sound-change metathesis derives swapped pairs", deriveForm("pata", echoProject, "child").text, "apat");
+
+const echoMetathesis = stagedProject([
+  { id: "s1", notation: "C V > V C", note: "", enabled: true, parentId: null },
+]);
+equal("top-level metathesis derives every pair", deriveForm("pata", echoMetathesis, "child").text, "apat");
+equal("a juncture rides along inside the echoed pair", deriveForm("k+ata", echoMetathesis, "child").text, "akat");
+
+const echoSequential = stagedProject([
+  { id: "s1", notation: "C V > V C", note: "", enabled: true, parentId: null },
+  { id: "s2", notation: "a > ɑ / p _", note: "", enabled: true, parentId: "s1" },
+]);
+equal("a child rule rewrites the metathesized form", deriveForm("pata", echoSequential, "child").text, "apɑt");
+
+equal("allophony metathesis and lengthening derive the surface", surfaceForForm("pata", echoProject, "child").text, "aptaː");
+equal("allophony lengthening is visible on the surface", surfaceForForm("taka", echoProject, "child").text, "takaː");
+equal(
+  "the allophone table previews lengthening echoes",
+  allophoneTable(echoProject, "child").rows.map((row) => [row.phoneme, row.allophone]),
+  [
+    ["i", "iː"],
+    ["u", "uː"],
+    ["a", "aː"],
+    ["ɑ", "ɑː"],
+  ]
+);
+
+const echoMetathesisAllophony = ensureProject({
+  title: "Metathesis allophony",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [{ id: "m1", notation: "p V > V p", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal("a two-segment echo is left out of the phoneme table", allophoneTable(echoMetathesisAllophony, "only").rows, []);
+
+const echoReconstruction = stagedProject([
+  { id: "s1", notation: "p V > V p", note: "", enabled: true, parentId: null },
+]);
+equal(
+  "reconstruction inverts a metathesis echo into both source orders",
+  reconstructForm("ap", echoReconstruction, "child").candidates.map((candidate) => candidate.text),
+  ["ap", "pa"]
+);
+equal(
+  "reconstruction inverts a literal exchange",
+  reconstructForm(
+    "tia",
+    stagedProject([{ id: "s1", notation: "a i > i a", note: "", enabled: true, parentId: null }]),
+    "child"
+  ).candidates.map((candidate) => candidate.text),
+  ["tia", "tai"]
+);
+const echoLexiconProject = ensureProject({
+  title: "Echo lexicon",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [{ id: "w1", gloss: "man", form: "pa" }],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      inventory,
+      soundChanges: [{ id: "s1", notation: "p V > V p", note: "", enabled: true, parentId: null }],
+      allophony: [],
+      vocabulary: [{ id: "w1", gloss: "man", form: "ap" }],
+    },
+  ],
+});
+const echoEvidence = reconstructForm("ap", echoLexiconProject, "child");
+equal("parent-lexicon evidence ranks the metathesis source first", echoEvidence.candidates[0].text, "pa");
+equal("the ranked echo candidate cites its evidence", echoEvidence.candidates[0].parentMatch, "gloss");
+
+// The long vowel must be charted ahead of its base for the surface form to
+// re-tokenize as one segment, mirroring literal outputs of uncharted lengths.
+const longVowels = {
+  inventory: {
+    consonants: makeChart(
+      ["Plosive"],
+      ["Bilabial", "Alveolar"],
+      [
+        ["Plosive", "Bilabial", ["p"]],
+        ["Plosive", "Alveolar", ["t"]],
+      ]
+    ),
+    vowels: makeChart(["Open"], ["Front"], [["Open", "Front", ["aː", "a"]]]),
+  },
+  phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+};
+const lengtheningReconstructionProject = {
+  title: "Lengthening reconstruction",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...longVowels, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...longVowels,
+      soundChanges: [{ id: "s1", notation: "V > Vː / _ #", note: "", enabled: true, parentId: null }],
+      vocabulary: [],
+    },
+  ],
+};
+equal(
+  "reconstruction inverts final lengthening to the short vowel",
+  reconstructForm("takaː", lengtheningReconstructionProject, "child").candidates.map((candidate) => candidate.text),
+  ["taka"]
+);
+equal(
+  "lengthening only inverts where the original was already long",
+  reconstructForm("taka", lengtheningReconstructionProject, "child").candidates.map((candidate) => candidate.text),
+  []
+);
+
 
 /* ---- summary ------------------------------------------------------------- */
 
