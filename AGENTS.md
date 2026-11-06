@@ -36,6 +36,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - Fix a red branch with a new commit on the same branch.
 - Never `git add -A`; stage only files you intentionally changed.
 - `BACKLOG.md` is a local planning file (gitignored): edit it freely, but never commit, stage, or push it.
+- When the owner agrees a feature or fix should be added, record it in `BACKLOG.md` before starting work.
 - One logical change per commit. Message: a capitalized imperative one-liner, e.g. "Add bulk parser tests and document the suite" or "Fix save conflicts, id collisions, and parsing edge cases" — no area prefix, no conventional commits. Read `git log` first and match its style.
 - Changes to data/project.json picked up while testing the app go in their own "Update project data" commit, never mixed with code changes.
 
