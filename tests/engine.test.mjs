@@ -12,19 +12,25 @@ import {
   createAncestor,
   createLanguage,
   createSibling,
+  DEFAULT_RULE_RATE,
   defaultInventory,
   deleteLanguage,
   ensureProject,
   groupAllophonyRules,
+  normalizeRuleExceptions,
+  normalizeRuleRate,
   restoreAllophonyGroup,
   restoreAllophonyRule,
   restoreDeletedLanguages,
   restoreUngroupedAllophonyRules,
+  ruleExceptsGloss,
   ruleNumberMap,
 } from "../web/js/model.js";
 import {
   allophoneCandidates,
   allophoneTable,
+  applyAllophony,
+  compileAllophonyRules,
   contextForAllophony,
   contextForInventory,
   contextForLanguage,
@@ -34,11 +40,20 @@ import {
   compileChainFrom,
   deriveForm,
   deriveStages,
+  exceptionRulesFromSteps,
   explainRuleMiss,
   normalizeAllophonyNotation,
+  optionalRulesInStages,
+  optionalSkippedRulesFromSteps,
   surfaceForForm,
 } from "../web/js/phonology.js";
-import { formatPhonemic, formatPhonetic, normalizeSearchText, stripLevelMarks } from "../web/js/notation.js";
+import {
+  formatPhonemic,
+  formatPhonetic,
+  joinSegments,
+  normalizeSearchText,
+  stripLevelMarks,
+} from "../web/js/notation.js";
 import { compileClasses } from "../web/js/categories.js";
 import {
   IPA_FEATURES,
@@ -1293,6 +1308,160 @@ equal(
   "kasə"
 );
 
+/* ---- morpheme boundaries ------------------------------------------------ */
+
+const cutApply = (notation, form, context = ctx) => {
+  const compiled = compileRule(notation, context);
+  if (!compiled.ok) return { error: compiled.error };
+  const parsed = context.tokenizeWithStress(form);
+  const result = applyRule(parsed.tokens, compiled.rule, context, parsed.junctures);
+  return {
+    out: joinSegments(result.tokens, result.junctures),
+    cuts: [...result.junctures].sort((a, b) => a - b),
+  };
+};
+
+const parsedCuts = ctx.tokenizeWithStress("kat+ta");
+equal("morpheme cuts are not segments", parsedCuts.tokens, ["k", "a", "t", "t", "a"]);
+equal("a morpheme cut is recorded between segments", [...parsedCuts.junctures], [3]);
+equal("cuts and stress coexist", ctx.tokenizeWithStress("ˈka+ta").junctures.has(2), true);
+equal("edge cuts duplicate the word boundary", [...ctx.tokenizeWithStress("+kata+").junctures], []);
+equal("plain tokenize ignores cuts", ctx.tokenize("kat+ta"), ["k", "a", "t", "t", "a"]);
+
+equal("a cut conditions a following segment", cutApply("t > d / + _", "at+ta"), {
+  out: "at+da",
+  cuts: [2],
+});
+equal("a cut does not match a plain cluster", cutApply("t > d / + _", "atta"), {
+  out: "atta",
+  cuts: [],
+});
+equal("a cut conditions a preceding segment", cutApply("t > d / _ +", "at+ta"), {
+  out: "ad+ta",
+  cuts: [2],
+});
+equal("a compact environment splits the cut from its neighbour", cutApply("t > d / a+ _", "a+ta"), {
+  out: "a+da",
+  cuts: [1],
+});
+equal("both sides can require a cut", cutApply("a > ə / + _ +", "k+a+k"), {
+  out: "k+ə+k",
+  cuts: [1, 2],
+});
+equal("a word boundary stays distinct from a cut", cutApply("t > d / # _", "ta+ta"), {
+  out: "da+ta",
+  cuts: [2],
+});
+equal("a cut is not a word boundary", cutApply("t > d / + _", "tata"), {
+  out: "tata",
+  cuts: [],
+});
+equal("insertion after a cut stays in the right morpheme", cutApply("∅ > t / + _", "a+a"), {
+  out: "a+ta",
+  cuts: [1],
+});
+equal("insertion before a cut stays in the left morpheme", cutApply("∅ > t / _ +", "a+a"), {
+  out: "at+a",
+  cuts: [2],
+});
+equal("rewriting across a cut removes it", cutApply("tt > t", "at+ta"), {
+  out: "ata",
+  cuts: [],
+});
+equal("unrelated rewrites keep their cuts", cutApply("a > e", "kat+ta"), {
+  out: "ket+te",
+  cuts: [3],
+});
+equal("a cut that reaches a word edge is dropped", cutApply("a > ∅ / # _", "a+ta"), {
+  out: "ta",
+  cuts: [],
+});
+
+const cutParallelProject = ensureProject({
+  title: "Parallel cuts",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "∅ > nn / # _", note: "", enabled: true },
+        { id: "r2", notation: "t > ∅ / a _", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "parallel edits shift cuts by their combined effect",
+  deriveForm("a+t+a", cutParallelProject, "child", { directOnly: true }).text,
+  "nna+a"
+);
+
+const cutTarget = compileRule("+ > -", ctx);
+truthy(
+  "morpheme boundaries are rejected in the input",
+  !cutTarget.ok && /only valid in the environment/.test(cutTarget.error)
+);
+
+const cutAlloRules = compileAllophonyRules(
+  [{ id: "a1", notation: "t > d / + _", note: "", enabled: true }],
+  ctx
+);
+const cutAlloInput = ctx.tokenizeWithStress("at+ta");
+const cutAllo = applyAllophony(cutAlloInput.tokens, cutAlloRules, ctx, {
+  junctures: cutAlloInput.junctures,
+});
+equal("allophony can condition on a cut", cutAllo.text, "at+da");
+equal("allophony keeps the cut", [...cutAllo.junctures], [2]);
+
+const cutChangeProject = ensureProject({
+  title: "Morpheme cuts",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [{ id: "r1", notation: "t > d / + _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "sound changes preserve morpheme cuts in the derived form",
+  deriveForm("at+ta", cutChangeProject, "child").text,
+  "at+da"
+);
+
+const cutSurface = surfaceForForm("kat+ta", stressProject, "only");
+equal("surface text preserves the cut", cutSurface.text, "kat+ta");
+equal("surface display keeps the cut instead of a dot", cutSurface.display, "ˈkat+ta");
+
+const cutReconstruction = reconstructForm("at+da", cutChangeProject, "child");
+equal("reconstruction keeps the daughter's cut", cutReconstruction.inputText, "at+da");
+truthy(
+  "reconstruction restores the parent form with its cut",
+  reconstructionAlternatives(cutReconstruction).includes("at+ta")
+);
+equal(
+  "reconstruction candidates carry the cut",
+  cutReconstruction.candidates.map((candidate) => [...candidate.junctures]),
+  [[2], [2]]
+);
+
+const cutChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "initial" },
+});
+equal("phonotactic display shows the cut", cutChecker.validate("kat+ta").displayText, "ˈkat+ta");
+equal("marking stress keeps the cut", stressMarkedForm("kat+ta", cutChecker), "ˈkat+ta");
+
+equal("search normalization ignores morpheme cuts", normalizeSearchText("Kat+ta"), "katta");
+
 /* ---- notation ----------------------------------------------------------- */
 
 equal("strip phonemic slashes", stripLevelMarks("/kasa/"), "kasa");
@@ -1865,6 +2034,289 @@ equal(
   [{ notation: "/p/ > [pʰ] / # _ V", note: "", enabled: true }]
 );
 truthy("migrated allophony rules receive an id", Boolean(migratedNotation.languages[0].allophony[0].id));
+
+/* ---- lexical exceptions ------------------------------------------------- */
+
+const exceptionProject = ensureProject({
+  title: "Lexical exceptions",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [
+        { id: "w1", gloss: "water", form: "pata" },
+        { id: "w2", gloss: "father", form: "pata" },
+      ],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "a > e", note: "", enabled: true, parentId: null, exceptions: ["water"] },
+        { id: "r2", notation: "p > f", note: "", enabled: true, parentId: null, exceptions: ["father"] },
+      ],
+      allophony: [
+        { id: "a1", notation: "e > i", note: "", enabled: true, exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+
+equal(
+  "a lexical exception skips only its rule",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: "water" }).text,
+  "fata"
+);
+equal(
+  "a second rule's exception is independent",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: "father" }).text,
+  "pete"
+);
+equal(
+  "words without an exception take every rule",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: "brother" }).text,
+  "fete"
+);
+equal(
+  "exception matching ignores case and surrounding whitespace",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: " Water " }).text,
+  "fata"
+);
+
+const exceptionDerivation = deriveForm("pata", exceptionProject, "child", {
+  directOnly: true,
+  gloss: "water",
+});
+const exceptionParallel = exceptionDerivation.steps.find((step) => step.kind === "parallel");
+const exceptionEntries = Object.fromEntries(exceptionParallel.entries.map((entry) => [entry.label, entry]));
+equal(
+  "an excepted top-level rule is marked in the derivation",
+  [Boolean(exceptionEntries["1"].excepted), Boolean(exceptionEntries["2"].excepted)],
+  [true, false]
+);
+equal("an excepted top-level rule reports no matches", exceptionEntries["1"].matches, 0);
+equal(
+  "exception steps summarize to the skipped rules",
+  exceptionRulesFromSteps(exceptionDerivation.steps).map((rule) => [rule.label, rule.notation]),
+  [["1", "a > e"]]
+);
+
+const sequentialExceptionProject = ensureProject({
+  title: "Sequential exception",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+        { id: "c1", notation: "a > e", note: "", enabled: true, parentId: "r1", exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const sequentialException = deriveForm("pata", sequentialExceptionProject, "only", {
+  directOnly: true,
+  gloss: "water",
+});
+equal("a sequential exception leaves its parent's output alone", sequentialException.text, "fata");
+const sequentialExceptionStep = sequentialException.steps.find((step) => step.excepted);
+equal(
+  "a sequential exception is marked in the derivation",
+  [sequentialExceptionStep?.label, sequentialExceptionStep?.changed],
+  ["1.1", false]
+);
+
+const chainExceptionProject = ensureProject({
+  title: "Chain exception",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null, exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+    {
+      id: "grandchild",
+      name: "Grandchild",
+      parentId: "child",
+      ...language,
+      soundChanges: [{ id: "r2", notation: "a > e", note: "", enabled: true, parentId: null }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "an exception applies at its own stage of a lineage",
+  deriveForm("pata", chainExceptionProject, "grandchild", { gloss: "water" }).text,
+  "pete"
+);
+equal(
+  "other glosses pass through every stage",
+  deriveForm("pata", chainExceptionProject, "grandchild", { gloss: "father" }).text,
+  "fete"
+);
+
+const exceptionSurface = surfaceForForm("pete", exceptionProject, "child", { gloss: "water" });
+equal("an allophony exception skips the surface rule", exceptionSurface.text, "pete");
+equal(
+  "an excepted allophony rule is marked in the surface steps",
+  exceptionSurface.steps.map((step) => [step.label, Boolean(step.excepted), step.changed]),
+  [["1", true, false]]
+);
+equal(
+  "allophony exception steps summarize to the skipped rule",
+  exceptionRulesFromSteps(exceptionSurface.steps).map((rule) => rule.label),
+  ["1"]
+);
+equal(
+  "the same allophony rule still applies to other glosses",
+  surfaceForForm("pete", exceptionProject, "child", { gloss: "father" }).text,
+  "piti"
+);
+equal(
+  "without a gloss an allophony exception cannot match",
+  surfaceForForm("pete", exceptionProject, "child").text,
+  "piti"
+);
+
+const iterativeExceptionProject = ensureProject(
+  harmonyLanguage([
+    {
+      id: "h1",
+      notation: "a > u / u _",
+      note: "",
+      enabled: true,
+      iterative: true,
+      repeatLimit: 12,
+      domain: "adjacent",
+      exceptions: ["water"],
+    },
+  ])
+);
+const exceptedRepeat = surfaceForForm("uaa", iterativeExceptionProject, "only", { gloss: "water" });
+equal("an iterative allophony exception skips every pass", exceptedRepeat.text, "uaa");
+equal(
+  "a skipped iterative step records zero passes",
+  [exceptedRepeat.steps[0].passes, Boolean(exceptedRepeat.steps[0].excepted)],
+  [0, true]
+);
+
+const reconstructionExceptionProject = ensureProject({
+  title: "Reconstruct exception",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      vocabulary: [{ id: "w1", gloss: "water", form: "pata" }],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null, exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const exceptedReconstruction = reconstructForm("fata", reconstructionExceptionProject, "child", {
+  gloss: "water",
+});
+equal(
+  "reconstruction does not invert an excepted rule",
+  exceptedReconstruction.candidates.map((candidate) => candidate.text),
+  ["fata"]
+);
+truthy(
+  "without a gloss the same rule still reconstructs",
+  reconstructForm("fata", reconstructionExceptionProject, "child").candidates.some(
+    (candidate) => candidate.text === "pata"
+  )
+);
+
+const migratedExceptions = ensureProject({
+  title: "Exception migration",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [
+        { id: "r1", notation: "a > e", note: "", enabled: true, exceptions: [" Water ", "water", "", 7] },
+      ],
+      allophony: [
+        { id: "a1", notation: "a > ə", note: "", enabled: true, exceptions: [" father ", "Father", null] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "sound-change exceptions are trimmed and deduplicated on load",
+  migratedExceptions.languages[0].soundChanges[0].exceptions,
+  ["Water"]
+);
+equal(
+  "allophony exceptions are trimmed and deduplicated on load",
+  migratedExceptions.languages[0].allophony[0].exceptions,
+  ["father"]
+);
+const legacyExceptions = ensureProject({
+  title: "Exception defaults",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [{ id: "r1", notation: "a > e", note: "", enabled: true }],
+      allophony: [{ id: "a1", notation: "a > ə", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "rules without stored exceptions default to an empty list",
+  [
+    legacyExceptions.languages[0].soundChanges[0].exceptions,
+    legacyExceptions.languages[0].allophony[0].exceptions,
+  ],
+  [[], []]
+);
+equal(
+  "normalization keeps the first spelling of a duplicated gloss",
+  normalizeRuleExceptions(["Water", " water ", "WATER"]),
+  ["Water"]
+);
+equal(
+  "an exception matches a gloss case-insensitively",
+  [
+    ruleExceptsGloss({ exceptions: ["Water"] }, " water "),
+    ruleExceptsGloss({ exceptions: ["water"] }, ""),
+    ruleExceptsGloss({}, "water"),
+    ruleExceptsGloss({ exceptions: "water" }, "water"),
+  ],
+  [true, false, false, false]
+);
 
 /* ---- custom categories in rules ----------------------------------------- */
 
@@ -3075,6 +3527,265 @@ equal(
 
 const missingSource = buildCorrespondences(correspondenceProject, "no_such_language");
 equal("an unknown source returns an empty table", [missingSource.source, missingSource.rows.length], [null, 0]);
+
+/* ---- optional sound changes and allophony ------------------------------- */
+
+const optionalDefaults = ensureProject({
+  title: "Optional defaults",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [{ id: "r1", notation: "p > f", note: "", enabled: true }],
+      allophony: [{ id: "a1", notation: "/p/ > [f]", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "rules without optional fields default to mandatory at the default rate",
+  [
+    optionalDefaults.languages[0].soundChanges[0].optional,
+    optionalDefaults.languages[0].soundChanges[0].rate,
+    optionalDefaults.languages[0].allophony[0].optional,
+    optionalDefaults.languages[0].allophony[0].rate,
+  ],
+  [false, DEFAULT_RULE_RATE, false, DEFAULT_RULE_RATE]
+);
+equal(
+  "optional rates are clamped to whole percentages",
+  [normalizeRuleRate("150"), normalizeRuleRate(-4), normalizeRuleRate(37.6), normalizeRuleRate("nope")],
+  [100, 0, 38, DEFAULT_RULE_RATE]
+);
+const normalizedOptional = ensureProject({
+  title: "Optional normalization",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [{ id: "r1", notation: "p > f", optional: "yes", rate: 12.4 }],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "stored optional flags are strict booleans and rates are normalized",
+  [normalizedOptional.languages[0].soundChanges[0].optional, normalizedOptional.languages[0].soundChanges[0].rate],
+  [false, 12]
+);
+
+const optionalProject = ensureProject({
+  title: "Optional changes",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "o1", notation: "p > f", note: "", enabled: true, optional: true, rate: 40 },
+        { id: "o2", notation: "t > s", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const optionalPrimary = deriveForm("pata", optionalProject, "child", { directOnly: true });
+equal("the primary derivation skips optional sound changes", optionalPrimary.text, "pasa");
+equal(
+  "forcing an optional sound change derives a variant",
+  deriveForm("pata", optionalProject, "child", { directOnly: true, optionalRuleIds: ["o1"] }).text,
+  "fasa"
+);
+equal(
+  "skipped optional sound changes are reported from the derivation steps",
+  optionalSkippedRulesFromSteps(optionalPrimary.steps).map((rule) => [rule.id, rule.rate]),
+  [["o1", 40]]
+);
+
+const optionalGroupProject = ensureProject({
+  title: "Optional group",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "g1", notation: "p > f", note: "", enabled: true, optional: true, rate: 30 },
+        { id: "g1a", notation: "a > e / f _", note: "", enabled: true, parentId: "g1" },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "skipping an optional top-level rule skips its sequential children",
+  deriveForm("pata", optionalGroupProject, "child", { directOnly: true }).text,
+  "pata"
+);
+equal(
+  "forcing an optional top-level rule runs its sequential children",
+  deriveForm("pata", optionalGroupProject, "child", { directOnly: true, optionalRuleIds: ["g1"] }).text,
+  "feta"
+);
+equal(
+  "forcing a child cannot override its skipped optional parent",
+  deriveForm("pata", optionalGroupProject, "child", { directOnly: true, optionalRuleIds: ["g1a"] }).text,
+  "pata"
+);
+
+const optionalChildProject = ensureProject({
+  title: "Optional child",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "h1", notation: "p > f", note: "", enabled: true },
+        { id: "h1a", notation: "a > e / f _", note: "", enabled: true, optional: true, rate: 60, parentId: "h1" },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "an optional child is skipped while its mandatory parent still runs",
+  deriveForm("pata", optionalChildProject, "child", { directOnly: true }).text,
+  "fata"
+);
+equal(
+  "an optional child can be forced independently",
+  deriveForm("pata", optionalChildProject, "child", { directOnly: true, optionalRuleIds: ["h1a"] }).text,
+  "feta"
+);
+
+const groupStageContext = contextForLanguage(optionalGroupProject, "child");
+const groupStages = [
+  {
+    language: optionalGroupProject.languages[1],
+    groups: compileRuleStages(optionalGroupProject.languages[1].soundChanges, groupStageContext),
+  },
+];
+equal(
+  "optional stages list top-level optional groups",
+  optionalRulesInStages(groupStages).map((rule) => [rule.id, rule.kind, rule.parentOptional]),
+  [["g1", "top", false]]
+);
+const childStageContext = contextForLanguage(optionalChildProject, "child");
+const childStages = [
+  {
+    language: optionalChildProject.languages[1],
+    groups: compileRuleStages(optionalChildProject.languages[1].soundChanges, childStageContext),
+  },
+];
+equal(
+  "optional stages list optional children with their parent",
+  optionalRulesInStages(childStages).map((rule) => [rule.id, rule.kind, rule.parentId]),
+  [["h1a", "child", "h1"]]
+);
+
+const optionalAllophonyProject = ensureProject({
+  title: "Optional allophony",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      allophony: [
+        { id: "a1", notation: "/p/ > [f]", note: "", enabled: true, optional: true, rate: 25 },
+        { id: "a2", notation: "/t/ > [s]", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "the primary surface skips optional allophony",
+  surfaceForForm("pata", optionalAllophonyProject, "only").text,
+  "pasa"
+);
+equal(
+  "forcing an optional allophony rule derives a variant",
+  surfaceForForm("pata", optionalAllophonyProject, "only", { optionalRuleIds: ["a1"] }).text,
+  "fasa"
+);
+equal(
+  "the primary allophone table leaves optional rules out",
+  allophoneTable(optionalAllophonyProject, "only").rows.map((row) => row.phoneme),
+  ["t"]
+);
+equal(
+  "the allophone table can include a forced optional rule",
+  allophoneTable(optionalAllophonyProject, "only", { optionalRuleIds: ["a1"] }).rows.map((row) => row.phoneme),
+  ["p", "t"]
+);
+
+const optionalReconstructionProject = ensureProject({
+  title: "Optional reconstruction",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [{ id: "r1", notation: "p > f", note: "", enabled: true, optional: true, rate: 50 }],
+      vocabulary: [],
+    },
+  ],
+});
+const optionalChanged = reconstructForm("f", optionalReconstructionProject, "child");
+equal(
+  "reconstruction keeps the changed and unchanged analyses of an optional rule",
+  optionalChanged.candidates.map((candidate) => candidate.text),
+  ["f", "p"]
+);
+equal("reconstruction reports the optional rule it considered", optionalChanged.optional, ["r1"]);
+equal(
+  "an unchanged form stays reconstructable when the optional change did not apply",
+  reconstructForm("p", optionalReconstructionProject, "child").candidates.map((candidate) => candidate.text),
+  ["p"]
+);
+
+const optionalChildReconstructionProject = ensureProject({
+  title: "Optional child reconstruction",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "k1", notation: "p > f", note: "", enabled: true },
+        { id: "k1a", notation: "a > e / f _", note: "", enabled: true, optional: true, rate: 60, parentId: "k1" },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "reconstruction explores an optional child both skipped and applied",
+  reconstructForm("fata", optionalChildReconstructionProject, "child").candidates.map((candidate) => candidate.text),
+  ["fata", "pata"]
+);
+equal(
+  "reconstruction inverts an applied optional child",
+  reconstructForm("feta", optionalChildReconstructionProject, "child").candidates.some(
+    (candidate) => candidate.text === "pata"
+  ),
+  true
+);
 
 /* ---- summary ------------------------------------------------------------- */
 

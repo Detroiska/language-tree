@@ -1,6 +1,11 @@
 import { allophonyRules, ancestorsOf, uid } from "../model.js";
 import { applyWordList, copyWords, downloadWords, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
-import { deriveForm, hasSurfaceDisplay, surfaceForForm } from "../phonology.js";
+import {
+  deriveForm,
+  exceptionRulesFromSteps,
+  hasSurfaceDisplay,
+  surfaceForForm,
+} from "../phonology.js";
 import { formatPhonemic, formatPhonetic, normalizeSearchText, stripLevelMarks, stripStressMarks } from "../notation.js";
 import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
 import { esc, icon, openModal, toast } from "../ui.js";
@@ -23,18 +28,30 @@ function expectedFor(ctx, word, parent) {
     (candidate) => candidate.form.trim() && normalizeGloss(candidate.gloss) === normalizeGloss(word.gloss) && word.gloss.trim()
   );
   if (!parentWord) return null;
-  const derived = deriveForm(parentWord.form, ctx.project, ctx.language.id, { directOnly: true });
+  const derived = deriveForm(parentWord.form, ctx.project, ctx.language.id, {
+    directOnly: true,
+    gloss: word.gloss,
+  });
   return {
     parentWord,
     derived: derived.text,
     error: derived.error,
+    exceptions: exceptionRulesFromSteps(derived.steps),
   };
+}
+
+function exceptionNote(exceptions) {
+  const count = exceptions?.length || 0;
+  if (!count) return "";
+  return ` · ${count} ${count === 1 ? "rule" : "rules"} skipped as a lexical ${
+    count === 1 ? "exception" : "exceptions"
+  }`;
 }
 
 function sameForm(a, b) {
   const normalize = (value) =>
     stripStressMarks(String(value || "").normalize("NFC"))
-      .replace(/[.\-·\s]+/gu, "")
+      .replace(/[.\-·+\s]+/gu, "")
       .trim();
   return normalize(a) === normalize(b);
 }
@@ -45,15 +62,17 @@ function checkCellMarkup(word, expected) {
     return `<span class="status-chip status-differs" title="${esc(expected.error)}">${icon("warning")}Rule error</span>`;
   }
   if (!word.form.trim()) return `<span class="status-chip status-missing">${icon("info")}No form</span>`;
+  const exceptionSuffix = exceptionNote(expected.exceptions);
   if (sameForm(word.form, expected.derived)) {
-    return `<span class="status-chip status-match" title="Matches the derived phonemic form ${esc(formatPhonemic(expected.derived))}">${icon("check")}Matches</span>`;
+    return `<span class="status-chip status-match" title="Matches the derived phonemic form ${esc(formatPhonemic(expected.derived))}${esc(exceptionSuffix)}">${icon("check")}Matches</span>`;
   }
-  return `<span class="status-chip status-differs" title="Expected ${esc(formatPhonemic(expected.derived))}">${icon("warning")}Expected ${esc(formatPhonemic(expected.derived)) || "∅"}</span>`;
+  return `<span class="status-chip status-differs" title="Expected ${esc(formatPhonemic(expected.derived))}${esc(exceptionSuffix)}">${icon("warning")}Expected ${esc(formatPhonemic(expected.derived)) || "∅"}</span>`;
 }
 
-function surfaceMarkup(form, ctx) {
+function surfaceMarkup(word, ctx) {
+  const form = word?.form;
   if (!hasSurfaceDisplay(ctx.language) || !String(form || "").trim()) return "";
-  const result = surfaceForForm(form, ctx.project, ctx.language.id);
+  const result = surfaceForForm(form, ctx.project, ctx.language.id, { gloss: word.gloss });
   if (result.errors.length) {
     return `<span class="surface-preview surface-error" title="${esc(result.errors[0])}">${icon("warning")}surface error</span>`;
   }
@@ -324,7 +343,7 @@ export function renderVocabulary(container, ctx) {
               <input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form (phonemic)">
               <span class="level-mark" aria-hidden="true">/</span>
             </span>
-            <div class="surface-preview-wrap" data-surface-preview>${surfaceMarkup(word.form, ctx)}</div>
+            <div class="surface-preview-wrap" data-surface-preview>${surfaceMarkup(word, ctx)}</div>
             <div class="word-issue-wrap" data-word-issue>${phonotacticIssueMarkup(result)}</div>
           </td>
           <td class="word-phonotactics" data-word-phonotactics>${phonotacticCellMarkup(result)}</td>
@@ -504,7 +523,7 @@ export function renderVocabulary(container, ctx) {
           const result = checker.validate(word.form);
           updateRowPhonotactics(row, result);
           const surface = row.querySelector("[data-surface-preview]");
-          if (surface) surface.innerHTML = surfaceMarkup(word.form, ctx);
+          if (surface) surface.innerHTML = surfaceMarkup(word, ctx);
           const summary = container.querySelector("[data-phonotactics-summary]");
           if (summary) summary.textContent = validitySummary(words, checker);
         }

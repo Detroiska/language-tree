@@ -195,11 +195,11 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
           coverage.get(daughter.id).errors.add(reason);
           continue;
         }
-        const derived = deriveStages(
-          daughter.chain.context.tokenize(word.form),
-          daughter.chain.stages,
-          daughter.chain.context
-        );
+        const parsed = daughter.chain.context.tokenizeWithStress(word.form);
+        const derived = deriveStages(parsed.tokens, daughter.chain.stages, daughter.chain.context, {
+          gloss: word.gloss,
+          junctures: parsed.junctures,
+        });
         if (derived.errors.length) {
           coverage.get(daughter.id).errors.add(derived.errors[0]);
           continue;

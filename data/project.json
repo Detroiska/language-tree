@@ -2,7 +2,7 @@
   "version": 1,
   "title": "Untitled language family",
   "createdAt": "2026-11-02T06:15:57Z",
-  "updatedAt": "2026-11-05T18:12:43Z",
+  "updatedAt": "2026-11-06T09:49:29Z",
   "languages": [
     {
       "id": "lang_4a601696-4ce1-4096-b253-1900abaaa860",
@@ -366,7 +366,13 @@
           "id": "allo_a0833d18-c410-477b-a251-9e7d9d26b2cb",
           "notation": "∅ -> [ʔ] / V_V",
           "note": "",
-          "enabled": true
+          "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "iterative": false,
+          "repeatLimit": 12,
+          "domain": "adjacent",
+          "exceptions": []
         },
         {
           "id": "allogroup_cfe1aba6-e2e1-40d5-972a-475c6f64aaa0",
@@ -379,19 +385,37 @@
               "id": "allo_341f965b-f500-4df3-9e1a-f7548ee156d5",
               "notation": "/p/ -> [b] / V_V",
               "note": "",
-              "enabled": true
+              "enabled": true,
+              "optional": false,
+              "rate": 50,
+              "iterative": false,
+              "repeatLimit": 12,
+              "domain": "adjacent",
+              "exceptions": []
             },
             {
               "id": "allo_10d2b363-67f3-492c-a467-ff213e03b7c2",
               "notation": "/t/ -> [d] / V_V",
               "note": "",
-              "enabled": true
+              "enabled": true,
+              "optional": false,
+              "rate": 50,
+              "iterative": false,
+              "repeatLimit": 12,
+              "domain": "adjacent",
+              "exceptions": []
             },
             {
               "id": "allo_0fd0bc97-1a17-4fde-a88a-e6248cccc63f",
               "notation": "/k/ -> [g] / V_V",
               "note": "",
-              "enabled": true
+              "enabled": true,
+              "optional": false,
+              "rate": 50,
+              "iterative": false,
+              "repeatLimit": 12,
+              "domain": "adjacent",
+              "exceptions": []
             }
           ]
         },
@@ -399,31 +423,61 @@
           "id": "allo_0cb92379-5090-4594-b51c-9e7f697fc2bc",
           "notation": "/eː/ -> [eɪ̯] / _#",
           "note": "",
-          "enabled": true
+          "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "iterative": false,
+          "repeatLimit": 12,
+          "domain": "adjacent",
+          "exceptions": []
         },
         {
           "id": "allo_2a191e64-e56f-4efd-af74-9237a23196f4",
           "notation": "/oː/ -> [oʊ̯] / _#",
           "note": "",
-          "enabled": true
+          "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "iterative": false,
+          "repeatLimit": 12,
+          "domain": "adjacent",
+          "exceptions": []
         },
         {
           "id": "allo_d193d5cc-e43a-46ea-9ad0-01f588955c17",
           "notation": "/e/ -> [ɛ] / aspirated, h _",
           "note": "",
-          "enabled": true
+          "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "iterative": false,
+          "repeatLimit": 12,
+          "domain": "adjacent",
+          "exceptions": []
         },
         {
           "id": "allo_cf7d5bb6-2746-45eb-88eb-6706d525f11d",
           "notation": "/o/ -> [ɔ] / aspirated, h _",
           "note": "",
-          "enabled": true
+          "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "iterative": false,
+          "repeatLimit": 12,
+          "domain": "adjacent",
+          "exceptions": []
         },
         {
           "id": "allo_c6ef7410-7e26-4b8e-b879-9d97509bcb14",
           "notation": "/a/ -> [ɑ] / aspirated, h _",
           "note": "",
-          "enabled": true
+          "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "iterative": false,
+          "repeatLimit": 12,
+          "domain": "adjacent",
+          "exceptions": []
         }
       ],
       "featureOverrides": {}
@@ -715,6 +769,9 @@
           "notation": "ŋ > n / _ [^u, o, uː, oː]",
           "note": "",
           "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "exceptions": [],
           "parentId": null
         },
         {
@@ -722,6 +779,9 @@
           "notation": "ŋ > m / _ [u, o, uː, oː]",
           "note": "",
           "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "exceptions": [],
           "parentId": null
         },
         {
@@ -729,6 +789,9 @@
           "notation": "ŋ͡g > n͜d / _ [^u, o, uː, oː]",
           "note": "",
           "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "exceptions": [],
           "parentId": null
         },
         {
@@ -736,6 +799,9 @@
           "notation": "ŋ͡g > m͜b / _ [u, o, uː, oː]",
           "note": "",
           "enabled": true,
+          "optional": false,
+          "rate": 50,
+          "exceptions": [],
           "parentId": null
         }
       ],
