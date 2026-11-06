@@ -269,18 +269,53 @@ try {
 
   /* ---- concurrent reads and writes (#8) ---------------------------------- */
 
-  const operations = [];
-  for (let index = 0; index < 80; index += 1) {
-    operations.push(call(server, "/api/project"));
-    operations.push(
-      call(server, "/api/project", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(project),
-      })
-    );
+  // A larger document keeps the read handle open long enough to overlap a
+  // save on Windows; a tiny project makes the race too narrow to observe.
+  const stressProject = {
+    ...project,
+    title: "Concurrent stress project",
+    languages: [
+      {
+        ...project.languages[0],
+        vocabulary: Array.from({ length: 20000 }, (_, index) => ({
+          id: `word_${index}`,
+          gloss: `gloss ${index}`,
+          form: "kasa",
+          note: "",
+        })),
+      },
+    ],
+  };
+  const stressBody = JSON.stringify(stressProject);
+  equal(
+    "large project seed saves",
+    (await call(server, "/api/project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: stressBody,
+    })).status,
+    200
+  );
+
+  const concurrent = [];
+  // Keep each batch small: the stdlib server's accept queue is short, and
+  // firing every request at once can reset connections before the lock is
+  // ever exercised. Repeating small mixed batches still overlaps reads and
+  // writes many times.
+  for (let round = 0; round < 10; round += 1) {
+    const batch = [];
+    for (let index = 0; index < 4; index += 1) {
+      batch.push(call(server, "/api/project"));
+      batch.push(
+        call(server, "/api/project", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: stressBody,
+        })
+      );
+    }
+    concurrent.push(...(await Promise.all(batch)));
   }
-  const concurrent = await Promise.all(operations);
   equal(
     "concurrent GET/PUT has no server errors",
     concurrent.filter((response) => response.status >= 500).map((response) => [response.status, response.json?.error]),
