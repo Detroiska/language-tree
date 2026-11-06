@@ -26,7 +26,7 @@ python3 server.py
 
 The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the browser launch, or `--port 9000` to choose another port.
 
-The repository ships with a blank demo, `data/example_project.json`, so a fresh clone starts with an empty family. Every `.json` file directly under `data/` is a project: use the project switcher under the app title to list them and open one, and the server remembers that choice in the gitignored `data/.active-project`. Other project files, such as `data/personal_project.json`, are gitignored too, so personal families stay local; only `example_project.json` is tracked. Add a project by dropping its `.json` file into `data/` and picking it in the switcher.
+The repository ships with a demo family, `data/example_project.json`: a documented Classical Nahuatl root whose 221-word lexicon comes from the Wiktionary Classical Nahuatl lemmas, plus 22 speculative descendants in two branches (a Proto-Balto-Slavic-style branch and a Proto-Arabic-style branch) over three derived generations, ending in Lithuanian, Polish, Palestinian, Mahri and more. Every `.json` file directly under `data/` is a project: use the project switcher under the app title to list them and open one, and the server remembers that choice in the gitignored `data/.active-project`. Other project files, such as `data/personal_project.json`, are gitignored too, so personal families stay local; only `example_project.json` is tracked. Add a project by dropping its `.json` file into `data/` and picking it in the switcher.
 
 ## What is here
 
@@ -50,7 +50,7 @@ The repository ships with a blank demo, `data/example_project.json`, so a fresh 
 - **Chart-class autocomplete** — typing in a sound-change or allophony rule field suggests the class references the lineage's charts actually support (`plosive.plain`, `V.back`), with member counts; ↑/↓/Enter or a click inserts the exact spelling at the caret, so a mistyped class cannot sneak in.
 - **Bulk vocabulary import / export** — paste a TSV, CSV, space-aligned, or JSON word list into any language with a live preview and dedupe control; export the same list back to TSV (spreadsheets) or JSON (tools).
 - **Family report & JSON backup** — download the whole family as a plain-text Markdown report or a self-contained HTML page (tree, inventories, phonotactics, sound changes, allophony, vocabulary, cognate sets), or snapshot the exact project document as JSON.
-- **Selectable JSON projects** — any `.json` file under `data/`, pretty-printed for readable diffs. The sidebar switcher lists them and remembers the active file; the tracked `example_project.json` is a blank demo, while personal projects stay gitignored.
+- **Selectable JSON projects** — any `.json` file under `data/`, pretty-printed for readable diffs. The sidebar switcher lists them and remembers the active file; the tracked `example_project.json` is the demo family, while personal projects stay gitignored.
 
 ## Using the app
 
@@ -394,7 +394,7 @@ language-tree/
 ├─ eslint.config.mjs       # ESLint configuration
 ├─ pyproject.toml          # Ruff configuration
 ├─ data/
-│  ├─ example_project.json # tracked blank demo project
+│  ├─ example_project.json # tracked demo project (Classical Nahuatl family)
 │  ├─ personal_project.json # ignored local project (not in a fresh clone)
 │  └─ .active-project      # ignored pointer to the last opened project
 ├─ tests/
