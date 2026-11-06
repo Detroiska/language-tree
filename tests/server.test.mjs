@@ -267,6 +267,66 @@ try {
   equal("matching revision saves", accepted.status, 200);
   truthy("save response carries the new revision", typeof accepted.json?.savedAt === "string" && accepted.json.savedAt.length > 0);
 
+  /* ---- concurrent reads and writes (#8) ---------------------------------- */
+
+  // A larger document keeps the read handle open long enough to overlap a
+  // save on Windows; a tiny project makes the race too narrow to observe.
+  const stressProject = {
+    ...project,
+    title: "Concurrent stress project",
+    languages: [
+      {
+        ...project.languages[0],
+        vocabulary: Array.from({ length: 20000 }, (_, index) => ({
+          id: `word_${index}`,
+          gloss: `gloss ${index}`,
+          form: "kasa",
+          note: "",
+        })),
+      },
+    ],
+  };
+  const stressBody = JSON.stringify(stressProject);
+  equal(
+    "large project seed saves",
+    (await call(server, "/api/project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: stressBody,
+    })).status,
+    200
+  );
+
+  const concurrent = [];
+  // Keep each batch small: the stdlib server's accept queue is short, and
+  // firing every request at once can reset connections before the lock is
+  // ever exercised. Repeating small mixed batches still overlaps reads and
+  // writes many times.
+  for (let round = 0; round < 10; round += 1) {
+    const batch = [];
+    for (let index = 0; index < 4; index += 1) {
+      batch.push(call(server, "/api/project"));
+      batch.push(
+        call(server, "/api/project", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: stressBody,
+        })
+      );
+    }
+    concurrent.push(...(await Promise.all(batch)));
+  }
+  equal(
+    "concurrent GET/PUT has no server errors",
+    concurrent.filter((response) => response.status >= 500).map((response) => [response.status, response.json?.error]),
+    []
+  );
+  equal(
+    "concurrent reads and writes all succeed",
+    concurrent.filter((response) => response.status !== 200).length,
+    0
+  );
+
   /* ---- methods and unknown routes (#15) ---------------------------------- */
 
   for (const method of ["POST", "DELETE", "OPTIONS", "PATCH"]) {

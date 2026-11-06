@@ -157,11 +157,18 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/project":
             try:
-                self.send_json(read_project())
+                # Windows cannot replace project.json while another thread has
+                # it open, so reads share the writer's lock instead of racing
+                # os.replace() and turning a valid save into a 500.
+                with SAVE_LOCK:
+                    project = read_project()
             except FileNotFoundError:
                 self.send_json({"error": "Project file not found."}, HTTPStatus.NOT_FOUND)
+                return
             except (OSError, json.JSONDecodeError) as exc:
                 self.send_json({"error": f"Could not read project: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            self.send_json(project)
             return
         if path.startswith("/api/"):
             self.send_json({"error": "Unknown API endpoint."}, HTTPStatus.NOT_FOUND)
