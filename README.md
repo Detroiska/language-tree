@@ -388,8 +388,10 @@ language-tree/
       ├─ store.js          # load, autosave, save status
       ├─ api.js
       ├─ model.js          # data model, defaults, tree/chart helpers
+      ├─ routes.js         # hash decoding and language links
       ├─ notation.js       # /…/ and […] display helpers; strips level marks
       ├─ naturalclasses.js # chart-derived natural classes (plosive.plain, V.back)
+      ├─ categories.js     # custom sound categories (N, G, OBS, …)
       ├─ features.js       # IPA feature table, overrides, bundles, α-notation
       ├─ phonology.js      # sound-change parser, allophony engine, derivation
       ├─ reconstruction.js # reverse rule application, inherited alternatives, ambiguity
@@ -403,9 +405,17 @@ language-tree/
       ├─ analytics.js      # lexicon/inventory analytics computations
       ├─ search.js         # Ctrl+K quick search palette
       ├─ autocomplete.js   # chart-class autocomplete for rule fields
+      ├─ keyboard.js       # phoneme keyboard palette for IPA fields
+      ├─ languageActions.js # add/rename language actions shared by tree and tabs
+      ├─ derivation.js     # shared derivation-step renderer
+      ├─ ruleEditor.js     # shared sound-change and allophony editor pieces
+      ├─ soundlaws.js      # attested sound-change library
+      ├─ escape.js         # HTML escaping for DOM-free builders
+      ├─ gloss.js          # gloss normalization shared by lexicon and reports
       ├─ bulk.js           # vocabulary import/export parsing and writers
       ├─ xsampa.js         # X-SAMPA <-> IPA conversion for stored forms
-      ├─ report.js         # Markdown/HTML family report + JSON backup
+      ├─ report.js         # Markdown/HTML family report builders
+      ├─ reportUi.js       # browser-only report downloads and menu
       ├─ ui.js             # icons, modals, menus, toasts
       └─ views/
          ├─ tree.js
