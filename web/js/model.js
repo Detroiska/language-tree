@@ -295,6 +295,16 @@ export function normalizeRuleRate(value) {
   return Math.min(100, Math.max(0, Math.round(parsed)));
 }
 
+// A sound-change rule may carry a relative stage: an editor-chosen integer used
+// only to order changes in the Timeline report. Like the rate it never feeds
+// derivation, so anything that is not an exact integer — or is absent — counts
+// as undated rather than failing normalization.
+export function normalizeRuleDate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
 function ensureAllophony(value) {
   if (!Array.isArray(value)) return [];
   const items = [];
@@ -570,6 +580,7 @@ export function ensureProject(raw) {
             enabled: rule.enabled !== false,
             optional: rule.optional === true,
             rate: normalizeRuleRate(rule.rate),
+            date: normalizeRuleDate(rule.date),
             exceptions: normalizeRuleExceptions(rule.exceptions),
             parentId:
               typeof rule.parentId === "number"

@@ -3,6 +3,7 @@ import {
   ancestorsOf,
   getLineage,
   languageStats,
+  normalizeRuleDate,
   normalizeRuleExceptions,
   normalizeRuleRate,
   ruleGroups,
@@ -171,6 +172,10 @@ function ruleCardMarkup(
             <span class="rule-option-label">Rate</span>
             <input class="rule-limit-input rule-rate-input" type="number" data-rule-rate min="0" max="100" step="5" value="${rate}" ${rule.optional ? "" : "disabled"}>
             <span>%</span>
+          </label>
+          <label class="rule-option" title="Relative stage shown in the Timeline view; derivation never reads it">
+            <span class="rule-option-label">Stage</span>
+            <input class="rule-limit-input rule-stage-input" type="number" data-rule-stage step="1" value="${rule.date ?? ""}" title="Relative stage (documentation only)" aria-label="Relative stage (documentation only)">
           </label>
         </div>
         ${exceptionsMarkup(rule)}
@@ -969,6 +974,7 @@ export function renderChanges(container, ctx) {
       enabled: true,
       optional: false,
       rate: DEFAULT_RULE_RATE,
+      date: null,
       exceptions: [],
       parentId: parent.id,
     };
@@ -991,6 +997,8 @@ export function renderChanges(container, ctx) {
         enabled: true,
         optional: false,
         rate: DEFAULT_RULE_RATE,
+        // Documentation-only stage for the Timeline view; null = undated.
+        date: null,
         exceptions: [],
         parentId: null,
       };
@@ -1039,6 +1047,7 @@ export function renderChanges(container, ctx) {
     const toggle = card.querySelector("[data-rule-toggle]");
     const optionalInput = card.querySelector("[data-rule-optional]");
     const rateInput = card.querySelector("[data-rule-rate]");
+    const stageInput = card.querySelector("[data-rule-stage]");
 
     notation.addEventListener("input", () => {
       rule.notation = notation.value;
@@ -1073,6 +1082,13 @@ export function renderChanges(container, ctx) {
       ctx.touch({ label: "Change optional rule rate" });
       runTest();
       refreshCheckSoon();
+    });
+    // Stage is documentation only: compilation, the tester, and card layout do
+    // not depend on it, so unlike rate there is no runTest/refresh here.
+    stageInput?.addEventListener("change", () => {
+      rule.date = normalizeRuleDate(stageInput.value);
+      stageInput.value = rule.date === null ? "" : String(rule.date);
+      ctx.touch({ label: "Change rule stage" });
     });
     toggle.addEventListener("change", () => {
       rule.enabled = toggle.checked;

@@ -21,6 +21,7 @@ import { decodeHashPart } from "./routes.js";
 import { renderCognates } from "./views/cognates.js";
 import { renderLanguage } from "./views/language.js";
 import { renderSubgrouping } from "./views/subgrouping.js";
+import { renderTimeline } from "./views/timeline.js";
 import { renderTree } from "./views/tree.js";
 
 const appShell = document.getElementById("app-shell");
@@ -31,6 +32,7 @@ const sidebarAddRoot = document.getElementById("sidebar-add-root");
 const sidebarTreeLink = document.getElementById("sidebar-tree-link");
 const sidebarCognatesLink = document.getElementById("sidebar-cognates-link");
 const sidebarSubgroupingLink = document.getElementById("sidebar-subgrouping-link");
+const sidebarTimelineLink = document.getElementById("sidebar-timeline-link");
 const projectName = document.getElementById("project-name");
 const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
@@ -62,6 +64,7 @@ function parseRoute() {
     };
   }
   if (parts[0] === "subgrouping") return { view: "subgrouping" };
+  if (parts[0] === "timeline") return { view: "timeline" };
   return { view: "tree" };
 }
 
@@ -74,6 +77,7 @@ function routeHash(route) {
     return "#/cognates";
   }
   if (route.view === "subgrouping") return "#/subgrouping";
+  if (route.view === "timeline") return "#/timeline";
   return "#/tree";
 }
 
@@ -114,7 +118,9 @@ function renderSidebar(route) {
       ? `Cognate explorer · ${store.project.title}`
       : route?.view === "subgrouping"
         ? `Subgrouping evidence · ${store.project.title}`
-        : `${store.project.title} · Language Tree`;
+        : route?.view === "timeline"
+          ? `Sound-change timeline · ${store.project.title}`
+          : `${store.project.title} · Language Tree`;
 
   if (!store.project.languages.length) {
     sidebarTree.innerHTML = `<p class="sidebar-empty">No languages yet.</p>`;
@@ -140,6 +146,10 @@ function renderSidebar(route) {
   if (sidebarSubgroupingLink) {
     sidebarSubgroupingLink.classList.toggle("is-active", route?.view === "subgrouping");
     sidebarSubgroupingLink.setAttribute("aria-current", route?.view === "subgrouping" ? "page" : "false");
+  }
+  if (sidebarTimelineLink) {
+    sidebarTimelineLink.classList.toggle("is-active", route?.view === "timeline");
+    sidebarTimelineLink.setAttribute("aria-current", route?.view === "timeline" ? "page" : "false");
   }
 }
 
@@ -329,6 +339,8 @@ function render(options = {}) {
       renderCognates(viewRoot, ctx);
     } else if (route.view === "subgrouping") {
       renderSubgrouping(viewRoot, ctx);
+    } else if (route.view === "timeline") {
+      renderTimeline(viewRoot, ctx);
     } else {
       renderLanguage(viewRoot, ctx, route.tab);
     }

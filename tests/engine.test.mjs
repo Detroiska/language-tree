@@ -17,6 +17,7 @@ import {
   deleteLanguage,
   ensureProject,
   groupAllophonyRules,
+  normalizeRuleDate,
   normalizeRuleExceptions,
   normalizeRuleRate,
   restoreAllophonyGroup,
@@ -80,6 +81,7 @@ import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/natural
 import { applyWordList, rowStatus } from "../web/js/bulk.js";
 import { newLibraryRules, soundChangeLibrary } from "../web/js/soundlaws.js";
 import { ipaToXSampa, xSampaToIPA } from "../web/js/xsampa.js";
+import { timelineStages } from "../web/js/timeline.js";
 
 let passed = 0;
 const failures = [];
@@ -4193,6 +4195,87 @@ equal("glued ejective affricates keep tie, release, and length", ipaToXSampa(glu
 equal("the glued ejective affricate round-trips", xSampaToIPA(ipaToXSampa(gluedEjective)), gluedEjective);
 equal("unknown characters pass through unchanged", [ipaToXSampa("a;b"), xSampaToIPA("$")], ["a;b", "$"]);
 equal("empty and null input stay empty", [ipaToXSampa(""), xSampaToIPA(""), ipaToXSampa(null), xSampaToIPA(null)], ["", "", "", ""]);
+
+/* ---- dated sound-change stages ---------------------------------------------- */
+
+// Stage numbers are documentation: the normalizer keeps exact integers (zero
+// and negatives included, since "stage 0" is a usable position) and quietly
+// drops everything else into the undated bucket instead of failing a save.
+equal(
+  "stage normalization keeps exact integers and undates everything else",
+  [
+    normalizeRuleDate(3),
+    normalizeRuleDate(-2),
+    normalizeRuleDate(0),
+    normalizeRuleDate("7"),
+    normalizeRuleDate(2.5),
+    normalizeRuleDate("nope"),
+    normalizeRuleDate(null),
+    normalizeRuleDate(undefined),
+    normalizeRuleDate(""),
+  ],
+  [3, -2, 0, 7, null, null, null, null, null]
+);
+
+// Migration mirrors the rate field's treatment: every stored rule gains the
+// field with a null default, saved integers survive, and sloppy values
+// collapse to undated rather than breaking a load.
+const stageProject = ensureProject({
+  title: "Stages",
+  languages: [
+    {
+      id: "old",
+      name: "Old",
+      parentId: null,
+      soundChanges: [
+        { id: "r1", notation: "p > f" },
+        { id: "r2", notation: "t > θ", date: 4 },
+        { id: "r3", notation: "k > x", date: "2" },
+        { id: "r4", notation: "s > r", date: 1.5 },
+      ],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+equal("stored rules gain a stage field on load", stageProject.languages[0].soundChanges.map((rule) => rule.date), [null, 4, 2, null]);
+
+// Grouping is family-wide: stages ascend, rules inside a stage keep stored
+// order, and the undated bucket takes both an absent field (library drafts
+// carry no date field at all) and an explicit null.
+const timelineFixture = {
+  languages: [
+    {
+      id: "north",
+      name: "North",
+      soundChanges: [
+        { id: "n1", notation: "p > f", date: 2, enabled: true },
+        { id: "n2", notation: "t > θ", date: 1 },
+        { id: "n3", notation: "k > x" },
+      ],
+    },
+    {
+      id: "south",
+      name: "South",
+      soundChanges: [
+        { id: "s1", notation: "d > ð", date: null },
+        { id: "s2", notation: "g > k", date: 1 },
+        { id: "s3", notation: "b > v", date: 2 },
+      ],
+    },
+  ],
+};
+const timelineReport = timelineStages(timelineFixture);
+equal("family stages ascend", timelineReport.stages.map((stage) => stage.date), [1, 2]);
+equal("stage one collects rules from every language in order", timelineReport.stages[0].rules.map((entry) => entry.rule.id), ["n2", "s2"]);
+equal("stage two keeps stored order too", timelineReport.stages[1].rules.map((entry) => entry.rule.id), ["n1", "s3"]);
+equal("undated rules keep stored order across languages", timelineReport.undated.map((entry) => entry.rule.id), ["n3", "s1"]);
+truthy("timeline entries carry their language for linking", timelineReport.stages[0].rules.every((entry) => entry.language.name === "North" || entry.language.name === "South"));
+equal(
+  "a family with no rules reports no stages and no undated rules",
+  [timelineStages({ languages: [] }).stages.length, timelineStages({ languages: [] }).undated.length, timelineStages({ languages: [{ id: "bare", name: "Bare" }, { id: "empty", name: "Empty", soundChanges: [] }] }).stages.length],
+  [0, 0, 0]
+);
 
 /* ---- summary ------------------------------------------------------------- */
 
