@@ -78,6 +78,7 @@ import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } 
 import { subgroupingEvidence } from "../web/js/subgrouping.js";
 import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
 import { applyWordList, rowStatus } from "../web/js/bulk.js";
+import { newLibraryRules, soundChangeLibrary } from "../web/js/soundlaws.js";
 
 let passed = 0;
 const failures = [];
@@ -4029,6 +4030,91 @@ equal(
   []
 );
 
+
+/* ---- attested sound-change library -------------------------------------- */
+
+// One flat chart holds every sound curated into the library so each rule
+// compiles without uncharted-character warnings: anything missing from the
+// chart would make a shipped rule look broken in the editor instead of
+// staying merely illustrative.
+const libraryInventory = {
+  consonants: makeChart(
+    ["Any"],
+    ["Any"],
+    [
+      [
+        "Any",
+        "Any",
+        ["p", "t", "k", "b", "d", "g", "bʰ", "dʰ", "gʰ", "p͡f", "t͡s", "k͡x", "t͡ʃ", "f", "v", "θ", "ð", "x", "ɣ", "s", "z", "ʃ", "ʒ", "r"],
+      ],
+    ]
+  ),
+  vowels: makeChart(["Any"], ["Any"], [["Any", "Any", ["a", "e", "i", "o", "u"]]]),
+};
+const libraryCtx = contextForInventory(libraryInventory);
+
+const libraryErrors = [];
+for (const group of soundChangeLibrary) {
+  for (const item of group.rules) {
+    const compiled = compileRule(item.notation, libraryCtx);
+    equal(`library rule ${item.notation} compiles cleanly`, [compiled.ok, compiled.warnings?.length ?? 0], [true, 0]);
+    if (!compiled.ok) libraryErrors.push(`${group.name} ${item.notation}: ${compiled.error}`);
+  }
+}
+equal("the library raises no compile errors", libraryErrors, []);
+
+const libraryIds = soundChangeLibrary.map((group) => group.id);
+equal("library group ids are unique", libraryIds.length, new Set(libraryIds).size);
+for (const group of soundChangeLibrary) {
+  truthy(
+    `${group.name} ships with a description and complete rules`,
+    typeof group.description === "string" &&
+      group.description.length > 0 &&
+      group.rules.every((rule) => rule.notation && rule.note)
+  );
+  const drafts = newLibraryRules(group);
+  equal(`${group.name} inserts one draft per rule`, drafts.length, group.rules.length);
+  const draftIds = drafts.map((draft) => draft.id);
+  truthy(`${group.name} draft ids are unique`, new Set(draftIds).size === draftIds.length);
+  // Imported groups must behave like anything the tab assembles by hand but
+  // stay inert: disabled drafts that never apply before they are reviewed.
+  truthy(
+    `${group.name} drafts import disabled with illustrative notes`,
+    drafts.every(
+      (draft, i) =>
+        draft.enabled === false &&
+        draft.optional === false &&
+        draft.rate === DEFAULT_RULE_RATE &&
+        draft.parentId === null &&
+        draft.notation === group.rules[i].notation &&
+        draft.note.includes(group.name) &&
+        draft.note.includes("(illustrative)")
+    )
+  );
+}
+
+// Spot checks use the curated notations exactly as shipped. A left-hand V
+// demands a preceding vowel, so word-initial stops stay put; likewise the
+// historical "gener" outcome needs a u > e change that lies outside the
+// rhotacism rule, which only turns post-vocalic s into r.
+const kLenition = compileRule("k > x / V _", libraryCtx).rule;
+const tLenition = compileRule("t > θ / V _", libraryCtx).rule;
+const palatalization = compileRule("k > t͡ʃ / _ [i e]", libraryCtx).rule;
+const affrication = compileRule("p > p͡f / # _", libraryCtx).rule;
+const rhotacism = compileRule("s > r / V _", libraryCtx).rule;
+const applyLibrary = (rule, form) => applyRule(libraryCtx.tokenize(form), rule, libraryCtx).tokens.join("");
+
+equal("insular celtic lenition leaves a word-initial stop alone", applyLibrary(kLenition, "kata"), "kata");
+equal(
+  "insular celtic lenition moves each stop a vowel precedes",
+  applyLibrary(tLenition, applyLibrary(kLenition, "akata")),
+  "axaθa"
+);
+equal("slavic palatalization fronts before a front vowel", applyLibrary(palatalization, "kine"), "t͡ʃine");
+equal("slavic palatalization ignores a back vowel", applyLibrary(palatalization, "kane"), "kane");
+equal("high german shift affricates a word-initial voiceless stop", applyLibrary(affrication, "pak"), "p͡fak");
+equal("high german shift leaves a medial stop unaffricated", applyLibrary(affrication, "apa"), "apa");
+equal("latin rhotacism turns a post-vocalic s into r", applyLibrary(rhotacism, "genus"), "genur");
 
 /* ---- summary ------------------------------------------------------------- */
 
