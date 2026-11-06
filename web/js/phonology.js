@@ -5,6 +5,7 @@ import {
   getLineage,
   normalizeAllophonyDomain,
   normalizeAllophonyRepeatLimit,
+  ruleExceptsGloss,
   ruleGroups,
   ruleNumberMap,
 } from "./model.js";
@@ -508,7 +509,7 @@ export function compileAllophonyRules(rules, context) {
   });
 }
 
-export function applyAllophony(tokens, compiledRules, context) {
+export function applyAllophony(tokens, compiledRules, context, options = {}) {
   let current = [...tokens];
   const steps = [];
   const errors = [];
@@ -516,6 +517,24 @@ export function applyAllophony(tokens, compiledRules, context) {
   for (const [index, compiled] of (compiledRules || []).entries()) {
     if (compiled.rule?.enabled === false || compiled.groupDisabled) continue;
     const label = compiled.number || String(index + 1);
+    if (ruleExceptsGloss(compiled.rule, options.gloss)) {
+      steps.push({
+        kind: "allophony",
+        label,
+        rule: compiled.rule,
+        compiled,
+        before: [...current],
+        after: [...current],
+        changed: false,
+        iterative: false,
+        passes: 0,
+        runaway: false,
+        warning: "",
+        excepted: true,
+        languageName: "",
+      });
+      continue;
+    }
     if (!compiled.ok) {
       if (!compiled.empty) errors.push(compiled.error);
       steps.push({
@@ -601,6 +620,22 @@ export function applyAllophony(tokens, compiledRules, context) {
   return { tokens: current, steps, errors, warnings, text: current.join("") };
 }
 
+// Summarize the rules a derivation skipped because of lexical exceptions.
+// Views use this to explain a predicted form without re-walking the steps.
+export function exceptionRulesFromSteps(steps) {
+  const rules = [];
+  for (const step of steps || []) {
+    if (step?.kind === "parallel") {
+      for (const entry of step.entries || []) {
+        if (entry.excepted) rules.push({ label: entry.label || "", notation: entry.notation || "" });
+      }
+      continue;
+    }
+    if (step?.excepted) rules.push({ label: step.label || "", notation: step.rule?.notation || "" });
+  }
+  return rules;
+}
+
 // Surface notation is useful when there is something to show: allophony
 // output, predicted stress, or both. Views use this to decide whether a
 // surface column appears at all.
@@ -614,12 +649,12 @@ export function hasSurfaceDisplay(language) {
 // Surface form of a phonemic form in the current language. The input is the
 // lexical/phonemic level; only this language's allophony (not its ancestors')
 // applies.
-export function surfaceForForm(form, project, languageId) {
+export function surfaceForForm(form, project, languageId, options = {}) {
   const context = contextForAllophony(project, languageId);
   const language = getLineage(project, languageId).at(-1);
   const compiled = compileAllophonyRules(language?.allophony || [], context);
   const input = context.tokenize(stripLevelMarks(form));
-  const result = applyAllophony(input, compiled, context);
+  const result = applyAllophony(input, compiled, context, { gloss: options.gloss });
   // Surface display adds the language's predicted stress and syllable dots.
   // Keeping it separate from `text` means every existing comparison and export
   // still sees the plain token string.
@@ -1676,14 +1711,17 @@ export function compileChainFrom(project, sourceId, targetId) {
 // combined in one pass, so the order of the list never changes which rules
 // apply. Two top-level rules that touch the same part of the form are a
 // conflict: the derivation stops with an error instead of guessing an order.
-function applyParallel(tokens, groups, context) {
+function applyParallel(tokens, groups, context, gloss = "") {
   const entries = [];
   for (const group of groups) {
-    const matches = findRuleMatches(tokens, group.compiled.rule, context);
-    const entry = { group, matches };
+    const excepted = ruleExceptsGloss(group.rule, gloss);
+    const matches = excepted ? [] : findRuleMatches(tokens, group.compiled.rule, context);
+    const entry = { group, matches, excepted };
     // A rule that matched nothing gets a diagnosis instead of a bare
     // "0 matches" — the tester shows this under its entry in the step list.
-    if (!matches.length) entry.debug = explainRuleMiss(tokens, group.compiled.rule, context) || "";
+    // An exception is a deliberate skip, not a failed match, so it needs no
+    // diagnosis.
+    if (!excepted && !matches.length) entry.debug = explainRuleMiss(tokens, group.compiled.rule, context) || "";
     entries.push(entry);
   }
   const changes = [];
@@ -1731,11 +1769,12 @@ function applyParallel(tokens, groups, context) {
   return { ok: true, tokens: output, changed: !sameTokens(tokens, output), entries };
 }
 
-export function deriveStages(inputTokens, stages, context) {
+export function deriveStages(inputTokens, stages, context, options = {}) {
   let current = [...inputTokens];
   const steps = [];
   const errors = [];
   let fatal = false;
+  const gloss = options.gloss || "";
 
   for (const stage of stages) {
     const languageName = stage.language?.name || "";
@@ -1766,7 +1805,7 @@ export function deriveStages(inputTokens, stages, context) {
     }
 
     const before = [...current];
-    const parallel = applyParallel(current, usable, stageContext);
+    const parallel = applyParallel(current, usable, stageContext, gloss);
     if (!parallel.ok) {
       steps.push({
         kind: "error",
@@ -1794,6 +1833,7 @@ export function deriveStages(inputTokens, stages, context) {
           label: entry.group.label,
           notation: entry.group.rule.notation,
           matches: entry.matches.length,
+          excepted: entry.excepted === true,
           debug: entry.debug || "",
         })),
         languageName,
@@ -1823,6 +1863,20 @@ export function deriveStages(inputTokens, stages, context) {
             languageName,
           });
           if (!child.compiled.empty) errors.push(child.compiled.error);
+          continue;
+        }
+        if (ruleExceptsGloss(child.rule, gloss)) {
+          steps.push({
+            kind: "sequential",
+            label: child.label,
+            rule: child.rule,
+            compiled: child.compiled,
+            before: [...current],
+            after: [...current],
+            changed: false,
+            excepted: true,
+            languageName,
+          });
           continue;
         }
         const result = applyRule(current, child.compiled.rule, stageContext);
@@ -1868,7 +1922,7 @@ export function deriveStages(inputTokens, stages, context) {
 }
 
 export function deriveForm(form, project, languageId, options = {}) {
-  const { directOnly = false } = options;
+  const { directOnly = false, gloss = "" } = options;
   const context = contextForLanguage(project, languageId);
   const lineage = getLineage(project, languageId);
   const languages = directOnly ? lineage.slice(-1) : lineage;
@@ -1881,7 +1935,7 @@ export function deriveForm(form, project, languageId, options = {}) {
     };
   });
   const tokens = context.tokenize(form);
-  const derived = deriveStages(tokens, stages, context);
+  const derived = deriveStages(tokens, stages, context, { gloss });
   return {
     input: tokens,
     output: derived.tokens,

@@ -257,6 +257,33 @@ export function normalizeAllophonyRepeatLimit(value) {
   return Math.min(100, Math.max(1, Math.round(parsed)));
 }
 
+// A lexical exception is a gloss the rule never applies to. The gloss is the
+// cross-language identity of a word, so an exception keeps working when the
+// form changes between generations. Stored entries keep the user's spelling;
+// matching ignores surrounding whitespace and case.
+export function normalizeRuleExceptions(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const exceptions = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const text = entry.trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    exceptions.push(text);
+  }
+  return exceptions;
+}
+
+export function ruleExceptsGloss(rule, gloss) {
+  const exceptions = rule?.exceptions;
+  if (!Array.isArray(exceptions) || !exceptions.length) return false;
+  const key = String(gloss ?? "").trim().toLowerCase();
+  if (!key) return false;
+  return exceptions.some((entry) => String(entry).trim().toLowerCase() === key);
+}
+
 function ensureAllophony(value) {
   if (!Array.isArray(value)) return [];
   const items = [];
@@ -277,6 +304,7 @@ function ensureAllophony(value) {
       iterative: rule.iterative === true,
       repeatLimit: normalizeAllophonyRepeatLimit(rule.repeatLimit),
       domain: normalizeAllophonyDomain(rule.domain),
+      exceptions: normalizeRuleExceptions(rule.exceptions),
     };
   };
   // Groups are one level deep. A malformed nested group is flattened into its
@@ -527,6 +555,7 @@ export function ensureProject(raw) {
             notation: typeof rule.notation === "string" ? rule.notation : "",
             note: typeof rule.note === "string" ? rule.note : "",
             enabled: rule.enabled !== false,
+            exceptions: normalizeRuleExceptions(rule.exceptions),
             parentId:
               typeof rule.parentId === "number"
                 ? String(rule.parentId)

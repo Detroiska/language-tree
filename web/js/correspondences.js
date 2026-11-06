@@ -198,7 +198,8 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
         const derived = deriveStages(
           daughter.chain.context.tokenize(word.form),
           daughter.chain.stages,
-          daughter.chain.context
+          daughter.chain.context,
+          { gloss: word.gloss }
         );
         if (derived.errors.length) {
           coverage.get(daughter.id).errors.add(derived.errors[0]);

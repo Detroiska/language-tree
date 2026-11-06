@@ -3212,6 +3212,76 @@ th:hover > .axis-menu,
   opacity: 0.45;
 }
 
+.rule-exceptions {
+  margin: 2px 8px 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.rule-exceptions summary {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+  cursor: pointer;
+  list-style: none;
+}
+
+.rule-exceptions summary::-webkit-details-marker {
+  display: none;
+}
+
+.rule-exceptions summary::before {
+  content: "\203A";
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.rule-exceptions[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.rule-exception-count {
+  padding: 0 5px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.rule-exception-body {
+  padding: 5px 0 2px;
+}
+
+.rule-exception-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 10.5px;
+}
+
+.rule-exception-input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(39, 103, 89, 0.07);
+}
+
+.rule-exception-hint {
+  margin: 3px 0 0;
+  color: var(--faint);
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
 .rule-status {
   display: inline-flex;
   max-width: 190px;
@@ -3651,6 +3721,16 @@ th:hover > .axis-menu,
   border-color: #eadfbe;
 }
 
+.derivation-step.is-excepted {
+  background: #f5f8fa;
+  border-color: #d7e0e6;
+}
+
+.step-rule-list li.is-excepted .step-rule-count {
+  color: #52697f;
+  font-weight: 600;
+}
+
 .step-badge {
   display: inline-flex;
   height: 16px;
@@ -3932,6 +4012,19 @@ th:hover > .axis-menu,
 .status-missing {
   color: var(--muted);
   background: var(--surface-tint);
+}
+
+.status-exception {
+  color: #52697f;
+  background: #e8eef3;
+}
+
+.status-cell {
+  white-space: nowrap;
+}
+
+.status-cell .status-chip + .status-chip {
+  margin-left: 4px;
 }
 
 .row-actions {

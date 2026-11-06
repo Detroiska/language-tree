@@ -16,10 +16,12 @@ import {
   deleteLanguage,
   ensureProject,
   groupAllophonyRules,
+  normalizeRuleExceptions,
   restoreAllophonyGroup,
   restoreAllophonyRule,
   restoreDeletedLanguages,
   restoreUngroupedAllophonyRules,
+  ruleExceptsGloss,
   ruleNumberMap,
 } from "../web/js/model.js";
 import {
@@ -34,6 +36,7 @@ import {
   compileChainFrom,
   deriveForm,
   deriveStages,
+  exceptionRulesFromSteps,
   explainRuleMiss,
   normalizeAllophonyNotation,
   surfaceForForm,
@@ -1865,6 +1868,289 @@ equal(
   [{ notation: "/p/ > [pʰ] / # _ V", note: "", enabled: true }]
 );
 truthy("migrated allophony rules receive an id", Boolean(migratedNotation.languages[0].allophony[0].id));
+
+/* ---- lexical exceptions ------------------------------------------------- */
+
+const exceptionProject = ensureProject({
+  title: "Lexical exceptions",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [
+        { id: "w1", gloss: "water", form: "pata" },
+        { id: "w2", gloss: "father", form: "pata" },
+      ],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "a > e", note: "", enabled: true, parentId: null, exceptions: ["water"] },
+        { id: "r2", notation: "p > f", note: "", enabled: true, parentId: null, exceptions: ["father"] },
+      ],
+      allophony: [
+        { id: "a1", notation: "e > i", note: "", enabled: true, exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+
+equal(
+  "a lexical exception skips only its rule",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: "water" }).text,
+  "fata"
+);
+equal(
+  "a second rule's exception is independent",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: "father" }).text,
+  "pete"
+);
+equal(
+  "words without an exception take every rule",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: "brother" }).text,
+  "fete"
+);
+equal(
+  "exception matching ignores case and surrounding whitespace",
+  deriveForm("pata", exceptionProject, "child", { directOnly: true, gloss: " Water " }).text,
+  "fata"
+);
+
+const exceptionDerivation = deriveForm("pata", exceptionProject, "child", {
+  directOnly: true,
+  gloss: "water",
+});
+const exceptionParallel = exceptionDerivation.steps.find((step) => step.kind === "parallel");
+const exceptionEntries = Object.fromEntries(exceptionParallel.entries.map((entry) => [entry.label, entry]));
+equal(
+  "an excepted top-level rule is marked in the derivation",
+  [Boolean(exceptionEntries["1"].excepted), Boolean(exceptionEntries["2"].excepted)],
+  [true, false]
+);
+equal("an excepted top-level rule reports no matches", exceptionEntries["1"].matches, 0);
+equal(
+  "exception steps summarize to the skipped rules",
+  exceptionRulesFromSteps(exceptionDerivation.steps).map((rule) => [rule.label, rule.notation]),
+  [["1", "a > e"]]
+);
+
+const sequentialExceptionProject = ensureProject({
+  title: "Sequential exception",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null },
+        { id: "c1", notation: "a > e", note: "", enabled: true, parentId: "r1", exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const sequentialException = deriveForm("pata", sequentialExceptionProject, "only", {
+  directOnly: true,
+  gloss: "water",
+});
+equal("a sequential exception leaves its parent's output alone", sequentialException.text, "fata");
+const sequentialExceptionStep = sequentialException.steps.find((step) => step.excepted);
+equal(
+  "a sequential exception is marked in the derivation",
+  [sequentialExceptionStep?.label, sequentialExceptionStep?.changed],
+  ["1.1", false]
+);
+
+const chainExceptionProject = ensureProject({
+  title: "Chain exception",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null, exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+    {
+      id: "grandchild",
+      name: "Grandchild",
+      parentId: "child",
+      ...language,
+      soundChanges: [{ id: "r2", notation: "a > e", note: "", enabled: true, parentId: null }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "an exception applies at its own stage of a lineage",
+  deriveForm("pata", chainExceptionProject, "grandchild", { gloss: "water" }).text,
+  "pete"
+);
+equal(
+  "other glosses pass through every stage",
+  deriveForm("pata", chainExceptionProject, "grandchild", { gloss: "father" }).text,
+  "fete"
+);
+
+const exceptionSurface = surfaceForForm("pete", exceptionProject, "child", { gloss: "water" });
+equal("an allophony exception skips the surface rule", exceptionSurface.text, "pete");
+equal(
+  "an excepted allophony rule is marked in the surface steps",
+  exceptionSurface.steps.map((step) => [step.label, Boolean(step.excepted), step.changed]),
+  [["1", true, false]]
+);
+equal(
+  "allophony exception steps summarize to the skipped rule",
+  exceptionRulesFromSteps(exceptionSurface.steps).map((rule) => rule.label),
+  ["1"]
+);
+equal(
+  "the same allophony rule still applies to other glosses",
+  surfaceForForm("pete", exceptionProject, "child", { gloss: "father" }).text,
+  "piti"
+);
+equal(
+  "without a gloss an allophony exception cannot match",
+  surfaceForForm("pete", exceptionProject, "child").text,
+  "piti"
+);
+
+const iterativeExceptionProject = ensureProject(
+  harmonyLanguage([
+    {
+      id: "h1",
+      notation: "a > u / u _",
+      note: "",
+      enabled: true,
+      iterative: true,
+      repeatLimit: 12,
+      domain: "adjacent",
+      exceptions: ["water"],
+    },
+  ])
+);
+const exceptedRepeat = surfaceForForm("uaa", iterativeExceptionProject, "only", { gloss: "water" });
+equal("an iterative allophony exception skips every pass", exceptedRepeat.text, "uaa");
+equal(
+  "a skipped iterative step records zero passes",
+  [exceptedRepeat.steps[0].passes, Boolean(exceptedRepeat.steps[0].excepted)],
+  [0, true]
+);
+
+const reconstructionExceptionProject = ensureProject({
+  title: "Reconstruct exception",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      vocabulary: [{ id: "w1", gloss: "water", form: "pata" }],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "p > f", note: "", enabled: true, parentId: null, exceptions: ["water"] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const exceptedReconstruction = reconstructForm("fata", reconstructionExceptionProject, "child", {
+  gloss: "water",
+});
+equal(
+  "reconstruction does not invert an excepted rule",
+  exceptedReconstruction.candidates.map((candidate) => candidate.text),
+  ["fata"]
+);
+truthy(
+  "without a gloss the same rule still reconstructs",
+  reconstructForm("fata", reconstructionExceptionProject, "child").candidates.some(
+    (candidate) => candidate.text === "pata"
+  )
+);
+
+const migratedExceptions = ensureProject({
+  title: "Exception migration",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [
+        { id: "r1", notation: "a > e", note: "", enabled: true, exceptions: [" Water ", "water", "", 7] },
+      ],
+      allophony: [
+        { id: "a1", notation: "a > ə", note: "", enabled: true, exceptions: [" father ", "Father", null] },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "sound-change exceptions are trimmed and deduplicated on load",
+  migratedExceptions.languages[0].soundChanges[0].exceptions,
+  ["Water"]
+);
+equal(
+  "allophony exceptions are trimmed and deduplicated on load",
+  migratedExceptions.languages[0].allophony[0].exceptions,
+  ["father"]
+);
+const legacyExceptions = ensureProject({
+  title: "Exception defaults",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [{ id: "r1", notation: "a > e", note: "", enabled: true }],
+      allophony: [{ id: "a1", notation: "a > ə", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "rules without stored exceptions default to an empty list",
+  [
+    legacyExceptions.languages[0].soundChanges[0].exceptions,
+    legacyExceptions.languages[0].allophony[0].exceptions,
+  ],
+  [[], []]
+);
+equal(
+  "normalization keeps the first spelling of a duplicated gloss",
+  normalizeRuleExceptions(["Water", " water ", "WATER"]),
+  ["Water"]
+);
+equal(
+  "an exception matches a gloss case-insensitively",
+  [
+    ruleExceptsGloss({ exceptions: ["Water"] }, " water "),
+    ruleExceptsGloss({ exceptions: ["water"] }, ""),
+    ruleExceptsGloss({}, "water"),
+    ruleExceptsGloss({ exceptions: "water" }, "water"),
+  ],
+  [true, false, false, false]
+);
 
 /* ---- custom categories in rules ----------------------------------------- */
 

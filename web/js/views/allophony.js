@@ -8,6 +8,7 @@ import {
   isAllophonyGroup,
   normalizeAllophonyDomain,
   normalizeAllophonyRepeatLimit,
+  normalizeRuleExceptions,
   restoreAllophonyGroup,
   restoreAllophonyRule,
   restoreUngroupedAllophonyRules,
@@ -39,6 +40,33 @@ function statusMarkup(status) {
   const glyph =
     status.kind === "ok" ? "check" : status.kind === "error" || status.kind === "warn" ? "warning" : "info";
   return `${icon(glyph)}<span>${esc(status.label)}</span>`;
+}
+
+function exceptionSummary(exceptions) {
+  const count = exceptions?.length || 0;
+  return count ? `${count} ${count === 1 ? "word" : "words"}` : "none";
+}
+
+function exceptionsMarkup(rule) {
+  const exceptions = normalizeRuleExceptions(rule.exceptions);
+  return `
+    <details class="rule-exceptions" ${exceptions.length ? "open" : ""}>
+      <summary>
+        <span>Exceptions</span>
+        <span class="rule-exception-count" data-allo-rule-exception-count>${esc(exceptionSummary(exceptions))}</span>
+      </summary>
+      <div class="rule-exception-body">
+        <input class="rule-exception-input" type="text" value="${esc(exceptions.join(", "))}" placeholder="Glosses, comma-separated — e.g. water, tooth" autocomplete="off" spellcheck="false" aria-label="Lexical exception glosses" list="allo-exception-glosses">
+        <p class="rule-exception-hint">This rule is skipped for words with these glosses. Suggestions come from this lineage’s vocabulary.</p>
+      </div>
+    </details>`;
+}
+
+function exceptionSuggestionsMarkup(suggestions) {
+  if (!suggestions.length) return "";
+  return `<datalist id="allo-exception-glosses">${suggestions
+    .map((gloss) => `<option value="${esc(gloss)}"></option>`)
+    .join("")}</datalist>`;
 }
 
 function ruleCardMarkup(rule, number, context, { canMoveUp, canMoveDown, groupDisabled = false }) {
@@ -79,6 +107,7 @@ function ruleCardMarkup(rule, number, context, { canMoveUp, canMoveDown, groupDi
             <input class="rule-limit-input" type="number" data-allo-rule-limit min="1" max="100" step="1" value="${repeatLimit}" aria-label="Maximum allophony passes" ${iterative ? "" : "disabled"}>
           </label>
         </div>
+        ${exceptionsMarkup(rule)}
       </div>
       <div class="rule-controls">
         <label class="rule-select" title="Select rule">
@@ -138,7 +167,7 @@ function groupCardMarkup(group, number, context, { canMoveUp, canMoveDown }) {
     </section>`;
 }
 
-function rulesMarkup(language, context) {
+function rulesMarkup(language, context, exceptionSuggestions = []) {
   if (!language.allophony.length) {
     return `
       <div class="rules-empty">
@@ -149,6 +178,7 @@ function rulesMarkup(language, context) {
       </div>`;
   }
   return `
+    ${exceptionSuggestionsMarkup(exceptionSuggestions)}
     <div class="rules-list">
       ${language.allophony
         .map((item, index) =>
@@ -217,7 +247,7 @@ function testPanelMarkup(language) {
             ? `<div class="word-suggestions">${suggestions
                 .map(
                   (word) =>
-                    `<button class="word-suggestion" type="button" data-allo-test-word="${esc(word.form)}" title="${esc(word.gloss)}">${esc(formatPhonemic(word.form))}<span>${esc(word.gloss)}</span></button>`
+                    `<button class="word-suggestion" type="button" data-allo-test-word="${esc(word.form)}" data-allo-test-gloss="${esc(word.gloss)}" title="Test with the gloss “${esc(word.gloss)}”">${esc(formatPhonemic(word.form))}<span>${esc(word.gloss)}</span></button>`
                 )
                 .join("")}</div>`
             : ""
@@ -283,7 +313,7 @@ function notationHelpMarkup() {
 }
 
 function allophonyStepsMarkup(steps) {
-  const visible = (steps || []).filter((step) => step.changed || step.error);
+  const visible = (steps || []).filter((step) => step.changed || step.error || step.excepted);
   if (!visible.length) {
     return `<p class="derivation-empty">No allophony rule changes this form — the surface stays identical.</p>`;
   }
@@ -300,15 +330,17 @@ function allophonyStepsMarkup(steps) {
           </div>`;
       }
       return `
-        <div class="derivation-step is-changed ${step.warning ? "has-warning" : ""}">
+        <div class="derivation-step ${step.changed ? "is-changed" : ""} ${step.excepted ? "is-excepted" : ""} ${step.warning ? "has-warning" : ""}">
           <span class="step-index">${esc(step.label)}</span>
           <div class="step-body">
             <div class="step-rule">
               <code>${esc(step.rule?.notation || "")}</code>
               ${
-                step.iterative && step.passes
-                  ? `<span class="step-badge">${esc(`${step.passes} ${step.passes === 1 ? "pass" : "passes"}`)}</span>`
-                  : ""
+                step.excepted
+                  ? `<span class="step-badge">lexical exception</span>`
+                  : step.iterative && step.passes
+                    ? `<span class="step-badge">${esc(`${step.passes} ${step.passes === 1 ? "pass" : "passes"}`)}</span>`
+                    : ""
               }
             </div>
             <div class="step-form">
@@ -332,6 +364,13 @@ export function renderAllophony(container, ctx) {
   const context = contextForAllophony(ctx.project, language.id);
   const table = allophoneTable(ctx.project, language.id);
   const parent = ancestorsOf(ctx.project, language.id).at(-1);
+  const exceptionSuggestions = [
+    ...new Set(
+      [...ancestorsOf(ctx.project, language.id), language].flatMap((item) =>
+        item.vocabulary.map((word) => word.gloss.trim()).filter(Boolean)
+      )
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 
   container.innerHTML = `
     <div class="workspace-stack">
@@ -367,7 +406,7 @@ export function renderAllophony(container, ctx) {
               <button class="button button-primary button-small" type="button" data-allo-group-selected disabled>Group selected</button>
               <button class="button button-quiet button-small" type="button" data-allo-select-cancel>Cancel</button>
             </div>
-            ${rulesMarkup(language, context)}
+            ${rulesMarkup(language, context, exceptionSuggestions)}
           </section>
 
           <section class="panel" data-allo-table-panel>
@@ -391,10 +430,13 @@ export function renderAllophony(container, ctx) {
   const testPanel = container.querySelector("[data-allo-test-panel]");
   const testInput = testPanel?.querySelector("[data-allo-test-input]");
   const tablePanel = container.querySelector("[data-allo-table-panel]");
+  let testGloss = language.vocabulary.find((word) => word.form.trim())?.gloss || "";
 
   const runTest = () => {
     if (!testPanel || !testInput) return;
-    const result = surfaceForForm(stripLevelMarks(testInput.value), ctx.project, language.id);
+    const result = surfaceForForm(stripLevelMarks(testInput.value), ctx.project, language.id, {
+      gloss: testGloss,
+    });
     const phonemic = testPanel.querySelector("[data-allo-phonemic]");
     const surface = testPanel.querySelector("[data-allo-surface]");
     const parsed = testPanel.querySelector("[data-allo-parsed]");
@@ -511,6 +553,7 @@ export function renderAllophony(container, ctx) {
         iterative: false,
         repeatLimit: ALLOPHONY_REPEAT_LIMIT,
         domain: "adjacent",
+        exceptions: [],
       };
       language.allophony.push(rule);
       ctx.touch({ label: "Add allophony rule" });
@@ -552,6 +595,7 @@ export function renderAllophony(container, ctx) {
           iterative: false,
           repeatLimit: ALLOPHONY_REPEAT_LIMIT,
           domain: "adjacent",
+          exceptions: [],
         };
         group.rules.push(rule);
         group.collapsed = false;
@@ -674,6 +718,15 @@ export function renderAllophony(container, ctx) {
       rule.note = note.value;
       ctx.touch({ label: "Edit allophony note" });
     });
+    const exceptionsInput = card.querySelector(".rule-exception-input");
+    const exceptionCount = card.querySelector("[data-allo-rule-exception-count]");
+    exceptionsInput?.addEventListener("input", () => {
+      rule.exceptions = normalizeRuleExceptions(exceptionsInput.value.split(","));
+      if (exceptionCount) exceptionCount.textContent = exceptionSummary(rule.exceptions);
+      ctx.touch({ label: "Edit allophony rule exceptions" });
+      runTest();
+      refreshTable();
+    });
     iterativeInput?.addEventListener("change", () => {
       rule.iterative = iterativeInput.checked;
       if (limitInput) limitInput.disabled = !iterativeInput.checked;
@@ -740,7 +793,10 @@ export function renderAllophony(container, ctx) {
   });
 
   if (testInput) {
-    testInput.addEventListener("input", runTest);
+    testInput.addEventListener("input", () => {
+      testGloss = "";
+      runTest();
+    });
     testInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -750,6 +806,7 @@ export function renderAllophony(container, ctx) {
     testPanel.querySelectorAll("[data-allo-test-word]").forEach((button) => {
       button.addEventListener("click", () => {
         testInput.value = button.dataset.alloTestWord;
+        testGloss = button.dataset.alloTestGloss || "";
         runTest();
         testInput.focus();
       });

@@ -2,6 +2,7 @@ import {
   ancestorsOf,
   getLineage,
   languageStats,
+  normalizeRuleExceptions,
   ruleGroups,
   uid,
 } from "../model.js";
@@ -11,6 +12,7 @@ import {
   contextForLanguage,
   deriveForm,
   deriveStages,
+  exceptionRulesFromSteps,
   hasSurfaceDisplay,
   surfaceForForm,
 } from "../phonology.js";
@@ -34,12 +36,14 @@ function compileDirect(ctx) {
   return { context, groups: compileRuleStages(ctx.language.soundChanges, context) };
 }
 
-function directDerivation(ctx, form) {
+function directDerivation(ctx, form, gloss = "") {
   const { context, groups } = compileDirect(ctx);
   const tokens = context.tokenize(form);
-  const result = deriveStages(tokens, [{ language: ctx.language, groups }], context);
+  const result = deriveStages(tokens, [{ language: ctx.language, groups }], context, { gloss });
   const phonemic = result.tokens.join("");
-  const surface = result.errors.length ? null : surfaceForForm(phonemic, ctx.project, ctx.language.id);
+  const surface = result.errors.length
+    ? null
+    : surfaceForForm(phonemic, ctx.project, ctx.language.id, { gloss });
   return {
     inputTokens: tokens,
     outputTokens: result.tokens,
@@ -74,6 +78,33 @@ function statusMarkup(status) {
   const glyph =
     status.kind === "ok" ? "check" : status.kind === "error" || status.kind === "warn" ? "warning" : "info";
   return `${icon(glyph)}<span>${esc(status.label)}</span>`;
+}
+
+function exceptionSummary(exceptions) {
+  const count = exceptions?.length || 0;
+  return count ? `${count} ${count === 1 ? "word" : "words"}` : "none";
+}
+
+function exceptionsMarkup(rule) {
+  const exceptions = normalizeRuleExceptions(rule.exceptions);
+  return `
+    <details class="rule-exceptions" ${exceptions.length ? "open" : ""}>
+      <summary>
+        <span>Exceptions</span>
+        <span class="rule-exception-count" data-rule-exception-count>${esc(exceptionSummary(exceptions))}</span>
+      </summary>
+      <div class="rule-exception-body">
+        <input class="rule-exception-input" type="text" value="${esc(exceptions.join(", "))}" placeholder="Glosses, comma-separated — e.g. water, tooth" autocomplete="off" spellcheck="false" aria-label="Lexical exception glosses" list="rule-exception-glosses">
+        <p class="rule-exception-hint">This rule is skipped for words with these glosses. Suggestions come from this lineage’s vocabulary.</p>
+      </div>
+    </details>`;
+}
+
+function exceptionSuggestionsMarkup(suggestions) {
+  if (!suggestions.length) return "";
+  return `<datalist id="rule-exception-glosses">${suggestions
+    .map((gloss) => `<option value="${esc(gloss)}"></option>`)
+    .join("")}</datalist>`;
 }
 
 function updateRuleStatus(card, context, rule, parentDisabled = false) {
@@ -111,6 +142,7 @@ function ruleCardMarkup(
           <span class="rule-status status-${status.kind}" data-rule-status title="${esc(status.label)}">${statusMarkup(status)}</span>
         </div>
         <input class="rule-note-input" type="text" value="${esc(rule.note)}" placeholder="Optional description, e.g. Verner’s law" autocomplete="off" aria-label="Rule note">
+        ${exceptionsMarkup(rule)}
       </div>
       <div class="rule-controls">
         <label class="switch" title="${rule.enabled === false ? "Enable rule" : "Disable rule"}">
@@ -125,7 +157,7 @@ function ruleCardMarkup(
     </article>`;
 }
 
-function rulesMarkup(language, context) {
+function rulesMarkup(language, context, exceptionSuggestions = []) {
   const groups = ruleGroups(language.soundChanges);
   if (!groups.length) {
     return `
@@ -137,6 +169,7 @@ function rulesMarkup(language, context) {
       </div>`;
   }
   return `
+    ${exceptionSuggestionsMarkup(exceptionSuggestions)}
     <div class="rules-list">
       ${groups
         .map((group, index) => {
@@ -175,7 +208,9 @@ function testPanelMarkup(ctx) {
   const parent = lineage.length > 1 ? lineage[lineage.length - 2] : null;
   const suggestions = parent?.vocabulary.filter((word) => word.form.trim()).slice(0, 4) || [];
   const remembered = testerMemory.get(ctx.language.id);
-  const initialValue = remembered ?? (parent?.vocabulary.find((word) => word.form.trim())?.form || "");
+  const initialValue =
+    (typeof remembered === "string" ? remembered : remembered?.form) ??
+    (parent?.vocabulary.find((word) => word.form.trim())?.form || "");
   return `
     <section class="panel test-panel" data-test-panel>
       <header class="panel-head">
@@ -191,7 +226,7 @@ function testPanelMarkup(ctx) {
             <div class="test-input-wrap">
               <label class="field-label" for="test-word">Input form <span class="field-optional">${esc(parent.name)}</span></label>
               <input class="input ipa-input" id="test-word" data-test-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
-              ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-test-word="${esc(word.form)}" title="${esc(word.gloss)}">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
+              ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-test-word="${esc(word.form)}" data-test-gloss="${esc(word.gloss)}" title="Test with the gloss “${esc(word.gloss)}”">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
             </div>
             <div class="derivation" data-derivation>
               <div class="derivation-output-row">
@@ -316,6 +351,13 @@ function renderReconstruction(panel, result) {
   if (result.truncated) {
     bits.push("The search stopped early, so some alternatives may be missing.");
   }
+  if (result.exceptions?.length) {
+    bits.push(
+      `Not inverted for “${result.gloss}”: ${result.exceptions.length === 1 ? "rule" : "rules"} ${result.exceptions.join(", ")} ${
+        result.exceptions.length === 1 ? "is a lexical exception" : "are lexical exceptions"
+      }.`
+    );
+  }
   const warnings = (result.warnings || []).slice(0, 2);
   notes.innerHTML = [
     ...bits.map((bit) => `<p class="reconstruct-note">${icon("info")}<span>${esc(bit)}</span></p>`),
@@ -406,7 +448,10 @@ function checkRows(ctx, context = null) {
     if (word.gloss.trim()) byGloss.set(word.gloss.trim().toLowerCase(), word);
   }
   const rows = parentWords.map((word, index) => {
-    const derived = deriveForm(word.form, ctx.project, ctx.language.id, { directOnly: true });
+    const derived = deriveForm(word.form, ctx.project, ctx.language.id, {
+      directOnly: true,
+      gloss: word.gloss,
+    });
     const recorded = byGloss.get(word.gloss.trim().toLowerCase()) || null;
     const status = derived.error
       ? "error"
@@ -415,7 +460,9 @@ function checkRows(ctx, context = null) {
         : sameForm(recorded.form, derived.text)
           ? "match"
           : "differs";
-    const surface = derived.error ? null : surfaceForForm(derived.text, ctx.project, ctx.language.id);
+    const surface = derived.error
+      ? null
+      : surfaceForForm(derived.text, ctx.project, ctx.language.id, { gloss: word.gloss });
     return {
       word,
       derived: derived.error ? "" : derived.text,
@@ -423,18 +470,20 @@ function checkRows(ctx, context = null) {
       recorded,
       status,
       error: derived.error,
+      exceptions: exceptionRulesFromSteps(derived.steps),
       index,
     };
   });
   const matches = rows.filter((row) => row.status === "match").length;
   const recordedCount = rows.filter((row) => row.status !== "missing").length;
   const errorCount = rows.filter((row) => row.status === "error").length;
+  const exceptionCount = rows.filter((row) => row.exceptions.length).length;
   const summary =
     recordedCount === 0
       ? `${rows.length} ancestral ${rows.length === 1 ? "word" : "words"} · none recorded yet`
       : `${matches} of ${recordedCount} recorded ${recordedCount === 1 ? "form matches" : "forms match"}${
           errorCount ? ` · ${errorCount} rule ${errorCount === 1 ? "error" : "errors"}` : ""
-        }`;
+        }${exceptionCount ? ` · ${exceptionCount} with lexical ${exceptionCount === 1 ? "exception" : "exceptions"}` : ""}`;
 
   const html = `
     <div class="check-table-wrap">
@@ -456,11 +505,16 @@ function checkRows(ctx, context = null) {
                   <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(row.derived)) || "—"}</code></td>
                   ${hasSurfaceDisplay(ctx.language) ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
                   <td>${diff ? `<code class="ipa">${diff.right}</code>` : row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
-                  <td>
+                  <td class="status-cell">
                     <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
                       ${row.status === "match" ? icon("check") : row.status === "differs" || row.status === "error" ? icon("warning") : icon("info")}
                       ${row.status === "match" ? "Matches" : row.status === "differs" ? "Differs" : row.status === "error" ? "Rule error" : "Missing"}
                     </span>
+                    ${
+                      row.exceptions.length
+                        ? `<span class="status-chip status-exception" title="${esc(exceptionChipTitle(row.exceptions))}">${icon("info")}${row.exceptions.length === 1 ? "Exception" : `${row.exceptions.length} exceptions`}</span>`
+                        : ""
+                    }
                   </td>
                   <td class="row-actions">
                     <button class="button button-quiet button-tiny" type="button" data-record-word="${row.index}" ${row.status === "match" || row.status === "error" ? "disabled" : ""}>
@@ -475,6 +529,12 @@ function checkRows(ctx, context = null) {
     </div>
     <p class="check-foot">Comparison is by gloss, using only this language’s direct changes. Not every word needs to be inherited; use “Use derived” when a reflex is correct. Top-level rules that change the same part of a word stop the derivation and appear as a rule error.</p>`;
   return { summary, html, rows, parent, byGloss };
+}
+
+function exceptionChipTitle(exceptions) {
+  return `Skipped by lexical exception: ${exceptions
+    .map((exception) => `${exception.label}${exception.notation ? ` (${exception.notation})` : ""}`)
+    .join("; ")}`;
 }
 
 function conflictFixMarkup(ctx, conflict) {
@@ -542,6 +602,13 @@ export function renderChanges(container, ctx) {
   const context = contextForLanguage(ctx.project, language.id);
   const parent = ancestorsOf(ctx.project, language.id).at(-1);
   const stats = languageStats(language);
+  const exceptionSuggestions = [
+    ...new Set(
+      getLineage(ctx.project, language.id).flatMap((item) =>
+        item.vocabulary.map((word) => word.gloss.trim()).filter(Boolean)
+      )
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 
   container.innerHTML = `
     <div class="workspace-stack">
@@ -568,7 +635,7 @@ export function renderChanges(container, ctx) {
               </div>
               <button class="button button-primary button-small" type="button" data-add-rule>${icon("plus")}Add rule</button>
             </header>
-            ${rulesMarkup(language, context)}
+            ${rulesMarkup(language, context, exceptionSuggestions)}
           </section>
           ${inheritedPanelMarkup(ctx)}
         </div>
@@ -586,11 +653,19 @@ export function renderChanges(container, ctx) {
   const checkPanel = container.querySelector("[data-inherited-panel]");
   const checkBody = checkPanel?.querySelector("[data-check-body]");
   const checkSummary = checkPanel?.querySelector("[data-check-summary]");
+  const rememberedTest = testerMemory.get(language.id);
+  const defaultTestWord = parent?.vocabulary.find((word) => word.form.trim());
+  let testGloss =
+    typeof rememberedTest === "object"
+      ? rememberedTest.gloss || ""
+      : rememberedTest
+        ? ""
+        : defaultTestWord?.gloss || "";
 
   const runTest = () => {
     if (!testPanel || !testInput) return;
-    const result = directDerivation(ctx, testInput.value);
-    testerMemory.set(language.id, testInput.value);
+    const result = directDerivation(ctx, testInput.value, testGloss);
+    testerMemory.set(language.id, { form: testInput.value, gloss: testGloss });
     const output = testPanel.querySelector("[data-test-output]");
     const surface = testPanel.querySelector("[data-test-surface]");
     const surfaceRow = testPanel.querySelector("[data-test-surface-row]");
@@ -653,7 +728,10 @@ export function renderChanges(container, ctx) {
   if (testInput) {
     // The derivation updates live on every keystroke (and Enter re-runs it),
     // so no explicit Apply control is needed.
-    testInput.addEventListener("input", runTest);
+    testInput.addEventListener("input", () => {
+      testGloss = "";
+      runTest();
+    });
     testInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -663,6 +741,7 @@ export function renderChanges(container, ctx) {
     testPanel.querySelectorAll("[data-test-word]").forEach((button) => {
       button.addEventListener("click", () => {
         testInput.value = button.dataset.testWord;
+        testGloss = button.dataset.testGloss || "";
         runTest();
         testInput.focus();
       });
@@ -746,7 +825,14 @@ export function renderChanges(container, ctx) {
   const addChildRule = (parent) => {
     const group = ruleGroups(language.soundChanges).find((item) => item.rule.id === parent.id);
     if (!group) return;
-    const child = { id: uid("rule"), notation: "", note: "", enabled: true, parentId: parent.id };
+    const child = {
+      id: uid("rule"),
+      notation: "",
+      note: "",
+      enabled: true,
+      exceptions: [],
+      parentId: parent.id,
+    };
     const anchor = group.children.at(-1) || parent;
     const index = language.soundChanges.indexOf(anchor);
     language.soundChanges.splice(index + 1, 0, child);
@@ -759,7 +845,14 @@ export function renderChanges(container, ctx) {
 
   container.querySelectorAll("[data-add-rule]").forEach((button) => {
     button.addEventListener("click", () => {
-      const rule = { id: uid("rule"), notation: "", note: "", enabled: true, parentId: null };
+      const rule = {
+        id: uid("rule"),
+        notation: "",
+        note: "",
+        enabled: true,
+        exceptions: [],
+        parentId: null,
+      };
       language.soundChanges.push(rule);
       ctx.touch({ label: "Add rule" });
       ctx.refresh();
@@ -788,6 +881,15 @@ export function renderChanges(container, ctx) {
     note.addEventListener("input", () => {
       rule.note = note.value;
       ctx.touch({ label: "Edit rule" });
+    });
+    const exceptionsInput = card.querySelector(".rule-exception-input");
+    const exceptionCount = card.querySelector("[data-rule-exception-count]");
+    exceptionsInput?.addEventListener("input", () => {
+      rule.exceptions = normalizeRuleExceptions(exceptionsInput.value.split(","));
+      if (exceptionCount) exceptionCount.textContent = exceptionSummary(rule.exceptions);
+      ctx.touch({ label: "Edit rule exceptions" });
+      runTest();
+      refreshCheckSoon();
     });
     toggle.addEventListener("change", () => {
       rule.enabled = toggle.checked;
@@ -872,7 +974,10 @@ export function renderChanges(container, ctx) {
       const words = parentLanguage.vocabulary.filter((word) => word.form.trim() && word.gloss.trim());
       const word = words[Number(recordButton.dataset.recordWord)];
       if (!word) return;
-      const derivation = deriveForm(word.form, ctx.project, language.id, { directOnly: true });
+      const derivation = deriveForm(word.form, ctx.project, language.id, {
+        directOnly: true,
+        gloss: word.gloss,
+      });
       if (derivation.error) {
         toast(`Cannot record “${word.gloss}”: ${derivation.error}`, { type: "error" });
         return;

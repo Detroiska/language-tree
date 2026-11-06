@@ -1,5 +1,12 @@
 import { findLanguage, getLineage, uid } from "../model.js";
-import { compileChainFrom, deriveStages, hasSurfaceDisplay, ruleCompileErrors, surfaceForForm } from "../phonology.js";
+import {
+  compileChainFrom,
+  deriveStages,
+  exceptionRulesFromSteps,
+  hasSurfaceDisplay,
+  ruleCompileErrors,
+  surfaceForForm,
+} from "../phonology.js";
 import { formatPhonemic, formatPhonetic, stripStressMarks } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
@@ -83,23 +90,29 @@ function deriveFor(row, sourceWord, project) {
   if (!row.descended || row.isSource || !row.chain.ok) {
     const recorded = recordedFor(row.language, sourceWord.gloss);
     const sourceForm = row.isSource ? sourceWord.form : recorded?.form || "";
-    const surface = sourceForm ? surfaceForForm(sourceForm, project, row.language.id) : null;
+    const surface = sourceForm
+      ? surfaceForForm(sourceForm, project, row.language.id, { gloss: sourceWord.gloss })
+      : null;
     return {
       derived: row.isSource ? sourceWord.form : "",
       surface: surface?.errors.length ? "" : surface?.display || "",
       steps: [],
+      exceptions: [],
       error: "",
       recorded,
     };
   }
   const tokens = row.chain.context.tokenize(sourceWord.form);
-  const result = deriveStages(tokens, row.chain.stages, row.chain.context);
+  const result = deriveStages(tokens, row.chain.stages, row.chain.context, { gloss: sourceWord.gloss });
   const derived = result.tokens.join("");
-  const surface = result.errors.length ? null : surfaceForForm(derived, project, row.language.id);
+  const surface = result.errors.length
+    ? null
+    : surfaceForForm(derived, project, row.language.id, { gloss: sourceWord.gloss });
   return {
     derived,
     surface: surface?.errors.length ? "" : surface?.display || "",
     steps: result.steps,
+    exceptions: exceptionRulesFromSteps(result.steps),
     error: row.errors[0] || result.errors[0] || "",
     recorded: recordedFor(row.language, sourceWord.gloss),
   };
@@ -109,6 +122,11 @@ function statusFor(sourceWord, row, cell) {
   if (!row.descended) return { kind: "outside", label: "—", icon: "info" };
   if (row.isSource) return { kind: "source", label: "Source", icon: "check" };
   if (cell.error) return { kind: "error", label: "Rule error", icon: "warning", detail: cell.error };
+  const exceptionSuffix = cell.exceptions?.length
+    ? ` · ${cell.exceptions.length} ${cell.exceptions.length === 1 ? "rule" : "rules"} skipped as lexical ${
+        cell.exceptions.length === 1 ? "exception" : "exceptions"
+      }`
+    : "";
   if (!cell.recorded || !cell.recorded.form.trim()) {
     return {
       kind: "missing",
@@ -122,14 +140,14 @@ function statusFor(sourceWord, row, cell) {
       kind: "match",
       label: "Matches",
       icon: "check",
-      detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"}.`,
+      detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"}${exceptionSuffix}.`,
     };
   }
   return {
     kind: "differs",
     label: "Differs",
     icon: "warning",
-    detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"} · recorded ${formatPhonemic(cell.recorded.form) || "∅"}.`,
+    detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"} · recorded ${formatPhonemic(cell.recorded.form) || "∅"}${exceptionSuffix}.`,
   };
 }
 
@@ -188,11 +206,13 @@ function introSummary(words, targetRows, cellsForMatrix) {
   let differs = 0;
   let missing = 0;
   let errors = 0;
+  let excepted = 0;
   if (cellsForMatrix) {
     for (const cell of cellsForMatrix) {
       if (cell.status.kind === "differs") differs += 1;
       else if (cell.status.kind === "error") errors += 1;
       else if (cell.status.kind === "missing") missing += 1;
+      if (cell.cell?.exceptions?.length) excepted += 1;
     }
   }
   return `
@@ -202,6 +222,7 @@ function introSummary(words, targetRows, cellsForMatrix) {
       ${differs ? `<span><strong>${differs}</strong> differ</span>` : ""}
       ${errors ? `<span><strong>${errors}</strong> rule ${errors === 1 ? "error" : "errors"}</span>` : ""}
       ${missing ? `<span><strong>${missing}</strong> unrecorded</span>` : ""}
+      ${excepted ? `<span><strong>${excepted}</strong> with lexical ${excepted === 1 ? "exception" : "exceptions"}</span>` : ""}
     </div>`;
 }
 

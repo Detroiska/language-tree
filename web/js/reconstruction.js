@@ -18,7 +18,7 @@
 // Candidates are ordered by fewest rule applications. Everything here is
 // DOM-free so it can be tested under Node.
 
-import { getLineage } from "./model.js";
+import { getLineage, ruleExceptsGloss } from "./model.js";
 import { stripLevelMarks, stripStressMarks } from "./notation.js";
 import {
   applyRule,
@@ -350,6 +350,11 @@ function invertRuleAll(tokens, compiled, context, options = {}) {
   if (!rule || !Array.isArray(rule.target)) {
     return { candidates: [identityCandidate(tokens)], truncated: false, loss: 0 };
   }
+  // The rule did not apply to this lexical item in the forward direction, so
+  // its only exact predecessor is the unchanged form.
+  if (ruleExceptsGloss(rule, options.gloss)) {
+    return { candidates: [identityCandidate(tokens)], truncated: false, loss: 0 };
+  }
   const settings = optionsWithDefaults(options);
   const { combos, truncated: targetsTruncated } = targetCombinations(
     rule,
@@ -449,14 +454,14 @@ function expandCandidates(candidates, rule, context, options) {
 // Apply only the top-level (parallel) rules of one stage. This is the forward
 // check used after reversing that pass; sequential children are handled by
 // their own single-rule checks before this point.
-function applyParallelOnly(tokens, groups, context) {
+function applyParallelOnly(tokens, groups, context, gloss = "") {
   if (!groups.length) return { ok: true, tokens: [...tokens], errors: [] };
   const stage = {
     language: null,
     context,
     groups: groups.map((group) => ({ ...group, children: [] })),
   };
-  const result = deriveStages(tokens, [stage], context);
+  const result = deriveStages(tokens, [stage], context, { gloss });
   return {
     ok: !result.errors.length && !result.fatal,
     tokens: result.tokens,
@@ -469,13 +474,19 @@ function applyParallelOnly(tokens, groups, context) {
 // The reverse order is therefore: children backwards, then the parallel pass.
 export function invertRules(tokens, groups, context, options = {}) {
   const settings = optionsWithDefaults(options);
+  const gloss = settings.gloss || "";
   const usable = (groups || []).filter((group) => group.rule?.enabled !== false);
   const warnings = [];
+  const exceptions = [];
   for (const group of usable) {
-    if (!group.compiled?.ok && !group.compiled?.empty) warnings.push(group.compiled?.error || "A rule could not be compiled.");
+    if (ruleExceptsGloss(group.rule, gloss)) exceptions.push(group.label);
+    else if (!group.compiled?.ok && !group.compiled?.empty) {
+      warnings.push(group.compiled?.error || "A rule could not be compiled.");
+    }
     for (const child of group.children || []) {
       if (child.rule.enabled === false) continue;
-      if (!child.compiled?.ok && !child.compiled?.empty) {
+      if (ruleExceptsGloss(child.rule, gloss)) exceptions.push(child.label);
+      else if (!child.compiled?.ok && !child.compiled?.empty) {
         warnings.push(child.compiled?.error || "A rule could not be compiled.");
       }
     }
@@ -487,11 +498,12 @@ export function invertRules(tokens, groups, context, options = {}) {
   for (const group of [...usable].reverse()) {
     for (const child of [...(group.children || [])].reverse()) {
       if (child.rule.enabled === false || !child.compiled?.ok) continue;
+      if (ruleExceptsGloss(child.rule, gloss)) continue;
       const expanded = expandCandidates(candidates, child.compiled.rule, context, settings);
       candidates = expanded.candidates;
       truncated = truncated || expanded.truncated;
       if (!candidates.length) {
-        return { candidates: [], truncated, warnings, loss: 0 };
+        return { candidates: [], truncated, warnings, exceptions, loss: 0 };
       }
     }
   }
@@ -503,12 +515,12 @@ export function invertRules(tokens, groups, context, options = {}) {
   }
 
   for (const group of [...usable].reverse()) {
-    if (!group.compiled?.ok) continue;
+    if (!group.compiled?.ok || ruleExceptsGloss(group.rule, gloss)) continue;
     const expanded = expandCandidates(candidates, group.compiled.rule, context, settings);
     candidates = expanded.candidates;
     truncated = truncated || expanded.truncated;
     if (!candidates.length) {
-      return { candidates: [], truncated, warnings, loss: 0 };
+      return { candidates: [], truncated, warnings, exceptions, loss: 0 };
     }
   }
 
@@ -516,7 +528,7 @@ export function invertRules(tokens, groups, context, options = {}) {
   if (topGroups.length) {
     candidates = candidates.filter((candidate) => {
       if (!candidate.parallelTarget) return false;
-      const forward = applyParallelOnly(candidate.tokens, topGroups, context);
+      const forward = applyParallelOnly(candidate.tokens, topGroups, context, gloss);
       return forward.ok && sameTokens(forward.tokens, candidate.parallelTarget);
     });
   }
@@ -532,6 +544,7 @@ export function invertRules(tokens, groups, context, options = {}) {
     candidates: list,
     truncated,
     warnings: [...new Set(warnings)],
+    exceptions: [...new Set(exceptions)],
     loss: list.length ? Math.max(...list.map((candidate) => candidate.loss)) : 0,
   };
 }
@@ -561,6 +574,7 @@ export function reconstructForm(form, project, languageId, options = {}) {
     lossy: false,
     truncated: false,
     warnings: [],
+    exceptions: [],
   };
   if (!language) return empty;
   if (!parent) return { ...empty, reason: "root" };
@@ -585,7 +599,7 @@ export function reconstructForm(form, project, languageId, options = {}) {
   };
 
   const groups = compileRuleStages(language.soundChanges || [], context);
-  const inverted = invertRules(tokens, groups, context, { ...options, priority });
+  const inverted = invertRules(tokens, groups, context, { ...options, gloss, priority });
   const candidates = inverted.candidates.map((candidate) => {
     const text = candidate.tokens.join("");
     const match = evidenceFor(text);
@@ -612,6 +626,7 @@ export function reconstructForm(form, project, languageId, options = {}) {
     lossy: candidates.some((candidate) => candidate.loss > 0),
     truncated: inverted.truncated,
     warnings: inverted.warnings,
+    exceptions: inverted.exceptions || [],
   };
 }
 

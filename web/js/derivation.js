@@ -25,6 +25,7 @@ function parallelLabel(entries) {
 function parallelMarkup(step, showLanguage) {
   const entries = step.entries || [];
   const matched = entries.filter((entry) => entry.matches > 0).length;
+  const excepted = entries.filter((entry) => entry.excepted).length;
   return `
     <div class="derivation-step is-parallel ${step.changed ? "is-changed" : ""}">
       <span class="step-index step-index-wide">${esc(parallelLabel(entries))}</span>
@@ -33,6 +34,7 @@ function parallelMarkup(step, showLanguage) {
           <span class="step-phase">Ancestral form</span>
           ${languageTag(step, showLanguage)}
           <span class="step-skip">${matched} of ${entries.length} ${entries.length === 1 ? "rule" : "rules"} match</span>
+          ${excepted ? `<span class="step-badge">${excepted} lexical ${excepted === 1 ? "exception" : "exceptions"}</span>` : ""}
         </div>
         <div class="step-form">
           <code class="ipa">${esc(formText(step.before))}</code>
@@ -43,10 +45,10 @@ function parallelMarkup(step, showLanguage) {
           ${entries
             .map(
               (entry) => `
-                <li class="${entry.matches > 0 ? "is-match" : ""}">
+                <li class="${entry.matches > 0 ? "is-match" : ""}${entry.excepted ? " is-excepted" : ""}">
                   <span class="step-rule-label">${esc(entry.label || "")}</span>
                   <code>${esc(entry.notation || "Empty rule")}</code>
-                  <span class="step-rule-count">${countLabel(entry.matches)}</span>
+                  <span class="step-rule-count">${entry.excepted ? "exception" : countLabel(entry.matches)}</span>
                   ${entry.debug ? `<span class="step-rule-why" title="${esc(entry.debug)}">${esc(entry.debug)}</span>` : ""}
                 </li>`
             )
@@ -65,7 +67,13 @@ function sequentialMarkup(step, index, showLanguage) {
         <div class="step-rule">
           <code>${esc(notation)}</code>
           ${languageTag(step, showLanguage)}
-          ${step.changed ? "" : `<span class="step-skip">unchanged</span>`}
+          ${
+            step.excepted
+              ? `<span class="step-badge">lexical exception</span>`
+              : step.changed
+                ? ""
+                : `<span class="step-skip">unchanged</span>`
+          }
         </div>
         ${step.debug ? `<div class="step-why">${esc(step.debug)}</div>` : ""}
         <div class="step-form">

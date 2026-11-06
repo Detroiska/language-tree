@@ -145,8 +145,8 @@ function featureOverrideRows(language) {
     .map(([sound, bundle]) => [sound, describeBundle(bundle, { full: true }).join(" ")]);
 }
 
-function surfaceOf(project, language, form) {
-  const result = surfaceForForm(form, project, language.id);
+function surfaceOf(project, language, form, gloss = "") {
+  const result = surfaceForForm(form, project, language.id, { gloss });
   return result.errors.length ? "" : result.display;
 }
 
@@ -165,7 +165,7 @@ function vocabularyTable(project, language) {
     headers: hasSurface ? ["Gloss", "Form", "Surface", "Note"] : ["Gloss", "Form", "Note"],
     rows: language.vocabulary.map((word) => {
       const row = [word.gloss, formatPhonemic(word.form)];
-      if (hasSurface) row.push(formatPhonetic(surfaceOf(project, language, word.form)));
+      if (hasSurface) row.push(formatPhonetic(surfaceOf(project, language, word.form, word.gloss)));
       row.push(word.note);
       return row;
     }),
