@@ -10,6 +10,7 @@ import {
   esc,
   hydrateIcons,
   icon,
+  openMenu,
   promptDialog,
   toast,
 } from "./ui.js";
@@ -34,6 +35,8 @@ const sidebarCognatesLink = document.getElementById("sidebar-cognates-link");
 const sidebarSubgroupingLink = document.getElementById("sidebar-subgrouping-link");
 const sidebarTimelineLink = document.getElementById("sidebar-timeline-link");
 const projectName = document.getElementById("project-name");
+const projectSwitch = document.getElementById("project-switch");
+const projectFileLabel = document.getElementById("project-file");
 const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
 const undoButton = document.getElementById("undo-button");
@@ -103,8 +106,69 @@ function sidebarNavMarkup(project, parentId, depth, activeId) {
     </ul>`;
 }
 
+function updateProjectSwitcher() {
+  const file = store.projectFile;
+  projectFileLabel.textContent = file || "No project";
+  projectSwitch.title = file ? `Project file: data/${file} — click to switch` : "Click to choose a project file";
+}
+
+async function switchToProject(file) {
+  if (!file) return;
+  try {
+    if (!(await store.switchProject(file))) return;
+  } catch (error) {
+    toast(error.message || String(error), { type: "error", duration: 6000 });
+    updateProjectSwitcher();
+    return;
+  }
+  updateProjectSwitcher();
+  booted = true;
+  appShell.classList.add("is-ready");
+  window.history.replaceState(null, "", "#/tree");
+  render();
+  toast(`Opened ${file}.`, { type: "success", duration: 2600 });
+}
+
+async function openProjectMenu() {
+  try {
+    await store.loadProjectList();
+  } catch {
+    // Keep the last listing visible; the server may simply be restarting.
+  }
+  const active = store.projectFile;
+  const items = store.projects.map((entry) => {
+    const count = Number.isInteger(entry.languages)
+      ? `${entry.languages} ${entry.languages === 1 ? "language" : "languages"}`
+      : "";
+    if (entry.error) {
+      return {
+        label: `${entry.file} — invalid project`,
+        icon: "warning",
+        disabled: true,
+      };
+    }
+    return {
+      label: `${entry.file}${entry.title ? ` — ${entry.title}` : ""}`,
+      icon: entry.file === active ? "check" : "book",
+      shortcut: entry.file === active ? "open" : count,
+      disabled: entry.file === active,
+      onClick: () => void switchToProject(entry.file),
+    };
+  });
+  if (!items.length) {
+    items.push({ label: "No .json project files in data/", disabled: true });
+  } else {
+    items.push(
+      { separator: true },
+      { label: "Add a .json file to data/ to create another project.", disabled: true }
+    );
+  }
+  openMenu(projectSwitch, items);
+}
+
 function renderSidebar(route) {
   if (!store.project) return;
+  updateProjectSwitcher();
   const stats = projectStats(store.project);
   const activeId = route?.view === "language" ? route.id : null;
   const roots = store.project.languages.filter((language) => !language.parentId || !findLanguage(store.project, language.parentId));
@@ -359,7 +423,7 @@ function bootError(error) {
         <button class="button button-primary" type="button" id="retry-load">${icon("refresh")}Try again</button>
         <button class="button button-quiet" type="button" id="reload-page">${icon("external")}Reload page</button>
       </div>
-      <p class="boot-hint">The local server is normally started with <code>start.bat</code> or <code>python server.py</code>. Data is stored in <code>data/project.json</code>.</p>
+      <p class="boot-hint">The local server is normally started with <code>start.bat</code> or <code>python server.py</code>. Project files live in <code>data/</code>; use the project switcher in the sidebar to open another one.</p>
     </div>`;
   // "Try again" re-runs the load in place — a server that was just started
   // does not need a full page reload — while "Reload page" resets everything.
@@ -382,18 +446,23 @@ function setSaveState(state, error) {
   else if (state === "conflict") label.textContent = "Save conflict";
   else if (state === "loading") label.textContent = "Loading…";
   else label.textContent = store.lastSavedAt ? `Saved · ${new Date(store.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved";
+  const file = store.projectFile ? `data/${store.projectFile}` : "the project file";
   saveState.title =
     state === "conflict"
       ? `${error || "The project was changed by another tab or window"} — click to resolve`
       : state === "error"
         ? `${error || "Could not save"} — click to retry`
         : state === "saved"
-          ? "All changes are written to data/project.json"
+          ? `All changes are written to ${file}`
           : "Changes are written automatically";
 }
 
 async function boot() {
   try {
+    // Load the listing first: if the active document is broken, the switcher
+    // must still be usable so the user can open a different project.
+    await store.loadProjectList();
+    updateProjectSwitcher();
     await store.load();
     booted = true;
     appShell.classList.add("is-ready");
@@ -401,6 +470,7 @@ async function boot() {
     render();
   } catch (error) {
     console.error(error);
+    updateProjectSwitcher();
     bootError(error);
   }
 }
@@ -416,6 +486,7 @@ async function init() {
     render({ preserveScroll: true });
     toast("Reloaded the newer project — another tab or window saved changes.", { type: "info", duration: 3200 });
   });
+  projectSwitch.addEventListener("click", () => void openProjectMenu());
   projectName.addEventListener("click", async () => {
     if (!store.project) return;
     const title = await promptDialog({

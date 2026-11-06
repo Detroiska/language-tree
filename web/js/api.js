@@ -1,6 +1,10 @@
 const jsonHeaders = { "Content-Type": "application/json" };
 const CAN_GZIP = typeof CompressionStream === "function";
 
+function projectQuery(file) {
+  return file ? `?file=${encodeURIComponent(file)}` : "";
+}
+
 async function gzipBody(text) {
   const stream = new Blob([text])
     .stream()
@@ -26,14 +30,27 @@ async function request(url, options = {}) {
 }
 
 export const api = {
-  loadProject() {
-    return request("/api/project");
+  // Every project lives in data/; the listing says which file is active and
+  // includes enough metadata for the switcher without opening each document.
+  listProjects() {
+    return request("/api/projects");
+  },
+  selectProject(file) {
+    return request("/api/projects/active", {
+      method: "PUT",
+      headers: jsonHeaders,
+      body: JSON.stringify({ file }),
+    });
+  },
+  loadProject(file = null) {
+    return request(`/api/project${projectQuery(file)}`);
   },
   // baseRevision is the updatedAt stamp of the document this client last
   // saw. The server answers 409 when the file has been saved by someone else
   // (another tab) in the meantime, so a stale tab cannot silently overwrite
-  // newer work. Omit it to save unconditionally.
-  async saveProject(project, baseRevision = null) {
+  // newer work. Omit it to save unconditionally. file pins the write to the
+  // document this tab opened, so switching projects cannot redirect a save.
+  async saveProject(project, baseRevision = null, file = null) {
     const headers = { ...jsonHeaders };
     if (baseRevision) headers["X-Base-Revision"] = baseRevision;
     let body = JSON.stringify(project);
@@ -44,7 +61,7 @@ export const api = {
       body = await gzipBody(body);
       headers["Content-Encoding"] = "gzip";
     }
-    return request("/api/project", { method: "PUT", headers, body });
+    return request(`/api/project${projectQuery(file)}`, { method: "PUT", headers, body });
   },
   health() {
     return request("/api/health");

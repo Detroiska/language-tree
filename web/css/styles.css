@@ -223,6 +223,48 @@ code {
   text-underline-offset: 2px;
 }
 
+.project-switch {
+  display: flex;
+  max-width: 185px;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 2px 5px 2px 0;
+  overflow: hidden;
+  color: #84978d;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  font-size: 10px;
+  text-align: left;
+}
+
+.project-switch:hover {
+  color: #d8e5dd;
+  background: rgba(235, 245, 238, 0.06);
+}
+
+.project-switch .icon-sm {
+  display: inline-flex;
+}
+
+.project-switch .icon-sm .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.project-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switch-chevron {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
 .sidebar-section {
   display: flex;
   flex: 1;

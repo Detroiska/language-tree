@@ -640,10 +640,6 @@ export function ensureProject(raw) {
     }
   }
 
-  if (!project.languages.length) {
-    project.languages.push(createLanguage("Proto-Language"));
-  }
-
   normalizeSiblingOrder(project);
   return project;
 }
