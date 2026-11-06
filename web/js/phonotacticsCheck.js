@@ -31,6 +31,7 @@ export function stressMarkedForm(form, checker) {
   const stressed = result.syllables[result.stressIndex];
   const output = [];
   for (let index = 0; index < tokens.length; index += 1) {
+    if (index > 0 && result.junctures?.has(index)) output.push("+");
     if (index === stressed.start) output.push("ˈ");
     output.push(tokens[index]);
   }

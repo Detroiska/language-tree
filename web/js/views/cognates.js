@@ -7,7 +7,7 @@ import {
   ruleCompileErrors,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, stripStressMarks } from "../notation.js";
+import { formatPhonemic, formatPhonetic, joinSegments, stripStressMarks } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { buildCorrespondences } from "../correspondences.js";
@@ -26,7 +26,7 @@ function normalizeGlossOf(value) {
 function sameForm(a, b) {
   const normalize = (value) =>
     stripStressMarks(String(value || "").normalize("NFC"))
-      .replace(/[.\-·\s]+/gu, "")
+      .replace(/[.\-·+\s]+/gu, "")
       .trim();
   return normalize(a) === normalize(b);
 }
@@ -102,9 +102,12 @@ function deriveFor(row, sourceWord, project) {
       recorded,
     };
   }
-  const tokens = row.chain.context.tokenize(sourceWord.form);
-  const result = deriveStages(tokens, row.chain.stages, row.chain.context, { gloss: sourceWord.gloss });
-  const derived = result.tokens.join("");
+  const parsed = row.chain.context.tokenizeWithStress(sourceWord.form);
+  const result = deriveStages(parsed.tokens, row.chain.stages, row.chain.context, {
+    gloss: sourceWord.gloss,
+    junctures: parsed.junctures,
+  });
+  const derived = joinSegments(result.tokens, result.junctures);
   const surface = result.errors.length
     ? null
     : surfaceForForm(derived, project, row.language.id, { gloss: sourceWord.gloss });

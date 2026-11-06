@@ -11,7 +11,7 @@ import {
 } from "./model.js";
 import { compileClasses } from "./categories.js";
 import { buildClassIndex, classForText } from "./naturalclasses.js";
-import { normalizeForm, stripLevelMarks } from "./notation.js";
+import { joinSegments, normalizeForm, stripLevelMarks } from "./notation.js";
 import { compilePhonotactics, syllabifyTokens } from "./phonotactics.js";
 import { prosodyFallback, prosodyFromSyllables, normalizeStressSystem } from "./prosody.js";
 import {
@@ -159,11 +159,13 @@ export class SegmentContext {
   // Stress marks belong to the syllable that follows them. They are never
   // tokens: `ˈkasa` still has four segments, and comparisons, alignment, and
   // phonotactics see `k a s a`. `stress[i]` records the mark on token i so the
-  // rule engine can condition on it.
+  // rule engine can condition on it. Morpheme cuts are zero-width too:
+  // `kat+ta` tokenizes as `k a t t a`, with a cut recorded at index 3.
   tokenizeWithStress(text) {
     const source = normalizeForm(text);
     const tokens = [];
     const stress = [];
+    const junctures = new Set();
     let pending = "";
     let explicit = false;
     let index = 0;
@@ -172,6 +174,11 @@ export class SegmentContext {
       if (char === "ˈ" || char === "ˌ") {
         pending = char;
         explicit = true;
+        index += 1;
+        continue;
+      }
+      if (char === "+") {
+        junctures.add(tokens.length);
         index += 1;
         continue;
       }
@@ -204,7 +211,11 @@ export class SegmentContext {
       pending = "";
       index = end;
     }
-    return { tokens, stress, explicit };
+    // A cut at either word edge adds nothing: it would duplicate the `#`
+    // boundary every form already has.
+    junctures.delete(0);
+    junctures.delete(tokens.length);
+    return { tokens, stress, explicit, junctures };
   }
 
   tokenize(text) {
@@ -224,8 +235,10 @@ export class SegmentContext {
   // template is used when it parses the word; otherwise a maximal-onset
   // fallback still gives a useful preview. Results are cached because the
   // same form is often tested by several rules in a row.
-  prosodyFor(tokens) {
-    const key = tokens.join("\u0000");
+  prosodyFor(tokens, junctures = null) {
+    const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
+    const cutKey = [...cuts].sort((a, b) => a - b).join(",");
+    const key = `${tokens.join("\u0000")}\u0000${cutKey}`;
     const cached = this._prosodyCache.get(key);
     if (cached) return cached;
 
@@ -234,11 +247,11 @@ export class SegmentContext {
     if (compiled?.ok) {
       const parse = syllabifyTokens(tokens, compiled.shapes, this);
       if (parse.ok) {
-        prosody = prosodyFromSyllables(tokens, parse.syllables, this.stressSystem);
+        prosody = prosodyFromSyllables(tokens, parse.syllables, this.stressSystem, cuts);
       }
     }
     if (!prosody) {
-      prosody = prosodyFallback(tokens, (token) => this.isVowel(token), this.stressSystem);
+      prosody = prosodyFallback(tokens, (token) => this.isVowel(token), this.stressSystem, cuts);
     }
     this._prosodyCache.set(key, prosody);
     return prosody;
@@ -511,6 +524,7 @@ export function compileAllophonyRules(rules, context) {
 
 export function applyAllophony(tokens, compiledRules, context, options = {}) {
   let current = [...tokens];
+  let currentJunctures = new Set(options.junctures || []);
   const steps = [];
   const errors = [];
   const warnings = [];
@@ -525,6 +539,8 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
         compiled,
         before: [...current],
         after: [...current],
+        beforeJunctures: new Set(currentJunctures),
+        afterJunctures: new Set(currentJunctures),
         changed: false,
         iterative: false,
         passes: 0,
@@ -545,6 +561,8 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
         error: compiled.error,
         before: [...current],
         after: [...current],
+        beforeJunctures: new Set(currentJunctures),
+        afterJunctures: new Set(currentJunctures),
         changed: false,
       });
       continue;
@@ -554,13 +572,15 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
     const repeatLimit = normalizeAllophonyRepeatLimit(compiled.repeatLimit);
     const maxPasses = iterative ? repeatLimit : 1;
     const before = [...current];
+    const beforeJunctures = new Set(currentJunctures);
     let after = before;
+    let afterJunctures = beforeJunctures;
     let changed = false;
     let passes = 0;
     let failure = "";
 
     for (let pass = 0; pass < maxPasses; pass += 1) {
-      const result = applyRule(after, compiled.rule, context);
+      const result = applyRule(after, compiled.rule, context, afterJunctures);
       if (result.error) {
         failure = result.error;
         break;
@@ -568,6 +588,7 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
       if (!result.changed) break;
       changed = true;
       after = result.tokens;
+      afterJunctures = result.junctures;
       passes += 1;
     }
 
@@ -581,6 +602,8 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
         error: failure,
         before,
         after: before,
+        beforeJunctures,
+        afterJunctures: beforeJunctures,
         changed: false,
       });
       // A failed feature resolution is a hard stop: continuing would derive
@@ -593,7 +616,7 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
     // runaway instead of looking finished.
     let runaway = false;
     if (iterative && changed) {
-      const probe = applyRule(after, compiled.rule, context);
+      const probe = applyRule(after, compiled.rule, context, afterJunctures);
       runaway = !probe.error && probe.changed;
     }
     let warning = "";
@@ -609,6 +632,8 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
       compiled,
       before,
       after,
+      beforeJunctures,
+      afterJunctures,
       changed,
       iterative,
       passes,
@@ -616,8 +641,16 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
       warning,
     });
     current = after;
+    currentJunctures = afterJunctures;
   }
-  return { tokens: current, steps, errors, warnings, text: current.join("") };
+  return {
+    tokens: current,
+    junctures: currentJunctures,
+    steps,
+    errors,
+    warnings,
+    text: joinSegments(current, currentJunctures),
+  };
 }
 
 // Summarize the rules a derivation skipped because of lexical exceptions.
@@ -653,15 +686,20 @@ export function surfaceForForm(form, project, languageId, options = {}) {
   const context = contextForAllophony(project, languageId);
   const language = getLineage(project, languageId).at(-1);
   const compiled = compileAllophonyRules(language?.allophony || [], context);
-  const input = context.tokenize(stripLevelMarks(form));
-  const result = applyAllophony(input, compiled, context, { gloss: options.gloss });
+  const parsed = context.tokenizeWithStress(stripLevelMarks(form));
+  const input = parsed.tokens;
+  const result = applyAllophony(input, compiled, context, {
+    gloss: options.gloss,
+    junctures: parsed.junctures,
+  });
   // Surface display adds the language's predicted stress and syllable dots.
   // Keeping it separate from `text` means every existing comparison and export
   // still sees the plain token string.
-  const prosody = context.prosodyFor(result.tokens);
+  const prosody = context.prosodyFor(result.tokens, result.junctures);
   return {
     ...result,
     input,
+    inputJunctures: parsed.junctures,
     context,
     compiled,
     language,
@@ -757,7 +795,19 @@ function chunksOf(text) {
     let end = index;
     while (end < text.length && !/\s/.test(text[end]) && text[end] !== "[" && text[end] !== "#") end += 1;
     if (end === index) end += 1;
-    chunks.push(text.slice(index, end));
+    const raw = text.slice(index, end);
+    // A leading “+” is feature syntax ([+voice] is already handled as one
+    // bracket chunk), while a “+” elsewhere in a run is a morpheme cut. That
+    // keeps `a+ta` compact without breaking `+nasal`.
+    if (!raw.startsWith("+") && raw.includes("+")) {
+      const parts = raw.split("+");
+      parts.forEach((part, partIndex) => {
+        if (partIndex > 0) chunks.push("+");
+        if (part) chunks.push(part);
+      });
+    } else {
+      chunks.push(raw);
+    }
     index = end;
   }
   return chunks;
@@ -916,9 +966,17 @@ function parsePattern(text, context, options = {}) {
       pattern.push({ type: "syllable" });
       continue;
     }
-    if (chunk === "#") {
-      if (!allowBoundary) return { ok: false, error: "A word boundary (#) is only valid in the environment." };
-      pattern.push({ type: "boundary", value: "#" });
+    if (chunk === "#" || chunk === "+") {
+      if (!allowBoundary) {
+        return {
+          ok: false,
+          error:
+            chunk === "+"
+              ? "A morpheme boundary (+) is only valid in the environment."
+              : "A word boundary (#) is only valid in the environment.",
+        };
+      }
+      pattern.push({ type: "boundary", value: chunk });
       continue;
     }
     if (chunk === "V" || chunk === "C") {
@@ -1031,7 +1089,8 @@ function matchesLeft(
   bindings,
   prosody = null,
   domain = "adjacent",
-  limit = null
+  limit = null,
+  junctures = null
 ) {
   let cursor = index;
   let next = { ...bindings };
@@ -1039,7 +1098,9 @@ function matchesLeft(
   for (let offset = pattern.length - 1; offset >= 0; offset -= 1) {
     const item = pattern[offset];
     if (item.type === "boundary") {
-      if (cursor !== 0) return null;
+      if (item.value === "+") {
+        if (!junctures?.has(cursor)) return null;
+      } else if (cursor !== 0) return null;
       continue;
     }
     if (item.type === "stress") {
@@ -1084,14 +1145,17 @@ function matchesRight(
   bindings,
   prosody = null,
   domain = "adjacent",
-  limit = null
+  limit = null,
+  junctures = null
 ) {
   let cursor = index;
   let next = { ...bindings };
   const ceiling = limit === null ? tokens.length : Math.min(tokens.length, limit);
   for (const item of pattern) {
     if (item.type === "boundary") {
-      if (cursor !== tokens.length) return null;
+      if (item.value === "+") {
+        if (!junctures?.has(cursor)) return null;
+      } else if (cursor !== tokens.length) return null;
       continue;
     }
     if (item.type === "stress") {
@@ -1427,15 +1491,16 @@ function syllableBoundsAt(start, end, prosody) {
   return record ? { start: record.start, end: record.end } : null;
 }
 
-export function findRuleMatches(tokens, compiled, context) {
+export function findRuleMatches(tokens, compiled, context, junctures = null) {
   const matches = [];
+  const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const domain =
     compiled.domain === "word" || compiled.domain === "syllable" ? compiled.domain : "adjacent";
   // Stress and syllable-edge atoms need the word's prosody. It is computed
   // once per call and reused at every candidate position. A widened domain
   // also needs it, because "syllable" is defined by these records.
   const prosody =
-    compiled.needsProsody || domain !== "adjacent" ? context.prosodyFor(tokens) : null;
+    compiled.needsProsody || domain !== "adjacent" ? context.prosodyFor(tokens, cuts) : null;
   const boundsFor = (start, end) => {
     if (domain === "word") return null;
     if (domain === "syllable") return syllableBoundsAt(start, end, prosody);
@@ -1457,7 +1522,8 @@ export function findRuleMatches(tokens, compiled, context) {
         {},
         prosody,
         domain,
-        bounds ? bounds.start : null
+        bounds ? bounds.start : null,
+        cuts
       );
       if (!bindings) continue;
       bindings = matchesRight(
@@ -1468,10 +1534,20 @@ export function findRuleMatches(tokens, compiled, context) {
         bindings,
         prosody,
         domain,
-        bounds ? bounds.end : null
+        bounds ? bounds.end : null,
+        cuts
       );
       if (!bindings) continue;
-      matches.push({ start: index, end: index, replacement: compiled.replacement, bindings });
+      matches.push({
+        start: index,
+        end: index,
+        replacement: compiled.replacement,
+        bindings,
+        // Insertion after a `+ _` environment belongs to the morpheme on the
+        // right; the boundary must stay before the inserted material.
+        afterJuncture:
+          compiled.left.at(-1)?.type === "boundary" && compiled.left.at(-1)?.value === "+",
+      });
     }
     return matches;
   }
@@ -1491,7 +1567,8 @@ export function findRuleMatches(tokens, compiled, context) {
       bindings,
       prosody,
       domain,
-      bounds ? bounds.start : null
+      bounds ? bounds.start : null,
+      cuts
     );
     if (!bindings) {
       index += 1;
@@ -1505,7 +1582,8 @@ export function findRuleMatches(tokens, compiled, context) {
       bindings,
       prosody,
       domain,
-      bounds ? bounds.end : null
+      bounds ? bounds.end : null,
+      cuts
     );
     if (!bindings) {
       index += 1;
@@ -1536,7 +1614,7 @@ function describePattern(pattern) {
   return pattern
     .map((atom) => {
       if (atom.type === "literal") return `“${atom.value}”`;
-      if (atom.type === "boundary") return "#";
+      if (atom.type === "boundary") return atom.value;
       if (atom.type === "stress") return atom.value;
       if (atom.type === "syllable") return ".";
       if (atom.type === "class") return atom.value;
@@ -1555,13 +1633,14 @@ function describePattern(pattern) {
 // that never holds — so a rule with zero matches is debuggable instead of
 // silent. Returns "" whenever the rule actually matches somewhere, or when no
 // diagnosis is possible, so callers can attach it only to inert rules.
-export function explainRuleMiss(tokens, compiled, context) {
+export function explainRuleMiss(tokens, compiled, context, junctures = null) {
   if (!compiled || !Array.isArray(compiled.target)) return "";
+  const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const left = compiled.left || [];
   const right = compiled.right || [];
   const hasLeft = left.length > 0;
   const hasRight = right.length > 0;
-  const prosody = compiled.needsProsody ? context.prosodyFor(tokens) : null;
+  const prosody = compiled.needsProsody ? context.prosodyFor(tokens, cuts) : null;
   const unit = (count) => `${count} ${count === 1 ? "place" : "places"}`;
 
   // Insertions are zero-width: both environment sides must hold at one point.
@@ -1569,10 +1648,10 @@ export function explainRuleMiss(tokens, compiled, context) {
     if (!hasLeft && !hasRight) return "";
     let leftOk = 0;
     for (let index = 0; index <= tokens.length; index += 1) {
-      const bindings = matchesLeft(tokens, index, left, context, {}, prosody);
+      const bindings = matchesLeft(tokens, index, left, context, {}, prosody, "adjacent", null, cuts);
       if (!bindings) continue;
       leftOk += 1;
-      if (matchesRight(tokens, index, right, context, bindings, prosody)) return "";
+      if (matchesRight(tokens, index, right, context, bindings, prosody, "adjacent", null, cuts)) return "";
     }
     if (!hasLeft) return `No insertion point satisfies the right environment (${describePattern(right)}).`;
     if (!hasRight) return `No insertion point satisfies the left environment (${describePattern(left)}).`;
@@ -1586,10 +1665,23 @@ export function explainRuleMiss(tokens, compiled, context) {
     let bindings = matchTarget(tokens, index, compiled.target, context);
     if (!bindings) continue;
     targetHits += 1;
-    bindings = matchesLeft(tokens, index, left, context, bindings, prosody);
+    bindings = matchesLeft(tokens, index, left, context, bindings, prosody, "adjacent", null, cuts);
     if (!bindings) continue;
     leftOk += 1;
-    if (matchesRight(tokens, index + compiled.target.length, right, context, bindings, prosody)) return "";
+    if (
+      matchesRight(
+        tokens,
+        index + compiled.target.length,
+        right,
+        context,
+        bindings,
+        prosody,
+        "adjacent",
+        null,
+        cuts
+      )
+    )
+      return "";
   }
   if (!targetHits) {
     const form = tokens.join("") || "∅";
@@ -1638,22 +1730,90 @@ function sameTokens(left, right) {
   return left.length === right.length && left.every((token, index) => token === right[index]);
 }
 
-export function applyRule(tokens, compiled, context) {
-  const matches = findRuleMatches(tokens, compiled, context);
-  if (!matches.length) return { tokens: [...tokens], changed: false };
+function sameJunctures(left, right) {
+  if (left.size !== right.size) return false;
+  for (const value of left) if (!right.has(value)) return false;
+  return true;
+}
+
+// Move zero-width morpheme cuts through a set of edits. A cut before an edit
+// stays before it, a cut after an edit shifts by the length change, and a cut
+// strictly inside a rewritten span disappears with the segments it separated.
+// An insertion at a cut attaches to the left morpheme by default; a `+ _`
+// environment explicitly places it on the right instead.
+function shiftJunctures(junctures, changes) {
+  const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
+  const output = new Set();
+  for (const boundary of cuts) {
+    if (boundary <= 0) continue;
+    // Changes use the original token coordinates, so compare against the
+    // boundary in those coordinates and accumulate the displacement.
+    let shift = 0;
+    let dropped = false;
+    for (const change of changes) {
+      const width = change.end - change.start;
+      const replacementLength = change.replacement?.length || 0;
+      if (width === 0) {
+        if (boundary > change.start || (boundary === change.start && !change.afterJuncture)) {
+          shift += replacementLength;
+        }
+        continue;
+      }
+      if (boundary > change.start && boundary < change.end) {
+        dropped = true;
+        break;
+      }
+      if (boundary >= change.end) shift += replacementLength - width;
+    }
+    if (!dropped) output.add(boundary + shift);
+  }
+  return output;
+}
+
+function dropEdgeJunctures(junctures, length) {
+  junctures.delete(0);
+  junctures.delete(length);
+  return junctures;
+}
+
+export function applyRule(tokens, compiled, context, junctures = null) {
+  const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
+  const matches = findRuleMatches(tokens, compiled, context, cuts);
+  if (!matches.length) {
+    return {
+      tokens: [...tokens],
+      junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
+      changed: false,
+    };
+  }
   const output = [];
+  const changes = [];
   let cursor = 0;
   for (const match of matches) {
     const resolved = replacementForMatch(tokens, match, compiled, context);
-    if (!resolved.ok) return { tokens: [...tokens], changed: false, error: resolved.error };
+    if (!resolved.ok) {
+      return {
+        tokens: [...tokens],
+        junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
+        changed: false,
+        error: resolved.error,
+      };
+    }
+    changes.push({ ...match, replacement: resolved.replacement });
     output.push(...tokens.slice(cursor, match.start), ...resolved.replacement);
     cursor = match.end;
   }
   output.push(...tokens.slice(cursor));
+  const outputJunctures = dropEdgeJunctures(shiftJunctures(cuts, changes), output.length);
   // A feature delta can match a segment and leave its bundle unchanged, and a
   // literal rule can rewrite a sound to itself. Neither is a surface change, so
-  // the derivation should not present it as one.
-  return { tokens: output, changed: !sameTokens(tokens, output) };
+  // the derivation should not present it as one. Losing a cut during a rewrite
+  // is still a change in the displayed form.
+  return {
+    tokens: output,
+    junctures: outputJunctures,
+    changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
+  };
 }
 
 export function compileRules(rules, context) {
@@ -1711,17 +1871,20 @@ export function compileChainFrom(project, sourceId, targetId) {
 // combined in one pass, so the order of the list never changes which rules
 // apply. Two top-level rules that touch the same part of the form are a
 // conflict: the derivation stops with an error instead of guessing an order.
-function applyParallel(tokens, groups, context, gloss = "") {
+function applyParallel(tokens, groups, context, gloss = "", junctures = null) {
+  const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const entries = [];
   for (const group of groups) {
     const excepted = ruleExceptsGloss(group.rule, gloss);
-    const matches = excepted ? [] : findRuleMatches(tokens, group.compiled.rule, context);
+    const matches = excepted ? [] : findRuleMatches(tokens, group.compiled.rule, context, cuts);
     const entry = { group, matches, excepted };
     // A rule that matched nothing gets a diagnosis instead of a bare
     // "0 matches" — the tester shows this under its entry in the step list.
     // An exception is a deliberate skip, not a failed match, so it needs no
     // diagnosis.
-    if (!excepted && !matches.length) entry.debug = explainRuleMiss(tokens, group.compiled.rule, context) || "";
+    if (!excepted && !matches.length) {
+      entry.debug = explainRuleMiss(tokens, group.compiled.rule, context, cuts) || "";
+    }
     entries.push(entry);
   }
   const changes = [];
@@ -1737,7 +1900,7 @@ function applyParallel(tokens, groups, context, gloss = "") {
       const b = change.entry.group;
       return {
         ok: false,
-        error: `Rules ${a.label} (“${a.rule.notation}”) and ${b.label} (“${b.rule.notation}”) both change overlapping parts of the ancestral form “${tokens.join("")}”. Make one of them sequential or make the rules mutually exclusive.`,
+        error: `Rules ${a.label} (“${a.rule.notation}”) and ${b.label} (“${b.rule.notation}”) both change overlapping parts of the ancestral form “${joinSegments(tokens, cuts)}”. Make one of them sequential or make the rules mutually exclusive.`,
         // Structured conflict for the tester's one-click fix: turning the
         // later-overlapping rule into a sequential child of the earlier one
         // is the standard remedy.
@@ -1753,7 +1916,15 @@ function applyParallel(tokens, groups, context, gloss = "") {
     if (!furthest || change.end > furthest.end) furthest = change;
   }
 
-  if (!changes.length) return { ok: true, tokens: [...tokens], changed: false, entries };
+  if (!changes.length) {
+    return {
+      ok: true,
+      tokens: [...tokens],
+      junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
+      changed: false,
+      entries,
+    };
+  }
   for (const change of changes) {
     const resolved = replacementForMatch(tokens, change, change.entry.group.compiled.rule, context);
     if (!resolved.ok) return { ok: false, error: resolved.error, entries };
@@ -1766,11 +1937,19 @@ function applyParallel(tokens, groups, context, gloss = "") {
     cursor = change.end;
   }
   output.push(...tokens.slice(cursor));
-  return { ok: true, tokens: output, changed: !sameTokens(tokens, output), entries };
+  const outputJunctures = dropEdgeJunctures(shiftJunctures(cuts, changes), output.length);
+  return {
+    ok: true,
+    tokens: output,
+    junctures: outputJunctures,
+    changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
+    entries,
+  };
 }
 
 export function deriveStages(inputTokens, stages, context, options = {}) {
   let current = [...inputTokens];
+  let currentJunctures = new Set(options.junctures || []);
   const steps = [];
   const errors = [];
   let fatal = false;
@@ -1798,6 +1977,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         error: group.compiled.error,
         before: [...current],
         after: [...current],
+        beforeJunctures: new Set(currentJunctures),
+        afterJunctures: new Set(currentJunctures),
         changed: false,
         languageName,
       });
@@ -1805,7 +1986,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
     }
 
     const before = [...current];
-    const parallel = applyParallel(current, usable, stageContext, gloss);
+    const beforeJunctures = new Set(currentJunctures);
+    const parallel = applyParallel(current, usable, stageContext, gloss, currentJunctures);
     if (!parallel.ok) {
       steps.push({
         kind: "error",
@@ -1814,6 +1996,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         conflict: parallel.conflict || null,
         before,
         after: [...before],
+        beforeJunctures,
+        afterJunctures: new Set(beforeJunctures),
         changed: false,
         languageName,
       });
@@ -1828,6 +2012,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         label: "anc",
         before,
         after: [...parallel.tokens],
+        beforeJunctures,
+        afterJunctures: parallel.junctures,
         changed: parallel.changed,
         entries: parallel.entries.map((entry) => ({
           label: entry.group.label,
@@ -1839,6 +2025,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         languageName,
       });
       current = parallel.tokens;
+      currentJunctures = parallel.junctures;
     }
 
     // Sequential children run after the whole ancestral pass, in display
@@ -1859,6 +2046,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
             error: child.compiled.error,
             before: [...current],
             after: [...current],
+            beforeJunctures: new Set(currentJunctures),
+            afterJunctures: new Set(currentJunctures),
             changed: false,
             languageName,
           });
@@ -1873,13 +2062,15 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
             compiled: child.compiled,
             before: [...current],
             after: [...current],
+            beforeJunctures: new Set(currentJunctures),
+            afterJunctures: new Set(currentJunctures),
             changed: false,
             excepted: true,
             languageName,
           });
           continue;
         }
-        const result = applyRule(current, child.compiled.rule, stageContext);
+        const result = applyRule(current, child.compiled.rule, stageContext, currentJunctures);
         if (result.error) {
           steps.push({
             kind: "error",
@@ -1889,6 +2080,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
             error: result.error,
             before: [...current],
             after: [...current],
+            beforeJunctures: new Set(currentJunctures),
+            afterJunctures: new Set(currentJunctures),
             changed: false,
             languageName,
           });
@@ -1905,11 +2098,16 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           compiled: child.compiled,
           before: [...current],
           after: [...result.tokens],
+          beforeJunctures: new Set(currentJunctures),
+          afterJunctures: result.junctures,
           changed: result.changed,
-          debug: result.changed ? "" : explainRuleMiss(current, child.compiled.rule, stageContext) || "",
+          debug: result.changed
+            ? ""
+            : explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures) || "",
           languageName,
         });
         current = result.tokens;
+        currentJunctures = result.junctures;
       }
     }
     if (stageFailed) {
@@ -1918,7 +2116,13 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
     }
   }
 
-  return { tokens: current, steps, errors, fatal };
+  return {
+    tokens: current,
+    junctures: currentJunctures,
+    steps,
+    errors,
+    fatal,
+  };
 }
 
 export function deriveForm(form, project, languageId, options = {}) {
@@ -1934,18 +2138,21 @@ export function deriveForm(form, project, languageId, options = {}) {
       groups: compileRuleStages(language.soundChanges, stageContext),
     };
   });
-  const tokens = context.tokenize(form);
-  const derived = deriveStages(tokens, stages, context, { gloss });
+  const parsed = context.tokenizeWithStress(form);
+  const tokens = parsed.tokens;
+  const derived = deriveStages(tokens, stages, context, { gloss, junctures: parsed.junctures });
   return {
     input: tokens,
+    inputJunctures: parsed.junctures,
     output: derived.tokens,
+    junctures: derived.junctures,
     steps: derived.steps,
     errors: derived.errors,
     error: derived.errors[0] || "",
     fatal: derived.fatal,
     stages,
     context,
-    text: derived.tokens.join(""),
+    text: joinSegments(derived.tokens, derived.junctures),
   };
 }
 

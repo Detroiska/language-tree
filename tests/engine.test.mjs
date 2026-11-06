@@ -27,6 +27,8 @@ import {
 import {
   allophoneCandidates,
   allophoneTable,
+  applyAllophony,
+  compileAllophonyRules,
   contextForAllophony,
   contextForInventory,
   contextForLanguage,
@@ -41,7 +43,13 @@ import {
   normalizeAllophonyNotation,
   surfaceForForm,
 } from "../web/js/phonology.js";
-import { formatPhonemic, formatPhonetic, normalizeSearchText, stripLevelMarks } from "../web/js/notation.js";
+import {
+  formatPhonemic,
+  formatPhonetic,
+  joinSegments,
+  normalizeSearchText,
+  stripLevelMarks,
+} from "../web/js/notation.js";
 import { compileClasses } from "../web/js/categories.js";
 import {
   IPA_FEATURES,
@@ -1295,6 +1303,160 @@ equal(
   surfaceForForm("kasa", stressAllophonyProject, "only").text,
   "kasə"
 );
+
+/* ---- morpheme boundaries ------------------------------------------------ */
+
+const cutApply = (notation, form, context = ctx) => {
+  const compiled = compileRule(notation, context);
+  if (!compiled.ok) return { error: compiled.error };
+  const parsed = context.tokenizeWithStress(form);
+  const result = applyRule(parsed.tokens, compiled.rule, context, parsed.junctures);
+  return {
+    out: joinSegments(result.tokens, result.junctures),
+    cuts: [...result.junctures].sort((a, b) => a - b),
+  };
+};
+
+const parsedCuts = ctx.tokenizeWithStress("kat+ta");
+equal("morpheme cuts are not segments", parsedCuts.tokens, ["k", "a", "t", "t", "a"]);
+equal("a morpheme cut is recorded between segments", [...parsedCuts.junctures], [3]);
+equal("cuts and stress coexist", ctx.tokenizeWithStress("ˈka+ta").junctures.has(2), true);
+equal("edge cuts duplicate the word boundary", [...ctx.tokenizeWithStress("+kata+").junctures], []);
+equal("plain tokenize ignores cuts", ctx.tokenize("kat+ta"), ["k", "a", "t", "t", "a"]);
+
+equal("a cut conditions a following segment", cutApply("t > d / + _", "at+ta"), {
+  out: "at+da",
+  cuts: [2],
+});
+equal("a cut does not match a plain cluster", cutApply("t > d / + _", "atta"), {
+  out: "atta",
+  cuts: [],
+});
+equal("a cut conditions a preceding segment", cutApply("t > d / _ +", "at+ta"), {
+  out: "ad+ta",
+  cuts: [2],
+});
+equal("a compact environment splits the cut from its neighbour", cutApply("t > d / a+ _", "a+ta"), {
+  out: "a+da",
+  cuts: [1],
+});
+equal("both sides can require a cut", cutApply("a > ə / + _ +", "k+a+k"), {
+  out: "k+ə+k",
+  cuts: [1, 2],
+});
+equal("a word boundary stays distinct from a cut", cutApply("t > d / # _", "ta+ta"), {
+  out: "da+ta",
+  cuts: [2],
+});
+equal("a cut is not a word boundary", cutApply("t > d / + _", "tata"), {
+  out: "tata",
+  cuts: [],
+});
+equal("insertion after a cut stays in the right morpheme", cutApply("∅ > t / + _", "a+a"), {
+  out: "a+ta",
+  cuts: [1],
+});
+equal("insertion before a cut stays in the left morpheme", cutApply("∅ > t / _ +", "a+a"), {
+  out: "at+a",
+  cuts: [2],
+});
+equal("rewriting across a cut removes it", cutApply("tt > t", "at+ta"), {
+  out: "ata",
+  cuts: [],
+});
+equal("unrelated rewrites keep their cuts", cutApply("a > e", "kat+ta"), {
+  out: "ket+te",
+  cuts: [3],
+});
+equal("a cut that reaches a word edge is dropped", cutApply("a > ∅ / # _", "a+ta"), {
+  out: "ta",
+  cuts: [],
+});
+
+const cutParallelProject = ensureProject({
+  title: "Parallel cuts",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "r1", notation: "∅ > nn / # _", note: "", enabled: true },
+        { id: "r2", notation: "t > ∅ / a _", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "parallel edits shift cuts by their combined effect",
+  deriveForm("a+t+a", cutParallelProject, "child", { directOnly: true }).text,
+  "nna+a"
+);
+
+const cutTarget = compileRule("+ > -", ctx);
+truthy(
+  "morpheme boundaries are rejected in the input",
+  !cutTarget.ok && /only valid in the environment/.test(cutTarget.error)
+);
+
+const cutAlloRules = compileAllophonyRules(
+  [{ id: "a1", notation: "t > d / + _", note: "", enabled: true }],
+  ctx
+);
+const cutAlloInput = ctx.tokenizeWithStress("at+ta");
+const cutAllo = applyAllophony(cutAlloInput.tokens, cutAlloRules, ctx, {
+  junctures: cutAlloInput.junctures,
+});
+equal("allophony can condition on a cut", cutAllo.text, "at+da");
+equal("allophony keeps the cut", [...cutAllo.junctures], [2]);
+
+const cutChangeProject = ensureProject({
+  title: "Morpheme cuts",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [{ id: "r1", notation: "t > d / + _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "sound changes preserve morpheme cuts in the derived form",
+  deriveForm("at+ta", cutChangeProject, "child").text,
+  "at+da"
+);
+
+const cutSurface = surfaceForForm("kat+ta", stressProject, "only");
+equal("surface text preserves the cut", cutSurface.text, "kat+ta");
+equal("surface display keeps the cut instead of a dot", cutSurface.display, "ˈkat+ta");
+
+const cutReconstruction = reconstructForm("at+da", cutChangeProject, "child");
+equal("reconstruction keeps the daughter's cut", cutReconstruction.inputText, "at+da");
+truthy(
+  "reconstruction restores the parent form with its cut",
+  reconstructionAlternatives(cutReconstruction).includes("at+ta")
+);
+equal(
+  "reconstruction candidates carry the cut",
+  cutReconstruction.candidates.map((candidate) => [...candidate.junctures]),
+  [[2], [2]]
+);
+
+const cutChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "initial" },
+});
+equal("phonotactic display shows the cut", cutChecker.validate("kat+ta").displayText, "ˈkat+ta");
+equal("marking stress keeps the cut", stressMarkedForm("kat+ta", cutChecker), "ˈkat+ta");
+
+equal("search normalization ignores morpheme cuts", normalizeSearchText("Kat+ta"), "katta");
 
 /* ---- notation ----------------------------------------------------------- */
 

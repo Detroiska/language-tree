@@ -19,7 +19,7 @@
 // DOM-free so it can be tested under Node.
 
 import { getLineage, ruleExceptsGloss } from "./model.js";
-import { stripLevelMarks, stripStressMarks } from "./notation.js";
+import { joinSegments, stripLevelMarks, stripStressMarks } from "./notation.js";
 import {
   applyRule,
   compileRuleStages,
@@ -39,16 +39,30 @@ function tokenKey(tokens) {
   return tokens.join("\u0000");
 }
 
+function cutKey(junctures) {
+  return [...(junctures || [])].sort((a, b) => a - b).join(",");
+}
+
+function candidateKey(tokens, junctures) {
+  return `${tokenKey(tokens)}\u0001${cutKey(junctures)}`;
+}
+
 function sameTokens(left, right) {
   return left.length === right.length && left.every((token, index) => token === right[index]);
 }
 
-function identityCandidate(tokens) {
-  return { tokens: [...tokens], score: 0, loss: 0 };
+function sameJunctures(left, right) {
+  return cutKey(left) === cutKey(right);
+}
+
+function identityCandidate(tokens, junctures = new Set()) {
+  return { tokens: [...tokens], junctures: new Set(junctures), score: 0, loss: 0 };
 }
 
 function normalizeLexicalForm(value) {
-  return stripStressMarks(stripLevelMarks(value)).normalize("NFC");
+  // Morpheme cuts are presentation: parent-lexicon evidence compares the
+  // segment string, not where a word happened to be divided.
+  return stripStressMarks(stripLevelMarks(value)).replace(/\+/gu, "").normalize("NFC");
 }
 
 function normalizeGloss(value) {
@@ -211,6 +225,7 @@ function featureSources(rule, context, outputToken, combos) {
 // passed through unchanged" and "this token is the output of the rule". Every
 // complete candidate is verified by applying the rule forward again.
 function substitutionCandidates(tokens, rule, context, combos, options) {
+  const targetJunctures = options.junctures instanceof Set ? options.junctures : new Set(options.junctures || []);
   const feature = Boolean(rule.featureOutput);
   const replacement = rule.replacement || [];
   const width = feature ? 1 : replacement.length;
@@ -218,16 +233,16 @@ function substitutionCandidates(tokens, rule, context, combos, options) {
   const bestAt = new Map();
   let truncated = false;
   let visited = 0;
-  const stack = [{ index: 0, pred: [], score: 0 }];
+  const stack = [{ index: 0, pred: [], cuts: new Set(), score: 0 }];
 
-  const push = (index, pred, score) => {
-    const key = `${index}\u0000${tokenKey(pred)}`;
+  const push = (index, pred, cuts, score) => {
+    const key = `${index}\u0000${candidateKey(pred, cuts)}`;
     const previous = bestAt.get(key);
     // Keep the lowest-cost path to a state. A state reached with more rule
     // applications cannot lead to a better (fewer-change) reconstruction.
     if (previous !== undefined && previous <= score) return;
     bestAt.set(key, score);
-    stack.push({ index, pred, score });
+    stack.push({ index, pred, cuts, score });
   };
 
   while (stack.length) {
@@ -238,18 +253,20 @@ function substitutionCandidates(tokens, rule, context, combos, options) {
       break;
     }
     if (state.index === tokens.length) {
-      const key = tokenKey(state.pred);
+      const key = candidateKey(state.pred, state.cuts);
       const previous = results.get(key);
       // If one form is reachable by several paths, keep the path that uses
       // the fewest rules. All distinct forms remain as candidates.
       if (!previous || state.score < previous.score) {
-        results.set(key, { tokens: state.pred, score: state.score, loss: 0 });
+        results.set(key, { tokens: state.pred, junctures: state.cuts, score: state.score, loss: 0 });
       }
       continue;
     }
 
-    // The token passed through the rule untouched.
-    push(state.index + 1, [...state.pred, tokens[state.index]], state.score);
+    // The token passed through the rule untouched, carrying the cut after it.
+    const untouchedCuts = new Set(state.cuts);
+    if (targetJunctures.has(state.index + 1)) untouchedCuts.add(state.pred.length + 1);
+    push(state.index + 1, [...state.pred, tokens[state.index]], untouchedCuts, state.score);
 
     // The token is the rule's output. For a literal output the slice must
     // match exactly; for a feature output the actually spelled sound varies
@@ -265,14 +282,19 @@ function substitutionCandidates(tokens, rule, context, combos, options) {
     // The search is a LIFO stack; push in reverse so the first target
     // alternative (for example *p in a p/t/k merger) is processed first.
     for (const source of [...sources].reverse()) {
-      push(state.index + width, [...state.pred, ...source], state.score + 1);
+      // A cut inside the rewritten slice has no segment left to separate;
+      // a cut after it moves to the end of the restored source.
+      const cuts = new Set(state.cuts);
+      if (targetJunctures.has(state.index + width)) cuts.add(state.pred.length + source.length);
+      push(state.index + width, [...state.pred, ...source], cuts, state.score + 1);
     }
   }
 
   const verified = [];
   for (const candidate of results.values()) {
-    const applied = applyRule(candidate.tokens, rule, context);
+    const applied = applyRule(candidate.tokens, rule, context, candidate.junctures);
     if (applied.error || !sameTokens(applied.tokens, tokens)) continue;
+    if (!sameJunctures(applied.junctures, targetJunctures)) continue;
     verified.push(candidate);
   }
   return { candidates: verified, truncated };
@@ -283,24 +305,28 @@ function substitutionCandidates(tokens, rule, context, combos, options) {
 // only candidates that the forward rule reproduces exactly. The identity
 // candidate stays available as a fallback for a rule that simply did not fire.
 function deletionCandidates(tokens, rule, context, combos, options) {
-  const identity = identityCandidate(tokens);
-  const forward = applyRule(tokens, rule, context);
-  const identityValid = !forward.error && sameTokens(forward.tokens, tokens);
+  const targetJunctures = options.junctures instanceof Set ? options.junctures : new Set(options.junctures || []);
+  const identity = identityCandidate(tokens, targetJunctures);
+  const forward = applyRule(tokens, rule, context, targetJunctures);
+  const identityValid =
+    !forward.error &&
+    sameTokens(forward.tokens, tokens) &&
+    sameJunctures(forward.junctures, targetJunctures);
 
   for (let loss = 1; loss <= options.maxLoss; loss += 1) {
     const generated = new Map();
     let truncated = false;
     let visited = 0;
 
-    const add = (pred) => {
+    const add = (pred, cuts) => {
       if (generated.size >= options.maxCandidates) {
         truncated = true;
         return;
       }
-      generated.set(tokenKey(pred), pred);
+      generated.set(candidateKey(pred, cuts), { tokens: pred, junctures: cuts });
     };
 
-    const build = (index, pred, remaining) => {
+    const build = (index, pred, cuts, remaining) => {
       visited += 1;
       if (visited > options.maxStates) {
         truncated = true;
@@ -311,30 +337,35 @@ function deletionCandidates(tokens, rule, context, combos, options) {
         return;
       }
       if (index === tokens.length && remaining === 0) {
-        add(pred);
+        add(pred, cuts);
         return;
       }
+      // A cut before this observed token maps to the current predecessor
+      // position. Restored deletions are placed after it.
+      const here = new Set(cuts);
+      if (index > 0 && targetJunctures.has(index)) here.add(pred.length);
       if (index < tokens.length) {
         // Keep the observed token, then continue to the next one.
-        build(index + 1, [...pred, tokens[index]], remaining);
+        build(index + 1, [...pred, tokens[index]], here, remaining);
       }
       if (remaining > 0) {
         // Restore one deleted sequence at this boundary and stay here, so
         // consecutive deleted segments can share a boundary.
         for (const combo of combos) {
-          build(index, [...pred, ...combo], remaining - 1);
+          build(index, [...pred, ...combo], new Set(here), remaining - 1);
           if (generated.size >= options.maxCandidates) break;
         }
       }
     };
 
-    build(0, [], loss);
+    build(0, [], new Set(), loss);
 
     const exact = [];
     for (const pred of generated.values()) {
-      const applied = applyRule(pred, rule, context);
+      const applied = applyRule(pred.tokens, rule, context, pred.junctures);
       if (applied.error || !sameTokens(applied.tokens, tokens)) continue;
-      exact.push({ tokens: pred, score: loss, loss });
+      if (!sameJunctures(applied.junctures, targetJunctures)) continue;
+      exact.push({ tokens: pred.tokens, junctures: pred.junctures, score: loss, loss });
     }
     if (exact.length) {
       const candidates = identityValid ? [...exact, identity] : exact;
@@ -348,12 +379,12 @@ function deletionCandidates(tokens, rule, context, combos, options) {
 function invertRuleAll(tokens, compiled, context, options = {}) {
   const rule = compiled?.rule || compiled;
   if (!rule || !Array.isArray(rule.target)) {
-    return { candidates: [identityCandidate(tokens)], truncated: false, loss: 0 };
+    return { candidates: [identityCandidate(tokens, options.junctures)], truncated: false, loss: 0 };
   }
   // The rule did not apply to this lexical item in the forward direction, so
   // its only exact predecessor is the unchanged form.
   if (ruleExceptsGloss(rule, options.gloss)) {
-    return { candidates: [identityCandidate(tokens)], truncated: false, loss: 0 };
+    return { candidates: [identityCandidate(tokens, options.junctures)], truncated: false, loss: 0 };
   }
   const settings = optionsWithDefaults(options);
   const { combos, truncated: targetsTruncated } = targetCombinations(
@@ -369,7 +400,11 @@ function invertRuleAll(tokens, compiled, context, options = {}) {
   const replacement = rule.replacement || [];
   if (!feature && !replacement.length) {
     if (!rule.target.length) {
-      return { candidates: [identityCandidate(tokens)], truncated: targetsTruncated, loss: 0 };
+      return {
+        candidates: [identityCandidate(tokens, options.junctures)],
+        truncated: targetsTruncated,
+        loss: 0,
+      };
     }
     const result = deletionCandidates(tokens, rule, context, combos, settings);
     return { ...result, truncated: result.truncated || targetsTruncated };
@@ -397,7 +432,7 @@ function compareWithPriority(left, right, priority) {
 function rankCandidates(candidates, limit = DEFAULTS.maxCandidates, priority = null) {
   const deduped = new Map();
   for (const candidate of candidates) {
-    const key = tokenKey(candidate.tokens);
+    const key = candidateKey(candidate.tokens, candidate.junctures);
     const previous = deduped.get(key);
     if (!previous || compareCandidates(candidate, previous) < 0) deduped.set(key, candidate);
   }
@@ -429,15 +464,29 @@ function expandCandidates(candidates, rule, context, options) {
   const next = new Map();
   let truncated = false;
   for (const candidate of candidates) {
-    const inverted = invertRuleAll(candidate.tokens, rule, context, options);
+    const inverted = invertRuleAll(candidate.tokens, rule, context, {
+      ...options,
+      junctures: candidate.junctures,
+    });
     if (inverted.truncated) truncated = true;
     for (const predecessor of inverted.candidates) {
       const tokens = predecessor.tokens;
+      const junctures = predecessor.junctures;
       const target = candidate.parallelTarget || null;
-      const key = `${tokenKey(tokens)}\u0000${target ? tokenKey(target) : ""}`;
+      const targetJunctures = candidate.parallelTargetJunctures || null;
+      const key = `${candidateKey(tokens, junctures)}\u0000${
+        target ? candidateKey(target, targetJunctures) : ""
+      }`;
       const score = candidate.score + predecessor.score;
       const loss = candidate.loss + (predecessor.loss || 0);
-      const nextCandidate = { tokens, score, loss, parallelTarget: target };
+      const nextCandidate = {
+        tokens,
+        junctures,
+        score,
+        loss,
+        parallelTarget: target,
+        parallelTargetJunctures: targetJunctures,
+      };
       const previous = next.get(key);
       if (previous && compareCandidates(previous, nextCandidate) <= 0) continue;
       next.set(key, nextCandidate);
@@ -454,17 +503,20 @@ function expandCandidates(candidates, rule, context, options) {
 // Apply only the top-level (parallel) rules of one stage. This is the forward
 // check used after reversing that pass; sequential children are handled by
 // their own single-rule checks before this point.
-function applyParallelOnly(tokens, groups, context, gloss = "") {
-  if (!groups.length) return { ok: true, tokens: [...tokens], errors: [] };
+function applyParallelOnly(tokens, groups, context, gloss = "", junctures = null) {
+  if (!groups.length) {
+    return { ok: true, tokens: [...tokens], junctures: new Set(junctures || []), errors: [] };
+  }
   const stage = {
     language: null,
     context,
     groups: groups.map((group) => ({ ...group, children: [] })),
   };
-  const result = deriveStages(tokens, [stage], context, { gloss });
+  const result = deriveStages(tokens, [stage], context, { gloss, junctures });
   return {
     ok: !result.errors.length && !result.fatal,
     tokens: result.tokens,
+    junctures: result.junctures,
     errors: result.errors,
   };
 }
@@ -492,7 +544,7 @@ export function invertRules(tokens, groups, context, options = {}) {
     }
   }
 
-  let candidates = [identityCandidate(tokens)];
+  let candidates = [identityCandidate(tokens, settings.junctures)];
   let truncated = false;
 
   for (const group of [...usable].reverse()) {
@@ -512,6 +564,7 @@ export function invertRules(tokens, groups, context, options = {}) {
   // reference the forward group check must reproduce after the rules reverse.
   for (const candidate of candidates) {
     candidate.parallelTarget = [...candidate.tokens];
+    candidate.parallelTargetJunctures = new Set(candidate.junctures || []);
   }
 
   for (const group of [...usable].reverse()) {
@@ -528,8 +581,18 @@ export function invertRules(tokens, groups, context, options = {}) {
   if (topGroups.length) {
     candidates = candidates.filter((candidate) => {
       if (!candidate.parallelTarget) return false;
-      const forward = applyParallelOnly(candidate.tokens, topGroups, context, gloss);
-      return forward.ok && sameTokens(forward.tokens, candidate.parallelTarget);
+      const forward = applyParallelOnly(
+        candidate.tokens,
+        topGroups,
+        context,
+        gloss,
+        candidate.junctures
+      );
+      return (
+        forward.ok &&
+        sameTokens(forward.tokens, candidate.parallelTarget) &&
+        sameJunctures(forward.junctures, candidate.parallelTargetJunctures)
+      );
     });
   }
 
@@ -537,6 +600,7 @@ export function invertRules(tokens, groups, context, options = {}) {
   truncated = truncated || ranked.truncated;
   const list = ranked.candidates.map((candidate) => ({
     tokens: candidate.tokens,
+    junctures: candidate.junctures,
     score: candidate.score,
     loss: candidate.loss,
   }));
@@ -565,6 +629,7 @@ export function reconstructForm(form, project, languageId, options = {}) {
     language,
     parent,
     inputTokens: [],
+    inputJunctures: new Set(),
     inputText: "",
     gloss: requestedGloss,
     candidates: [],
@@ -581,7 +646,9 @@ export function reconstructForm(form, project, languageId, options = {}) {
   if (!input) return empty;
 
   const context = contextForLanguage(project, languageId);
-  const tokens = context.tokenize(input);
+  const parsed = context.tokenizeWithStress(input);
+  const tokens = parsed.tokens;
+  const junctures = parsed.junctures;
   if (!tokens.length) return empty;
 
   const gloss = requestedGloss || inferGloss(language, input);
@@ -592,16 +659,16 @@ export function reconstructForm(form, project, languageId, options = {}) {
     return evidenceCache.get(text);
   };
   const priority = (candidate) => {
-    const match = evidenceFor(candidate.tokens.join(""));
+    const match = evidenceFor(joinSegments(candidate.tokens, candidate.junctures));
     if (match.parentMatch === "gloss") return 0;
     if (match.parentMatch === "form") return 1;
     return 2;
   };
 
   const groups = compileRuleStages(language.soundChanges || [], context);
-  const inverted = invertRules(tokens, groups, context, { ...options, gloss, priority });
+  const inverted = invertRules(tokens, groups, context, { ...options, gloss, junctures, priority });
   const candidates = inverted.candidates.map((candidate) => {
-    const text = candidate.tokens.join("");
+    const text = joinSegments(candidate.tokens, candidate.junctures);
     const match = evidenceFor(text);
     return {
       ...candidate,
@@ -617,7 +684,8 @@ export function reconstructForm(form, project, languageId, options = {}) {
     language,
     parent,
     inputTokens: tokens,
-    inputText: tokens.join(""),
+    inputJunctures: junctures,
+    inputText: joinSegments(tokens, junctures),
     gloss,
     candidates,
     text: candidates[0]?.text || "",

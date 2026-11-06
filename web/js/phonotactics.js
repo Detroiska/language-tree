@@ -819,6 +819,7 @@ export function validateWord(form, compiled, context) {
     form: normalized,
     text,
     tokens: [],
+    junctures: new Set(),
     unknown: [],
     issues: [],
     syllables: [],
@@ -835,8 +836,10 @@ export function validateWord(form, compiled, context) {
     return result;
   }
 
-  const tokens = context.tokenize(text);
+  const parsed = context.tokenizeWithStress(text);
+  const tokens = parsed.tokens;
   result.tokens = tokens;
+  result.junctures = parsed.junctures;
 
   const unknown = new Set();
   for (const token of tokens) {
@@ -859,7 +862,12 @@ export function validateWord(form, compiled, context) {
   if (parse.ok) {
     result.syllables = parse.syllables;
     result.syllableText = parse.text;
-    const prosody = prosodyFromSyllables(tokens, parse.syllables, context.stressSystem || "none");
+    const prosody = prosodyFromSyllables(
+      tokens,
+      parse.syllables,
+      context.stressSystem || "none",
+      parsed.junctures
+    );
     result.stressIndex = prosody.stressIndex;
     result.stress = prosody.stress;
     result.displayText = prosody.display;

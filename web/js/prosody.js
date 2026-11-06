@@ -7,6 +7,12 @@
 // the rule engine, the phonotactics checker, and the surface renderer share the
 // same placement rules without importing each other.
 
+import { joinSegments } from "./notation.js";
+
+function cutSet(junctures) {
+  return junctures instanceof Set ? junctures : new Set(junctures || []);
+}
+
 export const STRESS_SYSTEMS = [
   { value: "none", label: "No stress" },
   { value: "initial", label: "Initial" },
@@ -73,11 +79,11 @@ export function stressIndexOf(syllables, system) {
 // the stress array marks every token of the stressed syllable, which lets a
 // rule condition on any segment in that syllable without special-casing
 // onsets, nuclei, and codas.
-export function prosodyFromSyllables(tokens, syllables, system) {
+export function prosodyFromSyllables(tokens, syllables, system, junctures = null) {
+  const cuts = cutSet(junctures);
   const stressIndex = stressIndexOf(syllables, system);
   const stress = new Array(tokens.length).fill("");
   const boundaries = new Set([0, tokens.length]);
-  let display = "";
 
   if (!syllables.length) {
     return {
@@ -85,7 +91,7 @@ export function prosodyFromSyllables(tokens, syllables, system) {
       stressIndex: -1,
       stress,
       boundaries,
-      display: tokens.join(""),
+      display: joinSegments(tokens, cuts),
     };
   }
 
@@ -98,11 +104,18 @@ export function prosodyFromSyllables(tokens, syllables, system) {
     }
   }
 
-  display = syllables
-    .map((syllable, index) =>
-      `${index === stressIndex ? "ˈ" : ""}${syllable.tokens.join("")}`
-    )
-    .join(".");
+  // Dots mark syllable edges; a morpheme cut is a stronger boundary, so it
+  // replaces the dot when both fall between the same two segments. A cut
+  // inside a syllable still shows in place.
+  let display = "";
+  for (const [index, syllable] of syllables.entries()) {
+    if (syllable.start > 0) display += cuts.has(syllable.start) ? "+" : ".";
+    if (index === stressIndex) display += "ˈ";
+    for (let position = syllable.start; position < syllable.end; position += 1) {
+      if (position > syllable.start && cuts.has(position)) display += "+";
+      display += tokens[position];
+    }
+  }
 
   return { syllables, stressIndex, stress, boundaries, display };
 }
@@ -142,7 +155,7 @@ export function fallbackSyllables(tokens, isVowel) {
   });
 }
 
-export function prosodyFallback(tokens, isVowel, system) {
+export function prosodyFallback(tokens, isVowel, system, junctures = null) {
   const syllables = fallbackSyllables(tokens, isVowel);
   if (!syllables.length) {
     return {
@@ -150,8 +163,8 @@ export function prosodyFallback(tokens, isVowel, system) {
       stressIndex: -1,
       stress: new Array(tokens.length).fill(""),
       boundaries: new Set([0, tokens.length]),
-      display: tokens.join(""),
+      display: joinSegments(tokens, cutSet(junctures)),
     };
   }
-  return prosodyFromSyllables(tokens, syllables, system);
+  return prosodyFromSyllables(tokens, syllables, system, junctures);
 }

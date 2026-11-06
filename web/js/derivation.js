@@ -1,11 +1,12 @@
 import { esc } from "./ui.js";
+import { joinSegments } from "./notation.js";
 
 // Shared renderer for derivation steps. Top-level rules produce one parallel
 // step (all of them checked against the same ancestral form), while dotted
 // sequential rules produce the familiar before→after step.
 
-function formText(tokens) {
-  return tokens && tokens.length ? tokens.join("") : "∅";
+function formText(tokens, junctures = null) {
+  return tokens && tokens.length ? joinSegments(tokens, junctures) : "∅";
 }
 
 function countLabel(count) {
@@ -37,9 +38,9 @@ function parallelMarkup(step, showLanguage) {
           ${excepted ? `<span class="step-badge">${excepted} lexical ${excepted === 1 ? "exception" : "exceptions"}</span>` : ""}
         </div>
         <div class="step-form">
-          <code class="ipa">${esc(formText(step.before))}</code>
+          <code class="ipa">${esc(formText(step.before, step.beforeJunctures))}</code>
           <span class="step-arrow">→</span>
-          <code class="ipa">${esc(formText(step.after))}</code>
+          <code class="ipa">${esc(formText(step.after, step.afterJunctures))}</code>
         </div>
         <ul class="step-rule-list">
           ${entries
@@ -77,9 +78,9 @@ function sequentialMarkup(step, index, showLanguage) {
         </div>
         ${step.debug ? `<div class="step-why">${esc(step.debug)}</div>` : ""}
         <div class="step-form">
-          <code class="ipa">${esc(formText(step.before))}</code>
+          <code class="ipa">${esc(formText(step.before, step.beforeJunctures))}</code>
           <span class="step-arrow">→</span>
-          <code class="ipa">${esc(formText(step.after))}</code>
+          <code class="ipa">${esc(formText(step.after, step.afterJunctures))}</code>
         </div>
       </div>
     </div>`;

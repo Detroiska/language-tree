@@ -16,7 +16,7 @@ import {
   hasSurfaceDisplay,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, stripStressMarks } from "../notation.js";
+import { formatPhonemic, formatPhonetic, joinSegments, stripStressMarks } from "../notation.js";
 import { derivationStepsMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { reconstructForm, reconstructionAlternatives } from "../reconstruction.js";
@@ -38,9 +38,13 @@ function compileDirect(ctx) {
 
 function directDerivation(ctx, form, gloss = "") {
   const { context, groups } = compileDirect(ctx);
-  const tokens = context.tokenize(form);
-  const result = deriveStages(tokens, [{ language: ctx.language, groups }], context, { gloss });
-  const phonemic = result.tokens.join("");
+  const parsed = context.tokenizeWithStress(form);
+  const tokens = parsed.tokens;
+  const result = deriveStages(tokens, [{ language: ctx.language, groups }], context, {
+    gloss,
+    junctures: parsed.junctures,
+  });
+  const phonemic = joinSegments(result.tokens, result.junctures);
   const surface = result.errors.length
     ? null
     : surfaceForForm(phonemic, ctx.project, ctx.language.id, { gloss });
@@ -59,7 +63,7 @@ function directDerivation(ctx, form, gloss = "") {
 function sameForm(a, b) {
   const normalize = (value) =>
     stripStressMarks(String(value || "").normalize("NFC"))
-      .replace(/[.\-·\s]+/gu, "")
+      .replace(/[.\-·+\s]+/gu, "")
       .trim();
   return normalize(a) === normalize(b);
 }

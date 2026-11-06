@@ -51,7 +51,7 @@ function exceptionNote(exceptions) {
 function sameForm(a, b) {
   const normalize = (value) =>
     stripStressMarks(String(value || "").normalize("NFC"))
-      .replace(/[.\-·\s]+/gu, "")
+      .replace(/[.\-·+\s]+/gu, "")
       .trim();
   return normalize(a) === normalize(b);
 }
