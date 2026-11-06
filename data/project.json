@@ -771,6 +771,7 @@
           "enabled": true,
           "optional": false,
           "rate": 50,
+          "date": null,
           "exceptions": [],
           "parentId": null
         },
@@ -781,6 +782,7 @@
           "enabled": true,
           "optional": false,
           "rate": 50,
+          "date": null,
           "exceptions": [],
           "parentId": null
         },
@@ -791,6 +793,7 @@
           "enabled": true,
           "optional": false,
           "rate": 50,
+          "date": null,
           "exceptions": [],
           "parentId": null
         },
@@ -801,6 +804,7 @@
           "enabled": true,
           "optional": false,
           "rate": 50,
+          "date": null,
           "exceptions": [],
           "parentId": null
         }
