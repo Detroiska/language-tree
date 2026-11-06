@@ -38,6 +38,7 @@ function frequencyPanel(analysis) {
         .map((entry) => `<code class="ipa">${esc(entry.value)}</code>×${entry.count}`)
         .join(", ")}</span></div>`
     : "";
+  const notes = `${neverUsed}${uncharted}`;
 
   return `
     <section class="panel analytics-panel">
@@ -51,7 +52,7 @@ function frequencyPanel(analysis) {
       ${
         rows.length
           ? `
-            ${neverUsed}${uncharted}
+            ${notes ? `<div class="panel-body analytics-notes">${notes}</div>` : ""}
             <div class="table-scroll">
               <table class="data-table freq-table">
                 <thead><tr><th>Sound</th><th>Tokens</th><th></th></tr></thead>
@@ -83,7 +84,7 @@ function clusterPanel(title, rows, note) {
       </header>
       ${
         rows.length
-          ? `<div class="cluster-list">${rows
+          ? `<div class="panel-body"><div class="cluster-list">${rows
               .map(
                 (row) => `
                   <div class="cluster-row">
@@ -92,7 +93,7 @@ function clusterPanel(title, rows, note) {
                     <code class="ipa ${row.value === "∅" ? "cluster-empty" : ""}">${esc(row.value)}</code>
                   </div>`
               )
-              .join("")}</div>`
+              .join("")}</div></div>`
           : `<div class="notice notice-quiet">${icon("sliders")}<p>No syllabified words yet.</p></div>`
       }
     </section>`;
@@ -123,37 +124,39 @@ function balancePanel(analysis) {
         </div>
         <span class="panel-icon">${icon("sliders")}</span>
       </header>
-      <div class="balance-list">
-        <div class="balance-row">
-          <span class="balance-label">Consonant / vowel tokens</span>
-          <span>${esc(ratioText)}</span>
+      <div class="panel-body">
+        <div class="balance-list">
+          <div class="balance-row">
+            <span class="balance-label">Consonant / vowel tokens</span>
+            <span>${esc(ratioText)}</span>
+          </div>
+          <div class="balance-row">
+            <span class="balance-label">Charted inventory</span>
+            <span>${analysis.consonantCount} consonants · ${analysis.vowelCount} vowels</span>
+          </div>
+          ${
+            voicedGaps.length
+              ? `<div class="balance-row"><span class="balance-label">Voiced, no voiceless counterpart</span><span>${voicedGaps
+                  .map((sound) => `<code class="ipa">${esc(sound)}</code>`)
+                  .join(" ")}</span></div>`
+              : ""
+          }
+          ${
+            voicelessGaps.length
+              ? `<div class="balance-row"><span class="balance-label">Voiceless, no voiced counterpart</span><span>${voicelessGaps
+                  .map((sound) => `<code class="ipa">${esc(sound)}</code>`)
+                  .join(" ")}</span></div>`
+              : ""
+          }
         </div>
-        <div class="balance-row">
-          <span class="balance-label">Charted inventory</span>
-          <span>${analysis.consonantCount} consonants · ${analysis.vowelCount} vowels</span>
+        <div class="symmetry-block">
+          <h3>Chart gaps</h3>
+          ${
+            gapRows
+              ? `<ul class="symmetry-list">${gapRows}</ul>`
+              : `<p class="muted analysis-empty">The consonant chart is either empty or fills every row–place cell — no manner is missing a place.</p>`
+          }
         </div>
-        ${
-          voicedGaps.length
-            ? `<div class="balance-row"><span class="balance-label">Voiced, no voiceless counterpart</span><span>${voicedGaps
-                .map((sound) => `<code class="ipa">${esc(sound)}</code>`)
-                .join(" ")}</span></div>`
-            : ""
-        }
-        ${
-          voicelessGaps.length
-            ? `<div class="balance-row"><span class="balance-label">Voiceless, no voiced counterpart</span><span>${voicelessGaps
-                .map((sound) => `<code class="ipa">${esc(sound)}</code>`)
-                .join(" ")}</span></div>`
-            : ""
-        }
-      </div>
-      <div class="symmetry-block">
-        <h3>Chart gaps</h3>
-        ${
-          gapRows
-            ? `<ul class="symmetry-list">${gapRows}</ul>`
-            : `<p class="muted analysis-empty">The consonant chart is either empty or fills every row–place cell — no manner is missing a place.</p>`
-        }
       </div>
     </section>`;
 }
@@ -184,7 +187,7 @@ function leakagePanel(analysis) {
         !analysis.hasAllophony
           ? `<div class="notice notice-quiet">${icon("info")}<p>No allophony rules in this language, so there is nothing to leak.</p></div>`
           : rows
-            ? `<div class="leak-list">${rows}</div>`
+            ? `<div class="panel-body"><div class="leak-list">${rows}</div></div>`
             : `<div class="notice notice-quiet">${icon("check")}<p>No leakage — every recorded symbol is charted, or never was an allophone output.</p></div>`
       }
     </section>`;

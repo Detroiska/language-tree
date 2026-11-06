@@ -6169,6 +6169,10 @@ th:hover > .axis-menu,
   margin-left: 5px;
 }
 
+.analytics-notes {
+  padding-bottom: 0;
+}
+
 .cluster-list {
   display: flex;
   flex-direction: column;
