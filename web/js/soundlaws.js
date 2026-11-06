@@ -88,17 +88,30 @@ export const soundChangeLibrary = [
   },
 ];
 
+// Comparison key for "is this rule already in the language?" - notation
+// whitespace is not significant, so the panel and the insert handler agree.
+export function normalizeLibraryNotation(notation) {
+  return String(notation || "").trim().replace(/\s+/gu, " ");
+}
+
 // Draft rule records for one group: disabled, self-describing notes, and the
-// same shape the tab's own "Add rule" button produces.
-export function newLibraryRules(group) {
-  return (group?.rules || []).map((rule) => ({
-    id: uid("rule"),
-    notation: rule.notation,
-    note: `${group.name} (illustrative): ${rule.note}`,
-    enabled: false,
-    optional: false,
-    rate: DEFAULT_RULE_RATE,
-    exceptions: [],
-    parentId: null,
-  }));
+// same shape the tab's own "Add rule" button produces. `present` holds
+// notations already recorded in the language; those rules are skipped so a
+// partially inserted group only adds what is missing.
+export function newLibraryRules(group, present = []) {
+  const presentNotations = new Set(
+    Array.from(present, (notation) => normalizeLibraryNotation(notation)).filter(Boolean)
+  );
+  return (group?.rules || [])
+    .filter((rule) => !presentNotations.has(normalizeLibraryNotation(rule.notation)))
+    .map((rule) => ({
+      id: uid("rule"),
+      notation: rule.notation,
+      note: `${group.name} (illustrative): ${rule.note}`,
+      enabled: false,
+      optional: false,
+      rate: DEFAULT_RULE_RATE,
+      exceptions: [],
+      parentId: null,
+    }));
 }

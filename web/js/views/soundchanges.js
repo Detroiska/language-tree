@@ -28,7 +28,7 @@ import { reconstructForm, reconstructionAlternatives } from "../reconstruction.j
 import { debounce, esc, icon, toast } from "../ui.js";
 // Curated attested rule groups offered in the Rule library panel; the data
 // module also builds the disabled draft records the insert button pushes.
-import { soundChangeLibrary, newLibraryRules } from "../soundlaws.js";
+import { soundChangeLibrary, newLibraryRules, normalizeLibraryNotation } from "../soundlaws.js";
 
 // The tester input is re-created on every view render (which edits trigger),
 // so the typed form is remembered per language — otherwise adding a rule or
@@ -457,15 +457,16 @@ function notationHelpMarkup() {
     </details>`;
 }
 
-function libraryPanelMarkup(language) {
-  // Normalized notations already recorded in this language, so a group that
-  // overlaps the current rule list is shown as inserted instead of offering
-  // to add a duplicate copy of its rules.
-  const present = new Set(
-    language.soundChanges
-      .map((rule) => String(rule.notation || "").trim().replace(/\s+/gu, " "))
-      .filter(Boolean)
+function presentLibraryNotations(language) {
+  // Normalized notations already recorded in this language, shared by the
+  // panel's counts and the insert handler so they cannot disagree.
+  return new Set(
+    language.soundChanges.map((rule) => normalizeLibraryNotation(rule.notation)).filter(Boolean)
   );
+}
+
+function libraryPanelMarkup(language) {
+  const present = presentLibraryNotations(language);
   return `
     <details class="panel help-panel">
       <summary class="panel-head help-summary">
@@ -479,9 +480,10 @@ function libraryPanelMarkup(language) {
         ${soundChangeLibrary
           .map((group) => {
             const total = group.rules.length;
-            const presentCount = group.rules.filter((rule) => present.has(String(rule.notation || "").trim().replace(/\s+/gu, " "))).length;
+            const missingCount = group.rules.filter((rule) => !present.has(normalizeLibraryNotation(rule.notation))).length;
+            const presentCount = total - missingCount;
             // Only a complete match means the group was already inserted;
-            // sharing one broad rule (say p > f) should not block the rest.
+            // a partial match offers just the rules that are still missing.
             const insertedTitle =
               presentCount === total
                 ? "These notations already appear in this language’s rules."
@@ -489,7 +491,7 @@ function libraryPanelMarkup(language) {
             const insertButton =
               presentCount === total
                 ? `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" disabled title="${esc(insertedTitle)}">Inserted</button>`
-                : `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" title="${esc(insertedTitle)}">${icon("plus")}Insert ${total} ${total === 1 ? "rule" : "rules"}</button>`;
+                : `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" title="${esc(insertedTitle)}">${icon("plus")}Insert ${missingCount} ${missingCount === 1 ? "rule" : "rules"}</button>`;
             return `
               <p class="field-label">${esc(group.name)}<span class="field-optional">${esc(group.tag)}</span></p>
               <p class="rule-exception-hint">${esc(group.description)}</p>
@@ -1015,7 +1017,8 @@ export function renderChanges(container, ctx) {
     button.addEventListener("click", () => {
       const group = soundChangeLibrary.find((item) => item.id === button.dataset.insertLaws);
       if (!group) return;
-      const drafts = newLibraryRules(group);
+      const drafts = newLibraryRules(group, presentLibraryNotations(language));
+      if (!drafts.length) return;
       // The block lands at the end of the list; remembering where it starts
       // lets the undo splice exactly those drafts back out.
       const startIndex = language.soundChanges.length;

@@ -79,7 +79,7 @@ import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } 
 import { subgroupingEvidence } from "../web/js/subgrouping.js";
 import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
 import { applyWordList, rowStatus } from "../web/js/bulk.js";
-import { newLibraryRules, soundChangeLibrary } from "../web/js/soundlaws.js";
+import { newLibraryRules, normalizeLibraryNotation, soundChangeLibrary } from "../web/js/soundlaws.js";
 import { ipaToXSampa, xSampaToIPA } from "../web/js/xsampa.js";
 import { timelineStages } from "../web/js/timeline.js";
 
@@ -4095,6 +4095,27 @@ for (const group of soundChangeLibrary) {
     )
   );
 }
+
+// A partially inserted group must offer only the rules that are not present
+// yet; the panel's tooltip already promises that behavior.
+const grimm = soundChangeLibrary.find((group) => group.id === "grimms-law");
+const grimmDrafts = newLibraryRules(grimm);
+const partlyPresent = new Set(grimmDrafts.slice(0, -1).map((draft) => draft.notation));
+const missingDrafts = newLibraryRules(grimm, partlyPresent);
+equal(
+  "a partially present library group inserts only the missing rules",
+  missingDrafts.map((draft) => draft.notation),
+  [grimm.rules[grimm.rules.length - 1].notation]
+);
+equal("a partially present library group reports the missing count", missingDrafts.length, 1);
+const fullyPresent = new Set(grimmDrafts.map((draft) => draft.notation));
+equal("a fully present library group inserts nothing", newLibraryRules(grimm, fullyPresent), []);
+equal("library presence ignores notation whitespace", normalizeLibraryNotation("  p   >  f "), "p > f");
+equal(
+  "a whitespace variant still counts as present",
+  newLibraryRules(grimm, new Set([" p  >  f "])).map((draft) => draft.notation).includes("p > f"),
+  false
+);
 
 // Spot checks use the curated notations exactly as shipped. A left-hand V
 // demands a preceding vowel, so word-initial stops stay put; likewise the
