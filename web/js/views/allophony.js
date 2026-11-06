@@ -237,7 +237,7 @@ function activeAllophonyCount(language) {
   ).length;
 }
 
-export function allophoneTableMarkup(data) {
+function allophoneTableMarkup(data) {
   if (!data.rows.length) {
     return `<div class="notice notice-quiet">${icon("info")}<p>No allophones are active yet. Add an allophony rule to populate this table.</p></div>`;
   }

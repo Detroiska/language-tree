@@ -1,5 +1,5 @@
 import { uid } from "./model.js";
-import { formatPhonemic, stripLevelMarks } from "./notation.js";
+import { stripLevelMarks } from "./notation.js";
 import { toast } from "./ui.js";
 
 // Bulk word import/export: the paste-and-go side door for spreadsheets and

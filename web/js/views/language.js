@@ -1,5 +1,4 @@
 import {
-  ancestorsOf,
   canSetParent,
   childrenOf,
   createAncestor,

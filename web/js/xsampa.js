@@ -256,12 +256,8 @@ export function ipaToXSampa(text) {
       out.push(entry.x);
       position += [...entry.ipa].length;
       // Modifier loop: superscripts and combining marks bind to the segment.
-      let lastX = entry.x;
       while (position < chars.length && MODIFIERS[chars[position]]) {
         out.push(MODIFIERS[chars[position]]);
-        if (MODIFIERS[chars[position]].startsWith("_")) {
-          lastX = MODIFIERS[chars[position]].slice(1);
-        }
         position += 1;
       }
       continue;

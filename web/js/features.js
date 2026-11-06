@@ -80,9 +80,9 @@ export const FEATURE_DEFINITIONS = {
   pharyngealized: { type: "boolean", label: "pharyngealized" },
 };
 
-export const FEATURE_NAMES = Object.keys(FEATURE_DEFINITIONS);
+const FEATURE_NAMES = Object.keys(FEATURE_DEFINITIONS);
 
-export const FEATURE_ALIASES = {
+const FEATURE_ALIASES = {
   ant: "anterior",
   cons: "consonantal",
   cont: "continuant",
@@ -106,10 +106,6 @@ export const FEATURE_ALIASES = {
   lng: "long",
 };
 
-const BOOLEAN_FEATURES = FEATURE_NAMES.filter(
-  (name) => FEATURE_DEFINITIONS[name].type === "boolean"
-);
-
 const DEFAULT_BOOLEAN_FEATURES = new Set([
   "syllabic", "consonantal", "sonorant", "continuant", "nasal", "lateral",
   "trill", "tap", "delayed_release", "prenasalized", "click", "implosive",
@@ -117,15 +113,13 @@ const DEFAULT_BOOLEAN_FEATURES = new Set([
   "labialized", "palatalized", "velarized", "pharyngealized",
 ]);
 
-const VOWEL_FEATURES = ["high", "low", "back", "central", "round", "atr"];
-
 const CORONAL_PLACES = new Set(["dental", "alveolar", "postalveolar", "retroflex"]);
 const ANTERIOR_PLACES = new Set(["dental", "alveolar"]);
 
 const TIE_PRIMARY = "\u0361";
 const TIE_SECONDARY = "\u035C";
 
-export function normalizeSound(value) {
+function normalizeSound(value) {
   return String(value ?? "").normalize("NFC").trim();
 }
 
@@ -135,7 +129,7 @@ export function soundKey(value) {
   return normalizeSound(value).replaceAll(TIE_SECONDARY, TIE_PRIMARY);
 }
 
-export function normalizeFeatureName(value) {
+function normalizeFeatureName(value) {
   const key = String(value ?? "")
     .normalize("NFC")
     .trim()
@@ -149,11 +143,7 @@ function normalizeCategoryValue(value) {
   return String(value ?? "").normalize("NFC").trim().toLowerCase().replace(/[\s-]+/gu, "_");
 }
 
-export function featureDefinition(name) {
-  return FEATURE_DEFINITIONS[normalizeFeatureName(name)] || null;
-}
-
-export function featureLabel(name) {
+function featureLabel(name) {
   const key = normalizeFeatureName(name);
   return FEATURE_DEFINITIONS[key]?.label || key;
 }
@@ -175,7 +165,7 @@ function cloneBundle(bundle) {
   return { ...(bundle || {}) };
 }
 
-export function derivedFeatureValue(bundle, name) {
+function derivedFeatureValue(bundle, name) {
   const def = FEATURE_DEFINITIONS[name];
   if (!def || def.type !== "derived") return null;
   const place = bundle?.place || null;
@@ -183,7 +173,7 @@ export function derivedFeatureValue(bundle, name) {
   return def.values.includes(place);
 }
 
-export function featureValue(bundle, name) {
+function featureValue(bundle, name) {
   const key = normalizeFeatureName(name);
   const def = FEATURE_DEFINITIONS[key];
   if (!def) return undefined;
@@ -220,7 +210,7 @@ export function normalizeBundle(raw) {
 
 // Keep the bundle internally coherent. `explicit` is the record being applied:
 // an explicit anterior value is preserved, otherwise it follows place.
-export function canonicalizeBundle(input, explicit = null) {
+function canonicalizeBundle(input, explicit = null) {
   const bundle = cloneBundle(input);
   for (const name of FEATURE_NAMES) {
     if (FEATURE_DEFINITIONS[name].type === "derived") continue;
@@ -337,10 +327,6 @@ function lateral(place, patch = {}) {
 
 function affricate(place, voice = false, patch = {}) {
   return stop(place, voice, { delayed_release: true, ...patch });
-}
-
-function affricateFrom(place, voice = false, patch = {}) {
-  return affricate(place, voice, { ...patch });
 }
 
 function prenasalized(place, voice = false, patch = {}) {
@@ -771,7 +757,7 @@ function deriveContour(sound) {
   return null;
 }
 
-export function deriveIpaFeatures(sound) {
+function deriveIpaFeatures(sound) {
   const normalized = normalizeSound(sound);
   if (!normalized) return null;
   const key = soundKey(normalized);
@@ -944,7 +930,7 @@ function variableTerm(variable, feature) {
 
 // Parse one word as a feature term. Returns null when the word is not
 // feature-shaped at all, which lets callers fall back to literal sounds.
-export function parseFeatureWord(word, { allowBare = true, allowVariables = true } = {}) {
+function parseFeatureWord(word, { allowBare = true, allowVariables = true } = {}) {
   const source = String(word ?? "").normalize("NFC").trim();
   if (!source) return null;
 
@@ -1098,7 +1084,7 @@ export function isFeatureBundleText(text, options = {}) {
   return Boolean(parsed && parsed.ok);
 }
 
-export function describeTerm(term) {
+function describeTerm(term) {
   if (term.kind === "bool") return `${term.value ? "+" : "-"}${term.feature}`;
   if (term.kind === "cat") return `${term.feature}=${term.value}`;
   if (term.kind === "var") return `${term.variable}${term.feature}`;
@@ -1208,7 +1194,7 @@ export function featureDistance(a, b) {
   return distance;
 }
 
-export function featureDifferences(a, b) {
+function featureDifferences(a, b) {
   if (!a || !b) return [];
   const differences = [];
   for (const name of FEATURE_NAMES) {
@@ -1221,7 +1207,7 @@ export function featureDifferences(a, b) {
   return differences;
 }
 
-export function nearestBundles(target, candidates, limit = 3) {
+function nearestBundles(target, candidates, limit = 3) {
   return (candidates || [])
     .map((candidate) => ({
       ...candidate,
@@ -1233,7 +1219,7 @@ export function nearestBundles(target, candidates, limit = 3) {
     .slice(0, limit);
 }
 
-export function featureDifferenceLabel(names) {
+function featureDifferenceLabel(names) {
   return (names || []).map((name) => featureLabel(name)).join(", ");
 }
 
@@ -1289,6 +1275,4 @@ export function featureMembers(phonemes, resolver, terms) {
   return members;
 }
 
-export function featureQueryErrorName(terms) {
-  return describeTerms(terms) || "the feature bundle";
-}
+

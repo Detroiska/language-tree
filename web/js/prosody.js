@@ -124,7 +124,7 @@ export function prosodyFromSyllables(tokens, syllables, system, junctures = null
 // preview. Treat each vowel run as a nucleus and give every inter-vocalic
 // consonant to the following onset (the maximal-onset default). Word-final
 // consonants stay in the last coda.
-export function fallbackSyllables(tokens, isVowel) {
+function fallbackSyllables(tokens, isVowel) {
   const nuclei = [];
   let index = 0;
   while (index < tokens.length) {

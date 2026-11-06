@@ -72,7 +72,7 @@ function absorbSegmentEnd(source, end, hasTie = false) {
   return end;
 }
 
-export class SegmentContext {
+class SegmentContext {
   constructor({
     known = [],
     vowels = [],
@@ -1759,7 +1759,7 @@ function syllableBoundsAt(start, end, prosody) {
   return record ? { start: record.start, end: record.end } : null;
 }
 
-export function findRuleMatches(tokens, compiled, context, junctures = null) {
+function findRuleMatches(tokens, compiled, context, junctures = null) {
   const matches = [];
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const domain =
@@ -2105,13 +2105,6 @@ export function applyRule(tokens, compiled, context, junctures = null) {
     junctures: outputJunctures,
     changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
   };
-}
-
-export function compileRules(rules, context) {
-  return rules.map((rule) => {
-    const result = compileRule(rule.notation, context);
-    return { rule, ...result };
-  });
 }
 
 // Compile a language's rules into top-level groups and their sequential
@@ -2511,11 +2504,6 @@ export function ruleCompileErrors(stages) {
     }
   }
   return errors;
-}
-
-export function firstRuleError(compiledRules) {
-  const broken = compiledRules.find((item) => !item.ok && !item.empty);
-  return broken ? broken.error : "";
 }
 
 export { normalizeForm };

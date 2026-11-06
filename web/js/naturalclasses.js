@@ -174,7 +174,7 @@ function planForChart(entry, ref) {
   return plan;
 }
 
-export function resolveClassRef(index, ref) {
+function resolveClassRef(index, ref) {
   const members = [];
   if (!ref || !ref.ok) return { members, empty: true };
   for (const entry of index?.charts || []) {

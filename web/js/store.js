@@ -15,10 +15,8 @@ const KEEPALIVE_BYTE_LIMIT = 60000;
 
 class ProjectStore {
   project = null;
-  route = { view: "tree" };
   revision = 0;
   savedRevision = 0;
-  saving = false;
   saveState = "loading";
   saveError = "";
   lastSavedAt = null;
@@ -194,7 +192,6 @@ class ProjectStore {
       return;
     }
     this.#inFlight = true;
-    this.saving = true;
     this.setSaveState("saving");
     const revisionAtStart = this.revision;
     const snapshot = JSON.parse(JSON.stringify(this.project));
@@ -225,7 +222,6 @@ class ProjectStore {
       }
     } finally {
       this.#inFlight = false;
-      this.saving = false;
       // A successful save with newer edits should roll forward. A failed save
       // must wait for a real retry (the save indicator, the next edit, or a
       // visibility/unload flush); retrying on a timer would hammer the server
