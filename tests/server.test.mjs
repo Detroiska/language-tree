@@ -179,11 +179,26 @@ try {
   equal("GET / sends nosniff", root.headers.get("x-content-type-options"), "nosniff");
   equal("GET / sends no-referrer", root.headers.get("referrer-policy"), "no-referrer");
   equal("GET / disables caching", root.headers.get("cache-control"), "no-store, max-age=0");
+  equal(
+    "GET / sends a script-src self CSP",
+    root.headers.get("content-security-policy")?.includes("script-src 'self'"),
+    true
+  );
+  equal(
+    "GET / CSP denies framing",
+    root.headers.get("content-security-policy")?.includes("frame-ancestors 'none'"),
+    true
+  );
 
   const health = await call(server, "/api/health");
   equal("GET /api/health returns 200", health.status, 200);
   equal("GET /api/health is JSON", health.headers.get("content-type"), "application/json; charset=utf-8");
   equal("GET /api/health sends X-Frame-Options", health.headers.get("x-frame-options"), "DENY");
+  equal(
+    "GET /api/health sends the CSP",
+    health.headers.get("content-security-policy")?.includes("script-src 'self'"),
+    true
+  );
   equal("health reports ok", health.json?.ok, true);
 
   const current = await call(server, "/api/project");
