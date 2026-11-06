@@ -2,7 +2,7 @@ import globals from "globals";
 
 export default [
   {
-    ignores: ["node_modules/**", "test-results/**", "playwright-report/**"],
+    ignores: ["node_modules/**"],
   },
   {
     files: ["web/js/**/*.js"],
@@ -17,7 +17,7 @@ export default [
     },
   },
   {
-    files: ["tests/**/*.mjs", "playwright.config.mjs"],
+    files: ["tests/**/*.mjs"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
