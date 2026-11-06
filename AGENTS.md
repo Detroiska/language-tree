@@ -5,7 +5,8 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 
 ## Commands
 - Test:      node tests/engine.test.mjs   # engine suite: rule compilation, features, phonotactics, stress, reconstruction, subgrouping, reports, analytics
-             node tests/bulk.test.mjs     # word-list import/export parser (RFC 4180 CSV/TSV, JSON); run both — each exits non-zero on failure
+             node tests/bulk.test.mjs     # word-list import/export parser (RFC 4180 CSV/TSV, JSON)
+             node tests/server.test.mjs   # server API: JSON errors, gzip, revisions, Host check, headers; needs Python 3.10+; run all three — each exits non-zero on failure
 - Lint:      none
 - Typecheck: none
 - Run:       python3 server.py --no-browser   # http://127.0.0.1:8765/ ; Python 3.10+; flags: --port 9000, --host 0.0.0.0 (trusted network only). ./start.sh / start.bat pass flags through
@@ -15,8 +16,8 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - web/index.html, web/css/styles.css   # app shell and the single stylesheet
 - web/js/              # DOM-free engine ES modules importable from Node (model, notation, naturalclasses, features, categories, phonology, reconstruction, subgrouping, prosody, phonotactics, phonotacticsCheck, diff, correspondences, analytics, bulk, report, routes) plus UI modules (app, store, api, ui, search, autocomplete, keyboard)
 - web/js/views/        # one render module per tab; views/language.js owns the tab bar
-- tests/               # two suites in plain-assertion style that print "N passed, M failed"; engine.test.mjs covers every DOM-free module — not one test file per source module
-- .github/workflows/tests.yml   # CI: runs both suites on every pull request and on main after merge
+- tests/               # three suites in plain-assertion style that print "N passed, M failed"; engine.test.mjs covers every DOM-free module — not one test file per source module; server.test.mjs spawns server.py against a temp data directory
+- .github/workflows/tests.yml   # CI: runs all three suites on every pull request and on main after merge
 - data/project.json    # the complete project document (ships with the demo family). Not generated: ordinary app-edited data, pretty-printed for line-based diffs; the app rewrites it on every save
 
 ## Rules

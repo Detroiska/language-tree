@@ -25,3 +25,5 @@ jobs:
         run: node tests/engine.test.mjs
       - name: Bulk suite
         run: node tests/bulk.test.mjs
+      - name: Server suite
+        run: node tests/server.test.mjs

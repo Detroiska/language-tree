@@ -131,6 +131,9 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        # The app is local-only; a remote page must not frame loopback and
+        # clickjack destructive confirmations.
+        self.send_header("X-Frame-Options", "DENY")
         super().end_headers()
 
     def log_message(self, fmt: str, *args) -> None:
@@ -178,8 +181,11 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         except ValueError:
             self.send_json({"error": "Invalid Content-Length."}, HTTPStatus.BAD_REQUEST)
             return
-        if length <= 0 or length > MAX_BODY_BYTES:
-            self.send_json({"error": "Request body is empty or too large."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        if length <= 0:
+            self.send_json({"error": "Request body is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if length > MAX_BODY_BYTES:
+            self.send_json({"error": "Request body is too large."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return
 
         encoding = (self.headers.get("Content-Encoding") or "").strip().lower()
@@ -239,15 +245,28 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             return
         self.send_json({"ok": True, "savedAt": project["updatedAt"]})
 
-    def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
-        # SimpleHTTPRequestHandler has no do_POST, so without this the API
-        # would answer with the stdlib's HTML 501 page instead of JSON.
+    def method_not_allowed(self) -> None:
+        # SimpleHTTPRequestHandler implements only GET/HEAD, so any other
+        # method without a do_* handler gets the stdlib's HTML 501 page. Keep
+        # every API method on the same JSON envelope instead.
         if not self.host_allowed():
             return
         self.send_json(
             {"error": "Method not allowed. Save the project with PUT /api/project."},
             HTTPStatus.METHOD_NOT_ALLOWED,
         )
+
+    def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
+        self.method_not_allowed()
+
+    def do_DELETE(self) -> None:  # noqa: N802 (stdlib naming)
+        self.method_not_allowed()
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 (stdlib naming)
+        self.method_not_allowed()
+
+    def do_PATCH(self) -> None:  # noqa: N802 (stdlib naming)
+        self.method_not_allowed()
 
 
 def ensure_data_file() -> None:
@@ -279,7 +298,10 @@ def main() -> None:
     # too; any other name is treated as a rebinding attempt. Non-loopback
     # binds serve a network deliberately and skip the check.
     server.allowed_hosts = LOOPBACK_HOSTS if args.host.strip().lower() in LOOPBACK_BINDS else None
-    url = f"http://{args.host}:{args.port}/"
+    # server_address carries the real port, which matters for --port 0: bind an
+    # ephemeral port for tests without guessing one in advance.
+    port = server.server_address[1]
+    url = f"http://{args.host}:{port}/"
     print()
     print("  Language Tree")
     print(f"  {url}")
