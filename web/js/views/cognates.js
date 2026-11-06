@@ -1,3 +1,4 @@
+import { normalizeGloss } from "../gloss.js";
 import { findLanguage, getLineage, uid } from "../model.js";
 import {
   compileChainFrom,
@@ -9,7 +10,7 @@ import {
   ruleCompileErrors,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, joinSegments, stripStressMarks } from "../notation.js";
+import { formatPhonemic, formatPhonetic, joinSegments, sameForm } from "../notation.js";
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { buildCorrespondences } from "../correspondences.js";
@@ -25,18 +26,6 @@ import { esc, icon, toast } from "../ui.js";
 // re-render the matrix or trace with that change forced on.
 const optionalVariantMemory = new Map();
 
-function normalizeGlossOf(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function sameForm(a, b) {
-  const normalize = (value) =>
-    stripStressMarks(String(value || "").normalize("NFC"))
-      .replace(/[.\-·+\s]+/gu, "")
-      .trim();
-  return normalize(a) === normalize(b);
-}
-
 function wordsWithForms(language) {
   return language.vocabulary.filter((word) => word.gloss.trim() && word.form.trim());
 }
@@ -50,7 +39,7 @@ function languagesByDepth(project) {
 }
 
 function recordedFor(targetLanguage, gloss) {
-  const key = normalizeGlossOf(gloss);
+  const key = normalizeGloss(gloss);
   if (!key) return null;
   return (
     targetLanguage.vocabulary.find((entry) => entry.gloss.trim().toLowerCase() === key && entry.form.trim()) || null
@@ -836,8 +825,8 @@ export function renderCognates(container, ctx) {
     body.addEventListener("click", (event) => {
       const traceButton = event.target.closest("[data-correspondence-gloss]");
       if (!traceButton) return;
-      const gloss = normalizeGlossOf(traceButton.dataset.correspondenceGloss);
-      const targetWord = words.find((entry) => normalizeGlossOf(entry.gloss) === gloss);
+      const gloss = normalizeGloss(traceButton.dataset.correspondenceGloss);
+      const targetWord = words.find((entry) => normalizeGloss(entry.gloss) === gloss);
       if (targetWord) ctx.navigate(singleHash(source.id, targetWord.id));
     });
   }

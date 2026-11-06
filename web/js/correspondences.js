@@ -1,4 +1,5 @@
 import { alignSegments } from "./diff.js";
+import { normalizeGloss } from "./gloss.js";
 import { getLineage } from "./model.js";
 import { compileChainFrom, contextForLanguage, deriveStages } from "./phonology.js";
 
@@ -22,12 +23,6 @@ const POSITION_RANK = {
   final: 2,
   only: 3,
 };
-
-function normalizeGloss(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
 
 function formOf(word) {
   return String(word?.form || "").trim();

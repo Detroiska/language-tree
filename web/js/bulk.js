@@ -1,3 +1,4 @@
+import { normalizeGloss } from "./gloss.js";
 import { uid } from "./model.js";
 import { stripLevelMarks } from "./notation.js";
 
@@ -9,10 +10,6 @@ import { stripLevelMarks } from "./notation.js";
 
 const HEADER_WORDS = new Set(["gloss", "glosses", "meaning", "meanings"]);
 const FORM_HEADER_WORDS = new Set(["form", "forms", "ipa", "word", "words", "surface"]);
-
-function normalizeGloss(value) {
-  return String(value || "").trim().toLowerCase();
-}
 
 // Duplicate glosses can exist in an older project. applyWordList builds its
 // map by assignment, so the last matching word is the one an update changes;

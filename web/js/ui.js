@@ -44,6 +44,11 @@ export function icon(name, className = "") {
   return `<svg class="icon ${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }
 
+// Small "12 languages" summary used by the report-style tabs.
+export function summaryChip(label, value) {
+  return `<span><strong>${esc(String(value))}</strong> ${esc(label)}</span>`;
+}
+
 export function hydrateIcons(root = document) {
   root.querySelectorAll("[data-icon]").forEach((element) => {
     const name = element.getAttribute("data-icon");

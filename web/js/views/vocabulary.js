@@ -1,3 +1,4 @@
+import { normalizeGloss } from "../gloss.js";
 import { allophonyRules, ancestorsOf, uid } from "../model.js";
 import { applyWordList, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
 import {
@@ -6,7 +7,7 @@ import {
   hasSurfaceDisplay,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, normalizeSearchText, stripLevelMarks, stripStressMarks } from "../notation.js";
+import { formatPhonemic, formatPhonetic, normalizeSearchText, sameForm, stripLevelMarks } from "../notation.js";
 import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
 // ASCII form for notes and external tools; conversion lives in web/js/xsampa.js.
 import { ipaToXSampa } from "../xsampa.js";
@@ -64,10 +65,6 @@ function parentFor(ctx) {
   return ancestorsOf(ctx.project, ctx.language.id).at(-1) || null;
 }
 
-function normalizeGloss(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
 // Filter state lives at module level so it survives the full re-render that
 // follows every edit (add word, delete word, undo, …).
 const lexiconFilter = { text: "", status: "all" };
@@ -96,14 +93,6 @@ function exceptionNote(exceptions) {
   return ` · ${count} ${count === 1 ? "rule" : "rules"} skipped as a lexical ${
     count === 1 ? "exception" : "exceptions"
   }`;
-}
-
-function sameForm(a, b) {
-  const normalize = (value) =>
-    stripStressMarks(String(value || "").normalize("NFC"))
-      .replace(/[.\-·+\s]+/gu, "")
-      .trim();
-  return normalize(a) === normalize(b);
 }
 
 function checkCellMarkup(word, expected) {

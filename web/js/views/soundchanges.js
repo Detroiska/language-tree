@@ -21,7 +21,7 @@ import {
   optionalSkippedRulesFromSteps,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, joinSegments, stripStressMarks } from "../notation.js";
+import { formatPhonemic, formatPhonetic, joinSegments, sameForm } from "../notation.js";
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { reconstructForm, reconstructionAlternatives } from "../reconstruction.js";
@@ -80,14 +80,6 @@ function directDerivation(ctx, form, gloss = "", optionalRuleIds = []) {
     errors: result.errors,
     fatal: result.fatal,
   };
-}
-
-function sameForm(a, b) {
-  const normalize = (value) =>
-    stripStressMarks(String(value || "").normalize("NFC"))
-      .replace(/[.\-·+\s]+/gu, "")
-      .trim();
-  return normalize(a) === normalize(b);
 }
 
 function statusFor(rule, context) {

@@ -18,8 +18,9 @@
 // Candidates are ordered by fewest rule applications. Everything here is
 // DOM-free so it can be tested under Node.
 
+import { normalizeGloss } from "./gloss.js";
 import { getLineage, ruleExceptsGloss } from "./model.js";
-import { joinSegments, stripLevelMarks, stripStressMarks } from "./notation.js";
+import { joinSegments, sameJunctures, sameTokens, stripLevelMarks, stripStressMarks } from "./notation.js";
 import {
   applyRule,
   compileRuleStages,
@@ -47,14 +48,6 @@ function candidateKey(tokens, junctures) {
   return `${tokenKey(tokens)}\u0001${cutKey(junctures)}`;
 }
 
-function sameTokens(left, right) {
-  return left.length === right.length && left.every((token, index) => token === right[index]);
-}
-
-function sameJunctures(left, right) {
-  return cutKey(left) === cutKey(right);
-}
-
 function identityCandidate(tokens, junctures = new Set()) {
   return { tokens: [...tokens], junctures: new Set(junctures), score: 0, loss: 0 };
 }
@@ -63,10 +56,6 @@ function normalizeLexicalForm(value) {
   // Morpheme cuts are presentation: parent-lexicon evidence compares the
   // segment string, not where a word happened to be divided.
   return stripStressMarks(stripLevelMarks(value)).replace(/\+/gu, "").normalize("NFC");
-}
-
-function normalizeGloss(value) {
-  return String(value ?? "").trim().toLowerCase();
 }
 
 // Gloss labels in a real lexicon drift in punctuation more often than in

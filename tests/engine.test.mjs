@@ -53,8 +53,13 @@ import {
   formatPhonetic,
   joinSegments,
   normalizeSearchText,
+  sameForm,
+  sameJunctures,
+  sameTokens,
   stripLevelMarks,
 } from "../web/js/notation.js";
+import { esc } from "../web/js/escape.js";
+import { normalizeGloss } from "../web/js/gloss.js";
 import { compileClasses } from "../web/js/categories.js";
 import {
   IPA_FEATURES,
@@ -1479,6 +1484,23 @@ equal("format empty form", formatPhonemic("  "), "");
 equal("search normalization ignores stress marks", normalizeSearchText("kaˈsa"), "kasa");
 equal("search normalization ignores level marks and case", normalizeSearchText("/KaˈSa/"), "kasa");
 equal("search normalization keeps ordinary forms", normalizeSearchText("kasa"), "kasa");
+
+equal("same form ignores stress marks", sameForm("kaˈsa", "kasa"), true);
+equal("same form ignores morpheme cuts and syllable dots", sameForm("kat+ta", "kat.ta"), true);
+equal("same form ignores hyphens and whitespace", sameForm("ka-ta", "kata"), true);
+equal("same form compares actual segments", sameForm("kasa", "kaza"), false);
+equal("same tokens compares order", sameTokens(["k", "a"], ["a", "k"]), false);
+equal("same tokens accepts equal arrays", sameTokens(["k", "a"], ["k", "a"]), true);
+equal("same junctures compares sets", sameJunctures(new Set([2, 4]), new Set([4, 2])), true);
+equal("same junctures rejects a different cut", sameJunctures(new Set([2]), new Set([3])), false);
+
+equal(
+  "gloss normalization collapses whitespace, unicode, and case",
+  normalizeGloss("  Ka\u0301t\t ta "),
+  "kát ta"
+);
+equal("gloss normalization tolerates null", normalizeGloss(null), "");
+equal("escape covers markup characters", esc(`<a href="x">&'`), "&lt;a href=&quot;x&quot;&gt;&amp;&#039;");
 
 /* ---- allophony ---------------------------------------------------------- */
 

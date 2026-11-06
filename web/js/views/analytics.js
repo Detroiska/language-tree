@@ -1,6 +1,6 @@
 import { analyzeLexicon } from "../analytics.js";
 import { formatPhonemic } from "../notation.js";
-import { esc, icon } from "../ui.js";
+import { esc, icon, summaryChip } from "../ui.js";
 
 // A per-language analytics tab: type/token phoneme frequency, onset and coda
 // counts from the syllabifier, unused vs. un-charted sounds, C/V balance,
@@ -17,10 +17,6 @@ function barMarkup(count, max) {
   if (!count || !max) return "";
   const width = Math.max(2, Math.round((count / max) * 100));
   return `<span class="freq-bar-wrap"><span class="freq-bar" style="width:${width}%"></span></span>`;
-}
-
-function summaryChip(label, value) {
-  return `<span><strong>${esc(value)}</strong> ${esc(label)}</span>`;
 }
 
 function soundToken(value, charted) {

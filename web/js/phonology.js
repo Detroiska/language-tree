@@ -12,7 +12,7 @@ import {
 } from "./model.js";
 import { compileClasses } from "./categories.js";
 import { buildClassIndex, classForText } from "./naturalclasses.js";
-import { joinSegments, normalizeForm, stripLevelMarks } from "./notation.js";
+import { joinSegments, normalizeForm, sameJunctures, sameTokens, stripLevelMarks } from "./notation.js";
 import { compilePhonotactics, syllabifyTokens } from "./phonotactics.js";
 import { prosodyFallback, prosodyFromSyllables, normalizeStressSystem } from "./prosody.js";
 import {
@@ -2015,16 +2015,6 @@ export function replacementForMatch(tokens, match, compiled, context) {
     return { ok: false, error: `${label}: “${sound}” → ${resolved.error}` };
   }
   return { ok: true, replacement: [resolved.sound], sound: resolved.sound };
-}
-
-function sameTokens(left, right) {
-  return left.length === right.length && left.every((token, index) => token === right[index]);
-}
-
-function sameJunctures(left, right) {
-  if (left.size !== right.size) return false;
-  for (const value of left) if (!right.has(value)) return false;
-  return true;
 }
 
 // Move zero-width morpheme cuts through a set of edits. A cut before an edit

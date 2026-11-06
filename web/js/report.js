@@ -14,6 +14,7 @@ import { stressLabel } from "./prosody.js";
 import { describeBundle } from "./features.js";
 import { formatPhonemic, formatPhonetic } from "./notation.js";
 import { esc } from "./escape.js";
+import { normalizeGloss } from "./gloss.js";
 
 // Family report & backup: a shareable snapshot of the whole tree as Markdown
 // (plain text for notes tools and git) or a self-contained HTML page (opens
@@ -86,10 +87,6 @@ function chartTableData(chart) {
     ]),
     notes: chart.notes || "",
   };
-}
-
-function normalizeGloss(value) {
-  return String(value || "").normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 // Cognate sets: glosses recorded with a form in two or more languages,
