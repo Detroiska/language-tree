@@ -4118,14 +4118,14 @@ equal(
 );
 
 // Spot checks use the curated notations exactly as shipped. A left-hand V
-// demands a preceding vowel, so word-initial stops stay put; likewise the
-// historical "gener" outcome needs a u > e change that lies outside the
-// rhotacism rule, which only turns post-vocalic s into r.
+// demands a preceding vowel, so word-initial stops stay put; the rhotacism
+// rule is intervocalic, so a word-final s also stays.
 const kLenition = compileRule("k > x / V _", libraryCtx).rule;
 const tLenition = compileRule("t > θ / V _", libraryCtx).rule;
 const palatalization = compileRule("k > t͡ʃ / _ [i e]", libraryCtx).rule;
 const affrication = compileRule("p > p͡f / # _", libraryCtx).rule;
-const rhotacism = compileRule("s > r / V _", libraryCtx).rule;
+const latinRhotacism = soundChangeLibrary.find((group) => group.id === "latin-rhotacism");
+const rhotacism = compileRule(latinRhotacism.rules[0].notation, libraryCtx).rule;
 const applyLibrary = (rule, form) => applyRule(libraryCtx.tokenize(form), rule, libraryCtx).tokens.join("");
 
 equal("insular celtic lenition leaves a word-initial stop alone", applyLibrary(kLenition, "kata"), "kata");
@@ -4138,7 +4138,8 @@ equal("slavic palatalization fronts before a front vowel", applyLibrary(palatali
 equal("slavic palatalization ignores a back vowel", applyLibrary(palatalization, "kane"), "kane");
 equal("high german shift affricates a word-initial voiceless stop", applyLibrary(affrication, "pak"), "p͡fak");
 equal("high german shift leaves a medial stop unaffricated", applyLibrary(affrication, "apa"), "apa");
-equal("latin rhotacism turns a post-vocalic s into r", applyLibrary(rhotacism, "genus"), "genur");
+equal("latin rhotacism turns an intervocalic s into r", applyLibrary(rhotacism, "rosa"), "rora");
+equal("latin rhotacism leaves a word-final s alone", applyLibrary(rhotacism, "kas"), "kas");
 
 /* ---- x-sampa conversion ---------------------------------------------------- */
 

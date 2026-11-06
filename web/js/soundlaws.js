@@ -83,7 +83,7 @@ export const soundChangeLibrary = [
     tag: "Old Latin",
     description: "Intervocalic s becomes r, which is why nominative s-forms diverge from their perfect and future stems.",
     rules: [
-      { notation: "s > r / V _", note: "s becomes r after a vowel (the attested gener and honor also shifted vowels later)" },
+      { notation: "s > r / V _ V", note: "s becomes r between vowels (the attested gener and honor also shifted vowels later)" },
     ],
   },
 ];
