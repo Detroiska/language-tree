@@ -1042,6 +1042,10 @@ equal(
   ["", ""],
 );
 
+const emptyProject = ensureProject({ title: "Empty", languages: [] });
+equal("an empty project stays empty", emptyProject.languages, []);
+equal("an empty project keeps its title", emptyProject.title, "Empty");
+
 /* ---- id normalization ---------------------------------------------------- */
 
 const hostileId = 'x" onmouseover="alert(1) t="';

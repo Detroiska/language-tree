@@ -54,12 +54,17 @@ function resolvePython() {
   throw new Error("Python 3.10+ is required for the server suite (set PYTHON to override the interpreter).");
 }
 
-async function startServer(python) {
+async function startServer(python, files = { "project.json": project }) {
   const root = mkdtempSync(join(tmpdir(), "language-tree-server-"));
   copyFileSync(SERVER_PY, join(root, "server.py"));
   mkdirSync(join(root, "data"), { recursive: true });
   mkdirSync(join(root, "web"), { recursive: true });
-  writeFileSync(join(root, "data", "project.json"), `${JSON.stringify(project, null, 2)}\n`);
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(
+      join(root, "data", name),
+      typeof content === "string" ? content : `${JSON.stringify(content, null, 2)}\n`
+    );
+  }
   writeFileSync(join(root, "web", "index.html"), "<!doctype html><title>Language Tree test</title>\n");
 
   const child = spawn(python, ["-u", join(root, "server.py"), "--no-browser", "--port", "0"], {
@@ -340,6 +345,139 @@ try {
     concurrent.filter((response) => response.status !== 200).length,
     0
   );
+
+  /* ---- project files ----------------------------------------------------- */
+
+  const secondProject = {
+    ...project,
+    title: "Second project",
+  };
+  writeFileSync(
+    join(server.root, "data", "second_project.json"),
+    `${JSON.stringify(secondProject, null, 2)}\n`
+  );
+  writeFileSync(join(server.root, "data", "broken.json"), "{");
+  writeFileSync(
+    join(server.root, "data", "shape.json"),
+    `${JSON.stringify({ languages: [] }, null, 2)}\n`
+  );
+
+  const projects = await call(server, "/api/projects");
+  equal("GET /api/projects returns 200", projects.status, 200);
+  equal(
+    "GET /api/projects lists every data/*.json file",
+    projects.json?.projects?.map((entry) => entry.file),
+    ["broken.json", "project.json", "second_project.json", "shape.json"]
+  );
+  equal("GET /api/projects reports the active file", projects.json?.active, "project.json");
+  equal(
+    "GET /api/projects marks malformed JSON",
+    typeof projects.json?.projects?.find((entry) => entry.file === "broken.json")?.error,
+    "string"
+  );
+  equal(
+    "GET /api/projects marks invalid project shapes",
+    /title/.test(projects.json?.projects?.find((entry) => entry.file === "shape.json")?.error || ""),
+    true
+  );
+
+  const selectHeaders = { "Content-Type": "application/json" };
+  const selected = await call(server, "/api/projects/active", {
+    method: "PUT",
+    headers: selectHeaders,
+    body: JSON.stringify({ file: "second_project.json" }),
+  });
+  equal("PUT /api/projects/active selects an existing project", selected.status, 200);
+  equal("selection reports the active file", selected.json?.active, "second_project.json");
+  equal(
+    "GET /api/project follows the selected file",
+    (await call(server, "/api/project")).json?.title,
+    secondProject.title
+  );
+
+  const explicitSave = await call(server, "/api/project?file=project.json", {
+    method: "PUT",
+    headers: selectHeaders,
+    body: JSON.stringify({ ...project, title: "Explicit save" }),
+  });
+  equal("PUT /api/project?file= saves that file", explicitSave.status, 200);
+  equal("save reports its target file", explicitSave.json?.file, "project.json");
+  equal(
+    "explicit save leaves the active project alone",
+    (await call(server, "/api/project")).json?.title,
+    secondProject.title
+  );
+  equal(
+    "explicit save writes the selected target",
+    (await call(server, "/api/project?file=project.json")).json?.title,
+    "Explicit save"
+  );
+
+  const rejectBroken = await call(server, "/api/projects/active", {
+    method: "PUT",
+    headers: selectHeaders,
+    body: JSON.stringify({ file: "broken.json" }),
+  });
+  equal("selecting malformed JSON is 400", rejectBroken.status, 400);
+  truthy("selecting malformed JSON explains the problem", /Invalid JSON|Expecting/.test(rejectBroken.json?.error || ""));
+  const rejectShape = await call(server, "/api/projects/active", {
+    method: "PUT",
+    headers: selectHeaders,
+    body: JSON.stringify({ file: "shape.json" }),
+  });
+  equal("selecting an invalid project shape is 400", rejectShape.status, 400);
+  truthy("invalid project shape names the missing title", /title/.test(rejectShape.json?.error || ""));
+  const rejectPath = await call(server, "/api/projects/active", {
+    method: "PUT",
+    headers: selectHeaders,
+    body: JSON.stringify({ file: "../server.py" }),
+  });
+  equal("selecting a path outside data/ is 400", rejectPath.status, 400);
+  const rejectMissing = await call(server, "/api/projects/active", {
+    method: "PUT",
+    headers: selectHeaders,
+    body: JSON.stringify({ file: "missing.json" }),
+  });
+  equal("selecting a missing project is 404", rejectMissing.status, 404);
+  const rejectBody = await call(server, "/api/projects/active", {
+    method: "PUT",
+    headers: selectHeaders,
+    body: JSON.stringify({ file: 42 }),
+  });
+  equal("selection requires a filename string", rejectBody.status, 400);
+  equal(
+    "failed selections keep the previous active project",
+    (await call(server, "/api/project")).json?.title,
+    secondProject.title
+  );
+
+  const badProjectQuery = await call(server, "/api/project?file=../server.py");
+  equal("GET /api/project refuses paths outside data/", badProjectQuery.status, 400);
+  const blankProjectQuery = await call(server, "/api/project?file=");
+  equal("GET /api/project refuses an empty file selector", blankProjectQuery.status, 400);
+  const missingProjectQuery = await call(server, "/api/project?file=missing.json");
+  equal("GET /api/project reports a missing file", missingProjectQuery.status, 404);
+
+  /* ---- fresh data directory ---------------------------------------------- */
+
+  const fresh = await startServer(python, {});
+  try {
+    const freshProjects = await call(fresh, "/api/projects");
+    equal(
+      "a fresh data directory gets a blank example project",
+      freshProjects.json?.projects?.map((entry) => entry.file),
+      ["example_project.json"]
+    );
+    equal("the seeded example is active", freshProjects.json?.active, "example_project.json");
+    equal("the seeded example is blank", freshProjects.json?.projects?.[0]?.languages, 0);
+    equal(
+      "the seeded example loads through the API",
+      (await call(fresh, "/api/project")).json?.title,
+      "Example language family"
+    );
+  } finally {
+    await stopServer(fresh);
+  }
 
   /* ---- methods and unknown routes (#15) ---------------------------------- */
 

@@ -15,6 +15,10 @@ const KEEPALIVE_BYTE_LIMIT = 60000;
 
 class ProjectStore {
   project = null;
+  // The filename this tab has open. Saves are pinned to it, so changing the
+  // active project in another tab or window cannot redirect this tab's work.
+  projectFile = null;
+  projects = [];
   revision = 0;
   savedRevision = 0;
   saveState = "loading";
@@ -44,6 +48,63 @@ class ProjectStore {
   #historyListeners = new Set();
   #resyncListeners = new Set();
 
+  // Fetch data/ listing; the active file is only the startup default. This
+  // tab keeps its own filename so two tabs may work on different projects
+  // without either save landing in the other file.
+  async loadProjectList() {
+    const listing = await api.listProjects();
+    this.projects = Array.isArray(listing?.projects) ? listing.projects : [];
+    const active = typeof listing?.active === "string" ? listing.active : null;
+    // Once a document is open, never retarget it from a listing refresh: the
+    // file may have been deleted or the active pointer may have moved in
+    // another tab, and a later autosave must not land in a different project.
+    if (!this.projectFile) {
+      this.projectFile =
+        active ||
+        this.projects.find((entry) => !entry.error)?.file ||
+        this.projects[0]?.file ||
+        null;
+    }
+    return listing;
+  }
+
+  // Open another project file. Unsaved work is flushed first; a failed save
+  // aborts the switch rather than silently discarding it.
+  async switchProject(file) {
+    if (!file || (file === this.projectFile && this.project)) return false;
+    if (this.dirty) await this.flush();
+    if (this.saveState === "saving") {
+      await new Promise((resolve) => {
+        const unsubscribe = this.onStatus((state) => {
+          if (state === "saving") return;
+          unsubscribe();
+          resolve();
+        });
+      });
+    }
+    if (this.dirty || this.saveState === "error" || this.saveState === "conflict") {
+      throw new Error(this.saveError || "Could not save the current project before switching.");
+    }
+    // Fetch before changing the active pointer or the open document: a broken
+    // or missing file must leave the current project exactly as it was.
+    const remote = await api.loadProject(file);
+    await api.selectProject(file);
+    const previousFile = this.projectFile;
+    this.projectFile = file;
+    try {
+      await this.load(remote);
+    } catch (error) {
+      this.projectFile = previousFile;
+      throw error;
+    }
+    try {
+      await this.loadProjectList();
+    } catch {
+      // The switch already succeeded; a stale menu can be refreshed later.
+    }
+    return true;
+  }
+
   // The optional raw document lets the resync path apply the exact snapshot it
   // checked instead of fetching again. When ifClean is true, the caller is
   // replacing a background document: abort if any edit, save, or dialog
@@ -51,7 +112,9 @@ class ProjectStore {
   async load(raw = null, { ifClean = false } = {}) {
     const revisionAtStart = this.revision;
     const wasDirty = this.dirty;
-    const remote = raw ?? (await api.loadProject());
+    if (!raw && !this.projectFile) await this.loadProjectList();
+    if (!this.projectFile) throw new Error("No project files were found in data/.");
+    const remote = raw ?? (await api.loadProject(this.projectFile));
     if (ifClean) {
       if (wasDirty || this.dirty || this.revision !== revisionAtStart || this.#inFlight) return false;
       if (document.body.classList.contains("has-modal")) return false;
@@ -69,7 +132,7 @@ class ProjectStore {
     this.#recording = false;
     this.#lastState = deepClone(this.project);
     this.setSaveState("saved");
-    if (before !== after || !remote.languages?.length) {
+    if (before !== after) {
       this.touch({ immediate: true });
     }
     // History starts only after loading: the loader's normalizing save is not
@@ -197,7 +260,7 @@ class ProjectStore {
     const snapshot = JSON.parse(JSON.stringify(this.project));
     let saved = false;
     try {
-      const result = await api.saveProject(snapshot, force ? null : this.baseRevision);
+      const result = await api.saveProject(snapshot, force ? null : this.baseRevision, this.projectFile);
       saved = true;
       this.savedRevision = revisionAtStart;
       this.baseRevision = result?.savedAt || this.baseRevision;
@@ -251,7 +314,7 @@ class ProjectStore {
   flushOnExit() {
     // A conflicted tab must not force its stale snapshot over newer work while
     // the page unloads. The beforeunload prompt already warned the user.
-    if (!this.project || !this.dirty || this.saveState === "conflict") return;
+    if (!this.project || !this.projectFile || !this.dirty || this.saveState === "conflict") return;
     let body = "";
     try {
       body = JSON.stringify(this.project);
@@ -266,7 +329,7 @@ class ProjectStore {
     const headers = { "Content-Type": "application/json" };
     if (this.baseRevision) headers["X-Base-Revision"] = this.baseRevision;
     try {
-      void fetch("/api/project", {
+      void fetch(`/api/project?file=${encodeURIComponent(this.projectFile)}`, {
         method: "PUT",
         headers,
         body,
@@ -296,7 +359,7 @@ class ProjectStore {
     const baseRevisionAtStart = this.baseRevision;
     let remote;
     try {
-      remote = await api.loadProject();
+      remote = await api.loadProject(this.projectFile);
     } catch {
       return;
     }
