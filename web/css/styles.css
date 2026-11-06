@@ -3947,6 +3947,51 @@ th:hover > .axis-menu,
   overflow: hidden;
 }
 
+.library-trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+}
+
+.library-trigger:hover {
+  background: var(--surface-soft);
+}
+
+.library-trigger:focus-visible {
+  outline-offset: -2px;
+}
+
+.library-trigger .panel-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+}
+
+.library-trigger-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-trigger .details-chevron {
+  flex: 0 0 auto;
+}
+
 .help-summary {
   position: relative;
   cursor: pointer;
@@ -4729,6 +4774,18 @@ th:hover > .axis-menu,
 
 .modal-body {
   padding: 0 20px 6px;
+}
+
+.library-modal-copy {
+  margin-bottom: 12px;
+}
+
+.library-modal-body {
+  max-height: min(64vh, 620px);
+  padding: 0 4px 8px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .modal-copy {
