@@ -267,6 +267,31 @@ try {
   equal("matching revision saves", accepted.status, 200);
   truthy("save response carries the new revision", typeof accepted.json?.savedAt === "string" && accepted.json.savedAt.length > 0);
 
+  /* ---- concurrent reads and writes (#8) ---------------------------------- */
+
+  const operations = [];
+  for (let index = 0; index < 80; index += 1) {
+    operations.push(call(server, "/api/project"));
+    operations.push(
+      call(server, "/api/project", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(project),
+      })
+    );
+  }
+  const concurrent = await Promise.all(operations);
+  equal(
+    "concurrent GET/PUT has no server errors",
+    concurrent.filter((response) => response.status >= 500).map((response) => [response.status, response.json?.error]),
+    []
+  );
+  equal(
+    "concurrent reads and writes all succeed",
+    concurrent.filter((response) => response.status !== 200).length,
+    0
+  );
+
   /* ---- methods and unknown routes (#15) ---------------------------------- */
 
   for (const method of ["POST", "DELETE", "OPTIONS", "PATCH"]) {
