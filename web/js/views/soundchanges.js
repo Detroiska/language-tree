@@ -25,6 +25,13 @@ import { formatPhonemic, formatPhonetic, joinSegments, stripStressMarks } from "
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { reconstructForm, reconstructionAlternatives } from "../reconstruction.js";
+import {
+  exceptionSummary,
+  exceptionSuggestionsMarkup as sharedExceptionSuggestionsMarkup,
+  exceptionsMarkup as sharedExceptionsMarkup,
+  ruleStatusFor,
+  statusMarkup,
+} from "../ruleEditor.js";
 import { debounce, esc, icon, toast } from "../ui.js";
 // Curated attested rule groups offered in the Rule library panel; the data
 // module also builds the disabled draft records the insert button pushes.
@@ -84,46 +91,20 @@ function sameForm(a, b) {
 }
 
 function statusFor(rule, context) {
-  if (!rule.notation.trim()) return { kind: "empty", label: "Empty rule" };
-  const compiled = compileRule(rule.notation, context);
   // A warning keeps the rule usable — the user may be mid-edit — while making
   // an inert rule (for example compact “CV > x” letter literals) visible.
-  if (compiled.ok && compiled.warnings?.length) return { kind: "warn", label: compiled.warnings[0] };
-  if (compiled.ok) return { kind: "ok", label: "Valid" };
-  return { kind: "error", label: compiled.error };
-}
-
-function statusMarkup(status) {
-  const glyph =
-    status.kind === "ok" ? "check" : status.kind === "error" || status.kind === "warn" ? "warning" : "info";
-  return `${icon(glyph)}<span>${esc(status.label)}</span>`;
-}
-
-function exceptionSummary(exceptions) {
-  const count = exceptions?.length || 0;
-  return count ? `${count} ${count === 1 ? "word" : "words"}` : "none";
+  return ruleStatusFor(rule, (notation) => compileRule(notation, context));
 }
 
 function exceptionsMarkup(rule) {
-  const exceptions = normalizeRuleExceptions(rule.exceptions);
-  return `
-    <details class="rule-exceptions" ${exceptions.length ? "open" : ""}>
-      <summary>
-        <span>Exceptions</span>
-        <span class="rule-exception-count" data-rule-exception-count>${esc(exceptionSummary(exceptions))}</span>
-      </summary>
-      <div class="rule-exception-body">
-        <input class="rule-exception-input" type="text" value="${esc(exceptions.join(", "))}" placeholder="Glosses, comma-separated — e.g. water, tooth" autocomplete="off" spellcheck="false" aria-label="Lexical exception glosses" list="rule-exception-glosses">
-        <p class="rule-exception-hint">This rule is skipped for words with these glosses. Suggestions come from this lineage’s vocabulary.</p>
-      </div>
-    </details>`;
+  return sharedExceptionsMarkup(rule, {
+    countAttribute: "data-rule-exception-count",
+    listId: "rule-exception-glosses",
+  });
 }
 
 function exceptionSuggestionsMarkup(suggestions) {
-  if (!suggestions.length) return "";
-  return `<datalist id="rule-exception-glosses">${suggestions
-    .map((gloss) => `<option value="${esc(gloss)}"></option>`)
-    .join("")}</datalist>`;
+  return sharedExceptionSuggestionsMarkup(suggestions, "rule-exception-glosses");
 }
 
 function updateRuleStatus(card, context, rule, parentDisabled = false) {
