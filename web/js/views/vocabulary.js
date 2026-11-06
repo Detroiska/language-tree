@@ -8,7 +8,33 @@ import {
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, normalizeSearchText, stripLevelMarks, stripStressMarks } from "../notation.js";
 import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
+// ASCII form for notes and external tools; conversion lives in web/js/xsampa.js.
+import { ipaToXSampa } from "../xsampa.js";
 import { esc, icon, openModal, toast } from "../ui.js";
+
+// Same clipboard fallback bulk.js uses: the direct API first, then a hidden
+// textarea for contexts where the async clipboard is unavailable.
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const helper = document.createElement("textarea");
+      helper.value = text;
+      helper.setAttribute("readonly", "");
+      helper.style.position = "fixed";
+      helper.style.opacity = "0";
+      document.body.appendChild(helper);
+      helper.select();
+      const done = document.execCommand("copy");
+      helper.remove();
+      return done;
+    } catch {
+      return false;
+    }
+  }
+}
 
 function parentFor(ctx) {
   return ancestorsOf(ctx.project, ctx.language.id).at(-1) || null;
@@ -351,6 +377,7 @@ export function renderVocabulary(container, ctx) {
           <td class="word-note"><input class="table-input" data-word-field="note" value="${esc(word.note)}" placeholder="optional note" autocomplete="off" aria-label="Word note"></td>
           <td class="row-actions">
             <button class="icon-button icon-button-small" type="button" data-trace-word title="Trace in the cognate explorer" aria-label="Trace in the cognate explorer">${icon("language")}</button>
+            <button class="icon-button icon-button-small" type="button" data-copy-xsampa title="Copy X-SAMPA form" aria-label="Copy X-SAMPA form">${icon("copy")}</button>
             <button class="icon-button icon-button-small danger-hover" type="button" data-delete-word title="Delete word" aria-label="Delete word">${icon("trash")}</button>
           </td>
         </tr>`;
@@ -568,6 +595,18 @@ export function renderVocabulary(container, ctx) {
         return;
       }
       ctx.navigate(`#/cognates/${encodeURIComponent(language.id)}/${encodeURIComponent(word.id)}`);
+    });
+    row.querySelector("[data-copy-xsampa]")?.addEventListener("click", async () => {
+      if (!word.form.trim()) {
+        toast("Give the word an IPA form before copying it as X-SAMPA.", { type: "info" });
+        return;
+      }
+      // The converted form goes into the toast too, so the plain-ASCII text
+      // can be checked (or retyped) without a second paste.
+      const ascii = ipaToXSampa(word.form);
+      const done = await copyToClipboard(ascii);
+      if (done) toast(`X-SAMPA form copied: ${ascii}`, { type: "success" });
+      else toast("Copy failed — select the text and copy manually.", { type: "info" });
     });
     row.querySelector("[data-delete-word]")?.addEventListener("click", () => {
       const index = language.vocabulary.indexOf(word);

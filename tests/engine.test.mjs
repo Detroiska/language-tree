@@ -79,6 +79,7 @@ import { subgroupingEvidence } from "../web/js/subgrouping.js";
 import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
 import { applyWordList, rowStatus } from "../web/js/bulk.js";
 import { newLibraryRules, soundChangeLibrary } from "../web/js/soundlaws.js";
+import { ipaToXSampa, xSampaToIPA } from "../web/js/xsampa.js";
 
 let passed = 0;
 const failures = [];
@@ -4115,6 +4116,83 @@ equal("slavic palatalization ignores a back vowel", applyLibrary(palatalization,
 equal("high german shift affricates a word-initial voiceless stop", applyLibrary(affrication, "pak"), "p͡fak");
 equal("high german shift leaves a medial stop unaffricated", applyLibrary(affrication, "apa"), "apa");
 equal("latin rhotacism turns a post-vocalic s into r", applyLibrary(rhotacism, "genus"), "genur");
+
+/* ---- x-sampa conversion ---------------------------------------------------- */
+
+// The curated IPA table is the completeness gate: every symbol the project
+// knows must survive the ASCII detour. Documented foldings (script-g joins
+// plain g; deprecated glyph variants end on their modern spelling; the four
+// sinological segments have no documented X-SAMPA and pass through) follow
+// the module header in web/js/xsampa.js.
+const xsampaCanonical = (symbol) =>
+  symbol
+    .replace(/\u0261/g, "g")
+    .replace(/\u0269/g, "\u026A")
+    .replace(/\u0277/g, "\u028A")
+    .replace(/\u1D00/g, "\u0251")
+    .replace(/\u1D07/g, "\u025B");
+const xsampaPassthrough = new Set(["\u027F", "\u0285", "\u02AE", "\u02AF"]);
+
+let xsampaStrict = 0;
+let xsampaFolded = 0;
+const xsampaBroken = [];
+const xsampaWide = [];
+for (const symbol of Object.keys(IPA_FEATURES)) {
+  const ascii = ipaToXSampa(symbol);
+  if (xSampaToIPA(ascii) === symbol) {
+    xsampaStrict += 1;
+  } else if (xSampaToIPA(ascii) === xsampaCanonical(symbol)) {
+    xsampaFolded += 1;
+  } else {
+    xsampaBroken.push(`${symbol} -> ${JSON.stringify(ascii)} -> ${JSON.stringify(xSampaToIPA(ascii))}`);
+  }
+  if ([...ascii].some((character) => character.codePointAt(0) > 0x7e)) {
+    // Only the four sinological segments may leave the ASCII range.
+    if (!xsampaPassthrough.has(symbol)) xsampaWide.push(symbol);
+  }
+}
+equal("every curated IPA symbol reads back from its X-SAMPA form", [xsampaBroken.length, xsampaWide.length], [0, 0]);
+if (xsampaBroken.length) console.log(xsampaBroken.join("\n"));
+truthy(
+  "the curated table survives the detour strictly or via the documented foldings",
+  xsampaStrict + xsampaFolded === Object.keys(IPA_FEATURES).length
+);
+equal("script-g canonicalizes to the plain velar stop", [xSampaToIPA("g"), ipaToXSampa("\u0261"), xSampaToIPA(ipaToXSampa("g"))], ["g", "g", "g"]);
+equal("deprecated glyph variants fold onto their modern symbols", [xSampaToIPA(ipaToXSampa("\u0269")), xSampaToIPA(ipaToXSampa("\u1D00"))], ["\u026A", "\u0251"]);
+truthy("segments with no documented X-SAMPA pass through non-ASCII", [...ipaToXSampa("\u027F")].every((character) => character.codePointAt(0) > 0x7e));
+
+// The standard affricate digraphs decode as tie-barred clusters, matching the
+// convention external tools write; this project's own encodings prefer the
+// explicit underscore tie whenever no digraph is documented.
+equal(
+  "standard affricate digraphs decode as tie-barred clusters",
+  [xSampaToIPA("tS"), xSampaToIPA("ts"), xSampaToIPA("dZ"), xSampaToIPA("tK"), xSampaToIPA("kp"), xSampaToIPA("gb"), xSampaToIPA("Nm")],
+  ["t\u0361\u0283", "t\u0361s", "d\u0361\u0292", "t\u0361\u026C", "k\u0361p", "\u0261\u0361b", "\u014B\u0361m"]
+);
+equal(
+  "the underscore prefers a documented tie pair over the same letter's diacritic",
+  [xSampaToIPA("n_d"), xSampaToIPA("p_f"), xSampaToIPA("t_T"), xSampaToIPA("g_G"), xSampaToIPA("N_m")],
+  // The tie reconstruction uses the cluster table's canonical spellings, so
+  // the velar-affricate tie comes back with script-g like its stored form.
+  ["n\u0361d", "p\u0361f", "t\u0361\u03B8", "\u0261\u0361\u0263", "\u014B\u0361m"]
+);
+equal(
+  "the underscore attaches diacritics when no tie pair applies",
+  [xSampaToIPA("t_h"), xSampaToIPA("p_>"), xSampaToIPA("k_w"), xSampaToIPA("a_0"), xSampaToIPA("bO~"), xSampaToIPA("tS_h")],
+  ["t\u02B0", "p\u02BC", "k\u02B7", "a\u0325", "b\u0254\u0303", "t\u0361\u0283\u02B0"]
+);
+equal("retroflex affricates tie through the backslash-free join", xSampaToIPA("t`_s`"), "\u0288\u0361\u0282");
+
+// Whole-form checks mirror what a saved lexicon entry meets: glued
+// prenasalized/ejective affricates, length, and stress all stay ASCII and
+// round-trip exactly.
+equal("word forms survive the ASCII detour", [ipaToXSampa("akata"), xSampaToIPA(ipaToXSampa("akata"))], ["akata", "akata"]);
+equal("untied sequences use the digraph spelling", ipaToXSampa("t\u0283"), "tS");
+const gluedEjective = "k\u0361x\u02BC\u02D0";
+equal("glued ejective affricates keep tie, release, and length", ipaToXSampa(gluedEjective), "k_x_>:");
+equal("the glued ejective affricate round-trips", xSampaToIPA(ipaToXSampa(gluedEjective)), gluedEjective);
+equal("unknown characters pass through unchanged", [ipaToXSampa("a;b"), xSampaToIPA("$")], ["a;b", "$"]);
+equal("empty and null input stay empty", [ipaToXSampa(""), xSampaToIPA(""), ipaToXSampa(null), xSampaToIPA(null)], ["", "", "", ""]);
 
 /* ---- summary ------------------------------------------------------------- */
 
