@@ -213,7 +213,6 @@ export function renderTree(container, ctx) {
         </div>
         <div class="page-actions">
           <button class="button button-quiet" type="button" id="report-menu" title="Download a Markdown or HTML report of the family, or a JSON backup" aria-label="Download report or backup">${icon("download")}<span>Report / backup</span></button>
-          <button class="button button-quiet" type="button" id="fit-tree">${icon("fit")}<span>Fit</span></button>
           <button class="button button-primary" type="button" id="add-root">${icon("plus")}<span>New root language</span></button>
         </div>
       </header>
@@ -294,7 +293,6 @@ export function renderTree(container, ctx) {
     applyTransform();
   };
 
-  container.querySelector("#fit-tree")?.addEventListener("click", fit);
   container.querySelector("#fit-tree-floating")?.addEventListener("click", fit);
   container.querySelector("#zoom-in")?.addEventListener("click", () => zoomAt(1.18));
   container.querySelector("#zoom-out")?.addEventListener("click", () => zoomAt(1 / 1.18));
