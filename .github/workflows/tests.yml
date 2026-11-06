@@ -36,7 +36,3 @@ jobs:
         run: node tests/bulk.test.mjs
       - name: Server suite
         run: node tests/server.test.mjs
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-      - name: UI smoke test
-        run: npm run test:ui

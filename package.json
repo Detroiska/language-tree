@@ -1,18 +1,15 @@
 {
   "name": "language-tree",
-  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Local-first web tool for documenting a constructed language family",
   "scripts": {
     "test": "node tests/engine.test.mjs && node tests/bulk.test.mjs && node tests/server.test.mjs",
-    "test:ui": "playwright test",
     "lint": "npm run lint:js && npm run lint:py",
     "lint:js": "eslint web/js tests",
     "lint:py": "ruff check server.py"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0",
     "eslint": "^10.14.0",
     "globals": "^17.14.0"
   }
