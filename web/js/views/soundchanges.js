@@ -32,8 +32,8 @@ import {
   ruleStatusFor,
   statusMarkup,
 } from "../ruleEditor.js";
-import { debounce, esc, icon, toast } from "../ui.js";
-// Curated attested rule groups offered in the Rule library panel; the data
+import { debounce, esc, icon, openModal, toast } from "../ui.js";
+// Curated attested rule groups offered in the Rule library modal; the data
 // module also builds the disabled draft records the insert button pushes.
 import { soundChangeLibrary, newLibraryRules, normalizeLibraryNotation } from "../soundlaws.js";
 
@@ -438,47 +438,97 @@ function presentLibraryNotations(language) {
   );
 }
 
-function libraryPanelMarkup(language) {
+function libraryTriggerMarkup() {
+  return `
+    <section class="panel help-panel">
+      <button class="library-trigger" type="button" data-open-library>
+        <span class="panel-icon">${icon("book")}</span>
+        <span class="library-trigger-title">Rule library</span>
+        <span class="details-chevron">${icon("external")}</span>
+      </button>
+    </section>`;
+}
+
+function libraryGroupsMarkup(language) {
   const present = presentLibraryNotations(language);
   return `
-    <details class="panel help-panel">
-      <summary class="panel-head help-summary">
-        <div class="panel-title">
-          <h2>Rule library</h2>
-          <p>Illustrative attested changes to insert, review, and adapt.</p>
-        </div>
-        <span class="details-chevron">${icon("chevronDown")}</span>
-      </summary>
-      <div class="help-body">
-        ${soundChangeLibrary
-          .map((group) => {
-            const total = group.rules.length;
-            const missingCount = group.rules.filter((rule) => !present.has(normalizeLibraryNotation(rule.notation))).length;
-            const presentCount = total - missingCount;
-            // Only a complete match means the group was already inserted;
-            // a partial match offers just the rules that are still missing.
-            const insertedTitle =
-              presentCount === total
-                ? "These notations already appear in this language’s rules."
-                : `${presentCount === 1 ? "One of" : `${presentCount} of`} these ${total} notations already appear in this language’s rules — inserting adds the remaining ones.`;
-            const insertButton =
-              presentCount === total
-                ? `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" disabled title="${esc(insertedTitle)}">Inserted</button>`
-                : `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" title="${esc(insertedTitle)}">${icon("plus")}Insert ${missingCount} ${missingCount === 1 ? "rule" : "rules"}</button>`;
-            return `
-              <p class="field-label">${esc(group.name)}<span class="field-optional">${esc(group.tag)}</span></p>
-              <p class="rule-exception-hint">${esc(group.description)}</p>
-              ${insertButton}
-              <ul class="help-list">
-                ${group.rules
-                  .map((rule) => `<li><code>${esc(rule.notation)}</code><span>${esc(rule.note)}</span></li>`)
-                  .join("")}
-              </ul>`;
-          })
-          .join("")}
-        <p class="help-foot">Groups insert as disabled rules into this language’s sound changes. They are illustrative, not universal — review each rule against your inventory’s sounds and chart labels before enabling.</p>
-      </div>
-    </details>`;
+    ${soundChangeLibrary
+      .map((group) => {
+        const total = group.rules.length;
+        const missingCount = group.rules.filter((rule) => !present.has(normalizeLibraryNotation(rule.notation))).length;
+        const presentCount = total - missingCount;
+        // Only a complete match means the group was already inserted;
+        // a partial match offers just the rules that are still missing.
+        const insertedTitle =
+          presentCount === total
+            ? "These notations already appear in this language’s rules."
+            : `${presentCount === 1 ? "One of" : `${presentCount} of`} these ${total} notations already appear in this language’s rules — inserting adds the remaining ones.`;
+        const insertButton =
+          presentCount === total
+            ? `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" disabled title="${esc(insertedTitle)}">Inserted</button>`
+            : `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" title="${esc(insertedTitle)}">${icon("plus")}Insert ${missingCount} ${missingCount === 1 ? "rule" : "rules"}</button>`;
+        return `
+          <p class="field-label">${esc(group.name)}<span class="field-optional">${esc(group.tag)}</span></p>
+          <p class="rule-exception-hint">${esc(group.description)}</p>
+          ${insertButton}
+          <ul class="help-list">
+            ${group.rules
+              .map((rule) => `<li><code>${esc(rule.notation)}</code><span>${esc(rule.note)}</span></li>`)
+              .join("")}
+          </ul>`;
+      })
+      .join("")}
+    <p class="help-foot">Groups insert as disabled rules into this language’s sound changes. They are illustrative, not universal — review each rule against your inventory’s sounds and chart labels before enabling.</p>`;
+}
+
+function openRuleLibrary(language, ctx) {
+  openModal({
+    title: "Rule library",
+    width: "wide",
+    body: `
+      <p class="modal-copy library-modal-copy">Illustrative attested changes to insert, review, and adapt.</p>
+      <div class="library-modal-body" data-library-body>${libraryGroupsMarkup(language)}</div>`,
+    onMount({ root }) {
+      const body = root.querySelector("[data-library-body]");
+      function bindInsertButtons() {
+        body.querySelectorAll("[data-insert-laws]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const group = soundChangeLibrary.find((item) => item.id === button.dataset.insertLaws);
+            if (!group) return;
+            const drafts = newLibraryRules(group, presentLibraryNotations(language));
+            if (!drafts.length) return;
+            // The block lands at the end of the list; remembering where it
+            // starts lets the undo splice exactly those drafts back out.
+            const startIndex = language.soundChanges.length;
+            language.soundChanges.push(...drafts);
+            ctx.touch({ label: "Insert library rules" });
+            ctx.refresh();
+            refresh();
+            toast(`Inserted ${drafts.length} disabled ${drafts.length === 1 ? "rule" : "rules"} from ${group.name}.`, {
+              type: "info",
+              duration: 6000,
+              action: {
+                label: "Undo",
+                onClick: () => {
+                  language.soundChanges.splice(startIndex, drafts.length);
+                  ctx.touch({ label: "Remove library rules" });
+                  ctx.refresh();
+                  if (body.isConnected) refresh();
+                },
+              },
+            });
+          });
+        });
+      }
+      function refresh() {
+        const scrollTop = body.scrollTop;
+        body.innerHTML = libraryGroupsMarkup(language);
+        bindInsertButtons();
+        body.scrollTop = scrollTop;
+      }
+      bindInsertButtons();
+    },
+  });
 }
 
 function inheritedPanelMarkup(ctx, optionalRules = []) {
@@ -737,7 +787,7 @@ export function renderChanges(container, ctx) {
           ${testPanelMarkup(ctx, directOptionalRules)}
           ${reconstructPanelMarkup(ctx)}
           ${notationHelpMarkup()}
-          ${libraryPanelMarkup(language)}
+          ${libraryTriggerMarkup()}
         </aside>
       </div>
     </div>
@@ -986,32 +1036,7 @@ export function renderChanges(container, ctx) {
     });
   });
 
-  container.querySelectorAll("[data-insert-laws]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const group = soundChangeLibrary.find((item) => item.id === button.dataset.insertLaws);
-      if (!group) return;
-      const drafts = newLibraryRules(group, presentLibraryNotations(language));
-      if (!drafts.length) return;
-      // The block lands at the end of the list; remembering where it starts
-      // lets the undo splice exactly those drafts back out.
-      const startIndex = language.soundChanges.length;
-      language.soundChanges.push(...drafts);
-      ctx.touch({ label: "Insert library rules" });
-      ctx.refresh();
-      toast(`Inserted ${drafts.length} disabled ${drafts.length === 1 ? "rule" : "rules"} from ${group.name}.`, {
-        type: "info",
-        duration: 6000,
-        action: {
-          label: "Undo",
-          onClick: () => {
-            language.soundChanges.splice(startIndex, drafts.length);
-            ctx.touch({ label: "Remove library rules" });
-            ctx.refresh();
-          },
-        },
-      });
-    });
-  });
+  container.querySelector("[data-open-library]")?.addEventListener("click", () => openRuleLibrary(language, ctx));
 
   container.querySelectorAll(".rule-card").forEach((card) => {
     const rule = language.soundChanges.find((item) => item.id === card.dataset.ruleId);
