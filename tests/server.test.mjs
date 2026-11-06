@@ -204,7 +204,6 @@ try {
   const current = await call(server, "/api/project");
   equal("GET /api/project returns 200", current.status, 200);
   equal("GET /api/project returns the document", current.json?.title, project.title);
-  const revision = current.json?.updatedAt;
 
   /* ---- request body validation (#12) ------------------------------------- */
 
