@@ -4,15 +4,6 @@ import { suggestClassRefs } from "../naturalclasses.js";
 import { cellKey, chartLeaves, nodeLeafIds } from "../model.js";
 import { esc, icon, toast } from "../ui.js";
 
-const PRESETS = [
-  "(C)V(C)",
-  "(C)V",
-  "CV(C)",
-  "(C)(C)V(C)",
-  "(C)V(V)(C)",
-  "(C)V(C)(C)",
-];
-
 const CLASS_PRESETS = [
   { name: "N", label: "N · nasals", sounds: "m n ɲ ŋ" },
   { name: "G", label: "G · glides", sounds: "j w" },
@@ -344,12 +335,6 @@ export function renderPhonotactics(container, ctx) {
                 <input class="input phonotactics-template-input" type="text" data-phonotactics-field="template" value="${esc(phonotactics.template)}" placeholder="(C)V(C)" autocomplete="off" spellcheck="false" aria-label="Syllable template">
                 <span class="field-help">Examples: <code>(C)V(C)</code>, <code>(C)(C)V(C)</code>, <code>CVN</code>, <code>(C)V(G)</code>, <code>(C)V([+sonorant])</code> — letters beyond <code>C</code> and <code>V</code> come from Categories below, dotted chart labels like <code>plosive.plain</code> are classes read straight from the Phonology charts, and bracketed signs are feature bundles. Leave it blank to turn phonotactic checks off.</span>
               </label>
-              <div class="template-presets">
-                <span class="field-label">Presets</span>
-                <div class="preset-row">
-                  ${PRESETS.map((preset) => `<button class="preset-button" type="button" data-template-preset="${esc(preset)}">${esc(preset)}</button>`).join("")}
-                </div>
-              </div>
               <div data-template-feedback></div>
               <div data-template-shapes></div>
             </div>
@@ -712,18 +697,6 @@ export function renderPhonotactics(container, ctx) {
       language.phonotactics[input.dataset.phonotacticsField] = input.value;
       ctx.touch({ label: "Edit phonotactics" });
       refresh();
-    });
-  });
-
-  container.querySelectorAll("[data-template-preset]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const template = button.dataset.templatePreset;
-      language.phonotactics.template = template;
-      const templateInput = container.querySelector('[data-phonotactics-field="template"]');
-      if (templateInput) templateInput.value = template;
-      ctx.touch({ label: "Edit phonotactics" });
-      refresh();
-      templateInput?.focus();
     });
   });
 
