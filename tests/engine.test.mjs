@@ -12,11 +12,13 @@ import {
   createAncestor,
   createLanguage,
   createSibling,
+  DEFAULT_RULE_RATE,
   defaultInventory,
   deleteLanguage,
   ensureProject,
   groupAllophonyRules,
   normalizeRuleExceptions,
+  normalizeRuleRate,
   restoreAllophonyGroup,
   restoreAllophonyRule,
   restoreDeletedLanguages,
@@ -41,6 +43,8 @@ import {
   exceptionRulesFromSteps,
   explainRuleMiss,
   normalizeAllophonyNotation,
+  optionalRulesInStages,
+  optionalSkippedRulesFromSteps,
   surfaceForForm,
 } from "../web/js/phonology.js";
 import {
@@ -3523,6 +3527,265 @@ equal(
 
 const missingSource = buildCorrespondences(correspondenceProject, "no_such_language");
 equal("an unknown source returns an empty table", [missingSource.source, missingSource.rows.length], [null, 0]);
+
+/* ---- optional sound changes and allophony ------------------------------- */
+
+const optionalDefaults = ensureProject({
+  title: "Optional defaults",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [{ id: "r1", notation: "p > f", note: "", enabled: true }],
+      allophony: [{ id: "a1", notation: "/p/ > [f]", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "rules without optional fields default to mandatory at the default rate",
+  [
+    optionalDefaults.languages[0].soundChanges[0].optional,
+    optionalDefaults.languages[0].soundChanges[0].rate,
+    optionalDefaults.languages[0].allophony[0].optional,
+    optionalDefaults.languages[0].allophony[0].rate,
+  ],
+  [false, DEFAULT_RULE_RATE, false, DEFAULT_RULE_RATE]
+);
+equal(
+  "optional rates are clamped to whole percentages",
+  [normalizeRuleRate("150"), normalizeRuleRate(-4), normalizeRuleRate(37.6), normalizeRuleRate("nope")],
+  [100, 0, 38, DEFAULT_RULE_RATE]
+);
+const normalizedOptional = ensureProject({
+  title: "Optional normalization",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      soundChanges: [{ id: "r1", notation: "p > f", optional: "yes", rate: 12.4 }],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "stored optional flags are strict booleans and rates are normalized",
+  [normalizedOptional.languages[0].soundChanges[0].optional, normalizedOptional.languages[0].soundChanges[0].rate],
+  [false, 12]
+);
+
+const optionalProject = ensureProject({
+  title: "Optional changes",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "o1", notation: "p > f", note: "", enabled: true, optional: true, rate: 40 },
+        { id: "o2", notation: "t > s", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const optionalPrimary = deriveForm("pata", optionalProject, "child", { directOnly: true });
+equal("the primary derivation skips optional sound changes", optionalPrimary.text, "pasa");
+equal(
+  "forcing an optional sound change derives a variant",
+  deriveForm("pata", optionalProject, "child", { directOnly: true, optionalRuleIds: ["o1"] }).text,
+  "fasa"
+);
+equal(
+  "skipped optional sound changes are reported from the derivation steps",
+  optionalSkippedRulesFromSteps(optionalPrimary.steps).map((rule) => [rule.id, rule.rate]),
+  [["o1", 40]]
+);
+
+const optionalGroupProject = ensureProject({
+  title: "Optional group",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "g1", notation: "p > f", note: "", enabled: true, optional: true, rate: 30 },
+        { id: "g1a", notation: "a > e / f _", note: "", enabled: true, parentId: "g1" },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "skipping an optional top-level rule skips its sequential children",
+  deriveForm("pata", optionalGroupProject, "child", { directOnly: true }).text,
+  "pata"
+);
+equal(
+  "forcing an optional top-level rule runs its sequential children",
+  deriveForm("pata", optionalGroupProject, "child", { directOnly: true, optionalRuleIds: ["g1"] }).text,
+  "feta"
+);
+equal(
+  "forcing a child cannot override its skipped optional parent",
+  deriveForm("pata", optionalGroupProject, "child", { directOnly: true, optionalRuleIds: ["g1a"] }).text,
+  "pata"
+);
+
+const optionalChildProject = ensureProject({
+  title: "Optional child",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "h1", notation: "p > f", note: "", enabled: true },
+        { id: "h1a", notation: "a > e / f _", note: "", enabled: true, optional: true, rate: 60, parentId: "h1" },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "an optional child is skipped while its mandatory parent still runs",
+  deriveForm("pata", optionalChildProject, "child", { directOnly: true }).text,
+  "fata"
+);
+equal(
+  "an optional child can be forced independently",
+  deriveForm("pata", optionalChildProject, "child", { directOnly: true, optionalRuleIds: ["h1a"] }).text,
+  "feta"
+);
+
+const groupStageContext = contextForLanguage(optionalGroupProject, "child");
+const groupStages = [
+  {
+    language: optionalGroupProject.languages[1],
+    groups: compileRuleStages(optionalGroupProject.languages[1].soundChanges, groupStageContext),
+  },
+];
+equal(
+  "optional stages list top-level optional groups",
+  optionalRulesInStages(groupStages).map((rule) => [rule.id, rule.kind, rule.parentOptional]),
+  [["g1", "top", false]]
+);
+const childStageContext = contextForLanguage(optionalChildProject, "child");
+const childStages = [
+  {
+    language: optionalChildProject.languages[1],
+    groups: compileRuleStages(optionalChildProject.languages[1].soundChanges, childStageContext),
+  },
+];
+equal(
+  "optional stages list optional children with their parent",
+  optionalRulesInStages(childStages).map((rule) => [rule.id, rule.kind, rule.parentId]),
+  [["h1a", "child", "h1"]]
+);
+
+const optionalAllophonyProject = ensureProject({
+  title: "Optional allophony",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      allophony: [
+        { id: "a1", notation: "/p/ > [f]", note: "", enabled: true, optional: true, rate: 25 },
+        { id: "a2", notation: "/t/ > [s]", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "the primary surface skips optional allophony",
+  surfaceForForm("pata", optionalAllophonyProject, "only").text,
+  "pasa"
+);
+equal(
+  "forcing an optional allophony rule derives a variant",
+  surfaceForForm("pata", optionalAllophonyProject, "only", { optionalRuleIds: ["a1"] }).text,
+  "fasa"
+);
+equal(
+  "the primary allophone table leaves optional rules out",
+  allophoneTable(optionalAllophonyProject, "only").rows.map((row) => row.phoneme),
+  ["t"]
+);
+equal(
+  "the allophone table can include a forced optional rule",
+  allophoneTable(optionalAllophonyProject, "only", { optionalRuleIds: ["a1"] }).rows.map((row) => row.phoneme),
+  ["p", "t"]
+);
+
+const optionalReconstructionProject = ensureProject({
+  title: "Optional reconstruction",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [{ id: "r1", notation: "p > f", note: "", enabled: true, optional: true, rate: 50 }],
+      vocabulary: [],
+    },
+  ],
+});
+const optionalChanged = reconstructForm("f", optionalReconstructionProject, "child");
+equal(
+  "reconstruction keeps the changed and unchanged analyses of an optional rule",
+  optionalChanged.candidates.map((candidate) => candidate.text),
+  ["f", "p"]
+);
+equal("reconstruction reports the optional rule it considered", optionalChanged.optional, ["r1"]);
+equal(
+  "an unchanged form stays reconstructable when the optional change did not apply",
+  reconstructForm("p", optionalReconstructionProject, "child").candidates.map((candidate) => candidate.text),
+  ["p"]
+);
+
+const optionalChildReconstructionProject = ensureProject({
+  title: "Optional child reconstruction",
+  languages: [
+    { id: "root", name: "Root", parentId: null, ...language, soundChanges: [], vocabulary: [] },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...language,
+      soundChanges: [
+        { id: "k1", notation: "p > f", note: "", enabled: true },
+        { id: "k1a", notation: "a > e / f _", note: "", enabled: true, optional: true, rate: 60, parentId: "k1" },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "reconstruction explores an optional child both skipped and applied",
+  reconstructForm("fata", optionalChildReconstructionProject, "child").candidates.map((candidate) => candidate.text),
+  ["fata", "pata"]
+);
+equal(
+  "reconstruction inverts an applied optional child",
+  reconstructForm("feta", optionalChildReconstructionProject, "child").candidates.some(
+    (candidate) => candidate.text === "pata"
+  ),
+  true
+);
 
 /* ---- summary ------------------------------------------------------------- */
 

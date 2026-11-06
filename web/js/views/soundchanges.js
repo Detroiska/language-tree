@@ -1,8 +1,10 @@
 import {
+  DEFAULT_RULE_RATE,
   ancestorsOf,
   getLineage,
   languageStats,
   normalizeRuleExceptions,
+  normalizeRuleRate,
   ruleGroups,
   uid,
 } from "../model.js";
@@ -14,10 +16,12 @@ import {
   deriveStages,
   exceptionRulesFromSteps,
   hasSurfaceDisplay,
+  optionalRulesInStages,
+  optionalSkippedRulesFromSteps,
   surfaceForForm,
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, joinSegments, stripStressMarks } from "../notation.js";
-import { derivationStepsMarkup } from "../derivation.js";
+import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { reconstructForm, reconstructionAlternatives } from "../reconstruction.js";
 import { debounce, esc, icon, toast } from "../ui.js";
@@ -26,6 +30,12 @@ import { debounce, esc, icon, toast } from "../ui.js";
 // so the typed form is remembered per language — otherwise adding a rule or
 // recording a word wipes what was being tested.
 const testerMemory = new Map();
+// Optional rules are view-only variants: remember the ticked ids per language
+// so editing a rule does not clear the variant being explored.
+const testerOptionalMemory = new Map();
+// The inherited check can either follow the primary path or include every
+// optional rule; the choice is remembered per language.
+const checkOptionalMemory = new Map();
 // The reconstruction field is remembered for the same reason. The value is
 // `{ form, gloss }` so a selected vocabulary item keeps its gloss across
 // re-renders and the parent-lexicon check can use it.
@@ -36,13 +46,14 @@ function compileDirect(ctx) {
   return { context, groups: compileRuleStages(ctx.language.soundChanges, context) };
 }
 
-function directDerivation(ctx, form, gloss = "") {
+function directDerivation(ctx, form, gloss = "", optionalRuleIds = []) {
   const { context, groups } = compileDirect(ctx);
   const parsed = context.tokenizeWithStress(form);
   const tokens = parsed.tokens;
   const result = deriveStages(tokens, [{ language: ctx.language, groups }], context, {
     gloss,
     junctures: parsed.junctures,
+    optionalRuleIds,
   });
   const phonemic = joinSegments(result.tokens, result.junctures);
   const surface = result.errors.length
@@ -137,15 +148,28 @@ function ruleCardMarkup(
       ? { kind: "off", label: "Parent disabled" }
       : statusFor(rule, context);
   const number = isChild ? `${index + 1}.${childIndex + 1}` : String(index + 1);
+  const rate = normalizeRuleRate(rule.rate);
   return `
-    <article class="rule-card ${isChild ? "is-child" : ""} ${disabled ? "is-disabled" : ""}" data-rule-id="${esc(rule.id)}">
+    <article class="rule-card ${isChild ? "is-child" : ""} ${rule.optional ? "is-optional" : ""} ${disabled ? "is-disabled" : ""}" data-rule-id="${esc(rule.id)}">
       <div class="rule-number ${isChild ? "is-dotted" : ""}">${esc(number)}</div>
       <div class="rule-body">
         <div class="rule-notation-row">
           <input class="rule-input" type="text" value="${esc(rule.notation)}" placeholder="p > f / V _ V" autocomplete="off" spellcheck="false" aria-label="Sound change notation">
+          ${rule.optional ? `<span class="rule-optional-badge" title="Optional changes are skipped in the primary derivation">optional ${rate}%</span>` : ""}
           <span class="rule-status status-${status.kind}" data-rule-status title="${esc(status.label)}">${statusMarkup(status)}</span>
         </div>
         <input class="rule-note-input" type="text" value="${esc(rule.note)}" placeholder="Optional description, e.g. Verner’s law" autocomplete="off" aria-label="Rule note">
+        <div class="rule-options">
+          <label class="rule-option" title="Skip this rule in the primary derivation; include it in a variant when needed">
+            <input type="checkbox" data-rule-optional ${rule.optional ? "checked" : ""}>
+            <span>Optional</span>
+          </label>
+          <label class="rule-option" title="Descriptive likelihood; derivations stay deterministic">
+            <span class="rule-option-label">Rate</span>
+            <input class="rule-limit-input rule-rate-input" type="number" data-rule-rate min="0" max="100" step="5" value="${rate}" ${rule.optional ? "" : "disabled"}>
+            <span>%</span>
+          </label>
+        </div>
         ${exceptionsMarkup(rule)}
       </div>
       <div class="rule-controls">
@@ -207,10 +231,11 @@ function rulesMarkup(language, context, exceptionSuggestions = []) {
     </div>`;
 }
 
-function testPanelMarkup(ctx) {
+function testPanelMarkup(ctx, optionalRules = []) {
   const lineage = getLineage(ctx.project, ctx.language.id);
   const parent = lineage.length > 1 ? lineage[lineage.length - 2] : null;
   const suggestions = parent?.vocabulary.filter((word) => word.form.trim()).slice(0, 4) || [];
+  const selectedOptional = testerOptionalMemory.get(ctx.language.id) || new Set();
   const remembered = testerMemory.get(ctx.language.id);
   const initialValue =
     (typeof remembered === "string" ? remembered : remembered?.form) ??
@@ -232,6 +257,7 @@ function testPanelMarkup(ctx) {
               <input class="input ipa-input" id="test-word" data-test-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
               ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-test-word="${esc(word.form)}" data-test-gloss="${esc(word.gloss)}" title="Test with the gloss “${esc(word.gloss)}”">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
             </div>
+            ${optionalRulesPickerMarkup(optionalRules, selectedOptional, "data-test-optional")}
             <div class="derivation" data-derivation>
               <div class="derivation-output-row">
                 <span class="derivation-label">Phonemic</span>
@@ -362,6 +388,13 @@ function renderReconstruction(panel, result) {
       }.`
     );
   }
+  if (result.optional?.length) {
+    bits.push(
+      `${result.optional.length} optional ${result.optional.length === 1 ? "change is" : "changes are"} treated as possible: ${
+        result.optional.length === 1 ? "it may or may not" : "they may or may not"
+      } have applied.`
+    );
+  }
   const warnings = (result.warnings || []).slice(0, 2);
   notes.innerHTML = [
     ...bits.map((bit) => `<p class="reconstruct-note">${icon("info")}<span>${esc(bit)}</span></p>`),
@@ -413,7 +446,8 @@ function notationHelpMarkup() {
     </details>`;
 }
 
-function inheritedPanelMarkup(ctx) {
+function inheritedPanelMarkup(ctx, optionalRules = []) {
+  const includeOptional = checkOptionalMemory.get(ctx.language.id) === true;
   return `
     <section class="panel inherited-panel" data-inherited-panel>
       <header class="panel-head">
@@ -421,13 +455,14 @@ function inheritedPanelMarkup(ctx) {
           <h2>Inherited vocabulary check</h2>
           <p>Compare each ancestral word with the form these rules produce.</p>
         </div>
+        ${optionalRules.length ? `<label class="rule-option check-optional-toggle" title="Include every optional sound change in this comparison"><input type="checkbox" data-check-optional ${includeOptional ? "checked" : ""}>Include optional changes (${optionalRules.length})</label>` : ""}
         <span class="check-summary" data-check-summary></span>
       </header>
       <div data-check-body></div>
     </section>`;
 }
 
-function checkRows(ctx, context = null) {
+function checkRows(ctx, context = null, optionalRuleIds = []) {
   const parent = ancestorsOf(ctx.project, ctx.language.id).at(-1);
   if (!parent) {
     return {
@@ -455,6 +490,7 @@ function checkRows(ctx, context = null) {
     const derived = deriveForm(word.form, ctx.project, ctx.language.id, {
       directOnly: true,
       gloss: word.gloss,
+      optionalRuleIds,
     });
     const recorded = byGloss.get(word.gloss.trim().toLowerCase()) || null;
     const status = derived.error
@@ -475,6 +511,7 @@ function checkRows(ctx, context = null) {
       status,
       error: derived.error,
       exceptions: exceptionRulesFromSteps(derived.steps),
+      skippedOptional: optionalSkippedRulesFromSteps(derived.steps),
       index,
     };
   });
@@ -482,12 +519,15 @@ function checkRows(ctx, context = null) {
   const recordedCount = rows.filter((row) => row.status !== "missing").length;
   const errorCount = rows.filter((row) => row.status === "error").length;
   const exceptionCount = rows.filter((row) => row.exceptions.length).length;
+  const optionalCount = rows.filter((row) => row.skippedOptional.length).length;
   const summary =
     recordedCount === 0
       ? `${rows.length} ancestral ${rows.length === 1 ? "word" : "words"} · none recorded yet`
       : `${matches} of ${recordedCount} recorded ${recordedCount === 1 ? "form matches" : "forms match"}${
           errorCount ? ` · ${errorCount} rule ${errorCount === 1 ? "error" : "errors"}` : ""
-        }${exceptionCount ? ` · ${exceptionCount} with lexical ${exceptionCount === 1 ? "exception" : "exceptions"}` : ""}`;
+        }${exceptionCount ? ` · ${exceptionCount} with lexical ${exceptionCount === 1 ? "exception" : "exceptions"}` : ""}${
+          optionalCount ? ` · ${optionalCount} with optional changes skipped` : ""
+        }`;
 
   const html = `
     <div class="check-table-wrap">
@@ -519,6 +559,11 @@ function checkRows(ctx, context = null) {
                         ? `<span class="status-chip status-exception" title="${esc(exceptionChipTitle(row.exceptions))}">${icon("info")}${row.exceptions.length === 1 ? "Exception" : `${row.exceptions.length} exceptions`}</span>`
                         : ""
                     }
+                    ${
+                      row.skippedOptional.length
+                        ? `<span class="status-chip status-optional" title="${esc(optionalChipTitle(row.skippedOptional))}">${icon("info")}${row.skippedOptional.length === 1 ? "Optional skipped" : `${row.skippedOptional.length} optional skipped`}</span>`
+                        : ""
+                    }
                   </td>
                   <td class="row-actions">
                     <button class="button button-quiet button-tiny" type="button" data-record-word="${row.index}" ${row.status === "match" || row.status === "error" ? "disabled" : ""}>
@@ -538,6 +583,12 @@ function checkRows(ctx, context = null) {
 function exceptionChipTitle(exceptions) {
   return `Skipped by lexical exception: ${exceptions
     .map((exception) => `${exception.label}${exception.notation ? ` (${exception.notation})` : ""}`)
+    .join("; ")}`;
+}
+
+function optionalChipTitle(optionalRules) {
+  return `Skipped optional ${optionalRules.length === 1 ? "change" : "changes"}: ${optionalRules
+    .map((rule) => `${rule.label}${rule.notation ? ` (${rule.notation})` : ""}`)
     .join("; ")}`;
 }
 
@@ -613,6 +664,9 @@ export function renderChanges(container, ctx) {
       )
     ),
   ].sort((left, right) => left.localeCompare(right));
+  const directOptionalRules = optionalRulesInStages([
+    { language, groups: compileRuleStages(language.soundChanges, context) },
+  ]);
 
   container.innerHTML = `
     <div class="workspace-stack">
@@ -626,6 +680,7 @@ export function renderChanges(container, ctx) {
         <div class="inventory-summary">
           <span><strong>${language.soundChanges.filter((rule) => rule.enabled !== false).length}</strong> active</span>
           <span><strong>${language.soundChanges.filter((rule) => rule.enabled === false).length}</strong> disabled</span>
+          ${directOptionalRules.length ? `<span><strong>${directOptionalRules.length}</strong> optional</span>` : ""}
         </div>
       </section>
 
@@ -641,10 +696,10 @@ export function renderChanges(container, ctx) {
             </header>
             ${rulesMarkup(language, context, exceptionSuggestions)}
           </section>
-          ${inheritedPanelMarkup(ctx)}
+          ${inheritedPanelMarkup(ctx, directOptionalRules)}
         </div>
         <aside class="changes-aside">
-          ${testPanelMarkup(ctx)}
+          ${testPanelMarkup(ctx, directOptionalRules)}
           ${reconstructPanelMarkup(ctx)}
           ${notationHelpMarkup()}
         </aside>
@@ -665,10 +720,18 @@ export function renderChanges(container, ctx) {
       : rememberedTest
         ? ""
         : defaultTestWord?.gloss || "";
+  let includeOptional = checkOptionalMemory.get(language.id) === true;
+  const optionalIdsForCheck = () => (includeOptional ? directOptionalRules.map((rule) => rule.id) : []);
+  let testOptional = new Set(
+    [...(testerOptionalMemory.get(language.id) || [])].filter((id) =>
+      directOptionalRules.some((rule) => rule.id === id)
+    )
+  );
+  testerOptionalMemory.set(language.id, new Set(testOptional));
 
   const runTest = () => {
     if (!testPanel || !testInput) return;
-    const result = directDerivation(ctx, testInput.value, testGloss);
+    const result = directDerivation(ctx, testInput.value, testGloss, [...testOptional]);
     testerMemory.set(language.id, { form: testInput.value, gloss: testGloss });
     const output = testPanel.querySelector("[data-test-output]");
     const surface = testPanel.querySelector("[data-test-surface]");
@@ -716,7 +779,7 @@ export function renderChanges(container, ctx) {
 
   const refreshCheck = () => {
     if (!checkPanel || !checkBody) return;
-    const data = checkRows(ctx, context);
+    const data = checkRows(ctx, context, optionalIdsForCheck());
     checkBody.innerHTML = data.html;
     if (checkSummary) checkSummary.textContent = data.summary;
   };
@@ -748,6 +811,14 @@ export function renderChanges(container, ctx) {
         testGloss = button.dataset.testGloss || "";
         runTest();
         testInput.focus();
+      });
+    });
+    testPanel.querySelectorAll("[data-test-optional]").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.checked) testOptional.add(input.dataset.testOptional);
+        else testOptional.delete(input.dataset.testOptional);
+        testerOptionalMemory.set(language.id, new Set(testOptional));
+        runTest();
       });
     });
     runTest();
@@ -805,6 +876,12 @@ export function renderChanges(container, ctx) {
 
   refreshCheck();
 
+  checkPanel?.querySelector("[data-check-optional]")?.addEventListener("change", (event) => {
+    includeOptional = event.target.checked;
+    checkOptionalMemory.set(language.id, includeOptional);
+    refreshCheck();
+  });
+
   const moveRule = (rule, direction) => {
     if (!rule.parentId) {
       const groups = ruleGroups(language.soundChanges);
@@ -834,6 +911,8 @@ export function renderChanges(container, ctx) {
       notation: "",
       note: "",
       enabled: true,
+      optional: false,
+      rate: DEFAULT_RULE_RATE,
       exceptions: [],
       parentId: parent.id,
     };
@@ -854,6 +933,8 @@ export function renderChanges(container, ctx) {
         notation: "",
         note: "",
         enabled: true,
+        optional: false,
+        rate: DEFAULT_RULE_RATE,
         exceptions: [],
         parentId: null,
       };
@@ -874,6 +955,8 @@ export function renderChanges(container, ctx) {
     const notation = card.querySelector(".rule-input");
     const note = card.querySelector(".rule-note-input");
     const toggle = card.querySelector("[data-rule-toggle]");
+    const optionalInput = card.querySelector("[data-rule-optional]");
+    const rateInput = card.querySelector("[data-rule-rate]");
 
     notation.addEventListener("input", () => {
       rule.notation = notation.value;
@@ -892,6 +975,20 @@ export function renderChanges(container, ctx) {
       rule.exceptions = normalizeRuleExceptions(exceptionsInput.value.split(","));
       if (exceptionCount) exceptionCount.textContent = exceptionSummary(rule.exceptions);
       ctx.touch({ label: "Edit rule exceptions" });
+      runTest();
+      refreshCheckSoon();
+    });
+    optionalInput?.addEventListener("change", () => {
+      rule.optional = optionalInput.checked;
+      rule.rate = normalizeRuleRate(rule.rate);
+      ctx.touch({ label: rule.optional ? "Mark rule optional" : "Make rule mandatory" });
+      // Re-render so the optional picker and the rule badge reflect the change.
+      ctx.refresh();
+    });
+    rateInput?.addEventListener("change", () => {
+      rule.rate = normalizeRuleRate(rateInput.value);
+      rateInput.value = String(rule.rate);
+      ctx.touch({ label: "Change optional rule rate" });
       runTest();
       refreshCheckSoon();
     });
@@ -981,6 +1078,7 @@ export function renderChanges(container, ctx) {
       const derivation = deriveForm(word.form, ctx.project, language.id, {
         directOnly: true,
         gloss: word.gloss,
+        optionalRuleIds: optionalIdsForCheck(),
       });
       if (derivation.error) {
         toast(`Cannot record “${word.gloss}”: ${derivation.error}`, { type: "error" });

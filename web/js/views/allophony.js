@@ -1,5 +1,6 @@
 import {
   ALLOPHONY_REPEAT_LIMIT,
+  DEFAULT_RULE_RATE,
   allophonyEntries,
   allophonyRules,
   ancestorsOf,
@@ -9,6 +10,7 @@ import {
   normalizeAllophonyDomain,
   normalizeAllophonyRepeatLimit,
   normalizeRuleExceptions,
+  normalizeRuleRate,
   restoreAllophonyGroup,
   restoreAllophonyRule,
   restoreUngroupedAllophonyRules,
@@ -17,16 +19,38 @@ import {
 import {
   allophoneTable,
   compileAllophonyRule,
+  compileAllophonyRules,
   contextForAllophony,
   surfaceForForm,
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
+import { optionalRulesPickerMarkup } from "../derivation.js";
 import { esc, icon, toast } from "../ui.js";
 
 // Allophony is the synchronic surface layer. It is deliberately separate from
 // the Sound changes tab: historical rules run from an ancestor's phonemic form
 // to this language's phonemic form and feed the cognate chain; allophony runs
 // on this language's own phonemic forms and produces [surface] forms.
+
+// Optional allophony is a view-only variant, remembered per language just like
+// the sound-change tester's selection.
+const alloTesterOptionalMemory = new Map();
+
+function optionalAllophonyRules(compiled) {
+  return (compiled || [])
+    .filter(
+      (entry) =>
+        entry.rule?.optional === true &&
+        entry.rule.enabled !== false &&
+        !entry.groupDisabled
+    )
+    .map((entry) => ({
+      id: entry.rule.id,
+      label: entry.number || "",
+      notation: entry.rule.notation || "",
+      rate: normalizeRuleRate(entry.rule.rate),
+    }));
+}
 
 function statusFor(rule, context) {
   if (!String(rule.notation || "").trim()) return { kind: "empty", label: "Empty rule" };
@@ -74,6 +98,7 @@ function ruleCardMarkup(rule, number, context, { canMoveUp, canMoveDown, groupDi
   const iterative = rule.iterative === true;
   const repeatLimit = normalizeAllophonyRepeatLimit(rule.repeatLimit);
   const domain = normalizeAllophonyDomain(rule.domain);
+  const rate = normalizeRuleRate(rule.rate);
   const status =
     rule.enabled === false
       ? { kind: "off", label: "Disabled" }
@@ -81,11 +106,12 @@ function ruleCardMarkup(rule, number, context, { canMoveUp, canMoveDown, groupDi
         ? { kind: "off", label: "Group disabled" }
         : statusFor(rule, context);
   return `
-    <article class="rule-card ${disabled ? "is-disabled" : ""}" data-allo-rule-id="${esc(rule.id)}">
+    <article class="rule-card ${rule.optional ? "is-optional" : ""} ${disabled ? "is-disabled" : ""}" data-allo-rule-id="${esc(rule.id)}">
       <div class="rule-number ${String(number).includes(".") ? "is-dotted" : ""}">${esc(number)}</div>
       <div class="rule-body">
         <div class="rule-notation-row">
           <input class="rule-input" type="text" value="${esc(rule.notation)}" placeholder="/p/ > [pʰ] / # _ V" autocomplete="off" spellcheck="false" aria-label="Allophony rule notation">
+          ${rule.optional ? `<span class="rule-optional-badge" title="Optional allophony is skipped in the primary surface">optional ${rate}%</span>` : ""}
           <span class="rule-status status-${status.kind}" data-allo-rule-status title="${esc(status.label)}">${statusMarkup(status)}</span>
         </div>
         <input class="rule-note-input" type="text" value="${esc(rule.note)}" placeholder="Optional description, e.g. aspiration in onset" autocomplete="off" aria-label="Allophony rule note">
@@ -105,6 +131,15 @@ function ruleCardMarkup(rule, number, context, { canMoveUp, canMoveDown, groupDi
           <label class="rule-option" title="Maximum number of passes before the rule stops and warns">
             <span class="rule-option-label">Limit</span>
             <input class="rule-limit-input" type="number" data-allo-rule-limit min="1" max="100" step="1" value="${repeatLimit}" aria-label="Maximum allophony passes" ${iterative ? "" : "disabled"}>
+          </label>
+          <label class="rule-option" title="Skip this rule in the primary surface; include it in a tester variant when needed">
+            <input type="checkbox" data-allo-rule-optional ${rule.optional ? "checked" : ""}>
+            <span>Optional</span>
+          </label>
+          <label class="rule-option" title="Descriptive likelihood; surface derivations stay deterministic">
+            <span class="rule-option-label">Rate</span>
+            <input class="rule-limit-input rule-rate-input" type="number" data-allo-rule-rate min="0" max="100" step="5" value="${rate}" aria-label="Optional allophony rate" ${rule.optional ? "" : "disabled"}>
+            <span>%</span>
           </label>
         </div>
         ${exceptionsMarkup(rule)}
@@ -224,12 +259,13 @@ export function allophoneTableMarkup(data) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="table-foot">The table is derived from the rules above. Phonemes are written /…/ and surface allophones [ … ].</p>`;
+    <p class="table-foot">The table is derived from the active mandatory rules above. Optional rules appear in the surface tester when you tick them. Phonemes are written /…/ and surface allophones [ … ].</p>`;
 }
 
-function testPanelMarkup(language) {
+function testPanelMarkup(language, optionalRules = []) {
   const sample = language.vocabulary.find((word) => word.form.trim())?.form || "";
   const suggestions = language.vocabulary.filter((word) => word.form.trim()).slice(0, 4);
+  const selectedOptional = alloTesterOptionalMemory.get(language.id) || new Set();
   return `
     <section class="panel test-panel" data-allo-test-panel>
       <header class="panel-head">
@@ -253,6 +289,12 @@ function testPanelMarkup(language) {
             : ""
         }
       </div>
+      ${optionalRulesPickerMarkup(
+        optionalRules,
+        selectedOptional,
+        "data-allo-test-optional",
+        { hint: "The primary surface skips optional allophony. Tick a rule to include it in this variant." }
+      )}
       <div class="derivation">
         <div class="derivation-output-row">
           <span class="derivation-label">Phonemic</span>
@@ -313,7 +355,9 @@ function notationHelpMarkup() {
 }
 
 function allophonyStepsMarkup(steps) {
-  const visible = (steps || []).filter((step) => step.changed || step.error || step.excepted);
+  const visible = (steps || []).filter(
+    (step) => step.changed || step.error || step.excepted || step.optionalSkipped
+  );
   if (!visible.length) {
     return `<p class="derivation-empty">No allophony rule changes this form — the surface stays identical.</p>`;
   }
@@ -330,17 +374,21 @@ function allophonyStepsMarkup(steps) {
           </div>`;
       }
       return `
-        <div class="derivation-step ${step.changed ? "is-changed" : ""} ${step.excepted ? "is-excepted" : ""} ${step.warning ? "has-warning" : ""}">
+        <div class="derivation-step ${step.changed ? "is-changed" : ""} ${step.excepted ? "is-excepted" : ""} ${step.optionalSkipped ? "is-optional-skipped" : ""} ${step.warning ? "has-warning" : ""}">
           <span class="step-index">${esc(step.label)}</span>
           <div class="step-body">
             <div class="step-rule">
               <code>${esc(step.rule?.notation || "")}</code>
               ${
-                step.excepted
-                  ? `<span class="step-badge">lexical exception</span>`
-                  : step.iterative && step.passes
-                    ? `<span class="step-badge">${esc(`${step.passes} ${step.passes === 1 ? "pass" : "passes"}`)}</span>`
-                    : ""
+                step.optionalSkipped
+                  ? `<span class="step-badge step-badge-optional">optional${step.rule?.rate != null ? ` ${normalizeRuleRate(step.rule.rate)}%` : ""} skipped</span>`
+                  : step.excepted
+                    ? `<span class="step-badge">lexical exception</span>`
+                    : step.optional
+                      ? `<span class="step-badge step-badge-optional">optional${step.rule?.rate != null ? ` ${normalizeRuleRate(step.rule.rate)}%` : ""}</span>`
+                      : step.iterative && step.passes
+                        ? `<span class="step-badge">${esc(`${step.passes} ${step.passes === 1 ? "pass" : "passes"}`)}</span>`
+                        : ""
               }
             </div>
             <div class="step-form">
@@ -363,6 +411,7 @@ export function renderAllophony(container, ctx) {
   const language = ctx.language;
   const context = contextForAllophony(ctx.project, language.id);
   const table = allophoneTable(ctx.project, language.id);
+  const optionalRules = optionalAllophonyRules(compileAllophonyRules(language.allophony, context));
   const parent = ancestorsOf(ctx.project, language.id).at(-1);
   const exceptionSuggestions = [
     ...new Set(
@@ -420,7 +469,7 @@ export function renderAllophony(container, ctx) {
           </section>
         </div>
         <aside class="changes-aside">
-          ${testPanelMarkup(language)}
+          ${testPanelMarkup(language, optionalRules)}
           ${notationHelpMarkup()}
         </aside>
       </div>
@@ -431,11 +480,18 @@ export function renderAllophony(container, ctx) {
   const testInput = testPanel?.querySelector("[data-allo-test-input]");
   const tablePanel = container.querySelector("[data-allo-table-panel]");
   let testGloss = language.vocabulary.find((word) => word.form.trim())?.gloss || "";
+  let testOptional = new Set(
+    [...(alloTesterOptionalMemory.get(language.id) || [])].filter((id) =>
+      optionalRules.some((rule) => rule.id === id)
+    )
+  );
+  alloTesterOptionalMemory.set(language.id, new Set(testOptional));
 
   const runTest = () => {
     if (!testPanel || !testInput) return;
     const result = surfaceForForm(stripLevelMarks(testInput.value), ctx.project, language.id, {
       gloss: testGloss,
+      optionalRuleIds: [...testOptional],
     });
     const phonemic = testPanel.querySelector("[data-allo-phonemic]");
     const surface = testPanel.querySelector("[data-allo-surface]");
@@ -550,6 +606,8 @@ export function renderAllophony(container, ctx) {
         notation: "",
         note: "",
         enabled: true,
+        optional: false,
+        rate: DEFAULT_RULE_RATE,
         iterative: false,
         repeatLimit: ALLOPHONY_REPEAT_LIMIT,
         domain: "adjacent",
@@ -592,6 +650,8 @@ export function renderAllophony(container, ctx) {
           notation: "",
           note: "",
           enabled: true,
+          optional: false,
+          rate: DEFAULT_RULE_RATE,
           iterative: false,
           repeatLimit: ALLOPHONY_REPEAT_LIMIT,
           domain: "adjacent",
@@ -695,6 +755,8 @@ export function renderAllophony(container, ctx) {
     const iterativeInput = card.querySelector("[data-allo-rule-iterative]");
     const domainInput = card.querySelector("[data-allo-rule-domain]");
     const limitInput = card.querySelector("[data-allo-rule-limit]");
+    const optionalInput = card.querySelector("[data-allo-rule-optional]");
+    const rateInput = card.querySelector("[data-allo-rule-rate]");
 
     selector?.addEventListener("change", () => {
       if (selector.checked) selectedRules.add(rule.id);
@@ -745,6 +807,19 @@ export function renderAllophony(container, ctx) {
       rule.repeatLimit = normalizeAllophonyRepeatLimit(limitInput.value);
       limitInput.value = String(rule.repeatLimit);
       ctx.touch({ label: "Change allophony pass limit" });
+      runTest();
+    });
+    optionalInput?.addEventListener("change", () => {
+      rule.optional = optionalInput.checked;
+      rule.rate = normalizeRuleRate(rule.rate);
+      ctx.touch({ label: rule.optional ? "Mark allophony rule optional" : "Make allophony rule mandatory" });
+      // Re-render so the badge, picker, and allophone table stay in sync.
+      ctx.refresh();
+    });
+    rateInput?.addEventListener("change", () => {
+      rule.rate = normalizeRuleRate(rateInput.value);
+      rateInput.value = String(rule.rate);
+      ctx.touch({ label: "Change optional allophony rate" });
       runTest();
     });
     toggle.addEventListener("change", () => {
@@ -809,6 +884,14 @@ export function renderAllophony(container, ctx) {
         testGloss = button.dataset.alloTestGloss || "";
         runTest();
         testInput.focus();
+      });
+    });
+    testPanel.querySelectorAll("[data-allo-test-optional]").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.checked) testOptional.add(input.dataset.alloTestOptional);
+        else testOptional.delete(input.dataset.alloTestOptional);
+        alloTesterOptionalMemory.set(language.id, new Set(testOptional));
+        runTest();
       });
     });
     runTest();

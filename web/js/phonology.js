@@ -5,6 +5,7 @@ import {
   getLineage,
   normalizeAllophonyDomain,
   normalizeAllophonyRepeatLimit,
+  normalizeRuleRate,
   ruleExceptsGloss,
   ruleGroups,
   ruleNumberMap,
@@ -522,15 +523,43 @@ export function compileAllophonyRules(rules, context) {
   });
 }
 
+function forcedRuleIds(value) {
+  if (value instanceof Set) return value;
+  if (Array.isArray(value)) return new Set(value);
+  return new Set();
+}
+
 export function applyAllophony(tokens, compiledRules, context, options = {}) {
   let current = [...tokens];
   let currentJunctures = new Set(options.junctures || []);
   const steps = [];
   const errors = [];
   const warnings = [];
+  const optionalRuleIds = forcedRuleIds(options.optionalRuleIds);
   for (const [index, compiled] of (compiledRules || []).entries()) {
     if (compiled.rule?.enabled === false || compiled.groupDisabled) continue;
     const label = compiled.number || String(index + 1);
+    if (compiled.rule?.optional === true && !optionalRuleIds.has(compiled.rule.id)) {
+      steps.push({
+        kind: "allophony",
+        label,
+        rule: compiled.rule,
+        compiled,
+        before: [...current],
+        after: [...current],
+        beforeJunctures: new Set(currentJunctures),
+        afterJunctures: new Set(currentJunctures),
+        changed: false,
+        iterative: false,
+        passes: 0,
+        runaway: false,
+        warning: "",
+        optional: true,
+        optionalSkipped: true,
+        languageName: "",
+      });
+      continue;
+    }
     if (ruleExceptsGloss(compiled.rule, options.gloss)) {
       steps.push({
         kind: "allophony",
@@ -547,6 +576,7 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
         runaway: false,
         warning: "",
         excepted: true,
+        optional: compiled.rule?.optional === true,
         languageName: "",
       });
       continue;
@@ -639,6 +669,7 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
       passes,
       runaway,
       warning,
+      optional: compiled.rule?.optional === true,
     });
     current = after;
     currentJunctures = afterJunctures;
@@ -651,6 +682,80 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
     warnings,
     text: joinSegments(current, currentJunctures),
   };
+}
+
+// Summarize the optional rules a derivation skipped. Views use this to explain
+// why a predicted form follows the primary path, and to offer a variant.
+export function optionalSkippedRulesFromSteps(steps) {
+  const rules = [];
+  for (const step of steps || []) {
+    if (step?.kind === "parallel") {
+      for (const entry of step.entries || []) {
+        if (entry.optionalSkipped) {
+          rules.push({
+            id: entry.id || "",
+            label: entry.label || "",
+            notation: entry.notation || "",
+            rate: normalizeRuleRate(entry.rate),
+          });
+        }
+      }
+      continue;
+    }
+    // A mandatory child skipped only because its optional parent was skipped
+    // is covered by the parent entry; do not list it twice.
+    if (step?.optionalSkipped && !step.optionalParentSkipped) {
+      rules.push({
+        id: step.rule?.id || "",
+        label: step.label || "",
+        notation: step.rule?.notation || "",
+        rate: normalizeRuleRate(step.rule?.rate),
+      });
+    }
+  }
+  return rules;
+}
+
+// Describe the optional rules available in a compiled stage list. The engine
+// skips them by default; a UI variant can force selected ids through
+// `optionalRuleIds`. Disabled rules are left out unless explicitly requested.
+export function optionalRulesInStages(stages, { includeDisabled = false } = {}) {
+  const rules = [];
+  for (const stage of stages || []) {
+    const languageName = stage.language?.name || "";
+    for (const group of stage.groups || []) {
+      const parentOptional = group.rule?.optional === true;
+      const parentDisabled = group.rule?.enabled === false;
+      if (parentOptional && (includeDisabled || !parentDisabled)) {
+        rules.push({
+          id: group.rule.id,
+          label: group.label || "",
+          notation: group.rule.notation || "",
+          rate: normalizeRuleRate(group.rule.rate),
+          languageName,
+          kind: "top",
+          parentId: null,
+          parentOptional: false,
+        });
+      }
+      if (parentDisabled && !includeDisabled) continue;
+      for (const child of group.children || []) {
+        if (child.rule?.optional !== true) continue;
+        if (!includeDisabled && child.rule.enabled === false) continue;
+        rules.push({
+          id: child.rule.id,
+          label: child.label || "",
+          notation: child.rule.notation || "",
+          rate: normalizeRuleRate(child.rule.rate),
+          languageName,
+          kind: "child",
+          parentId: group.rule?.id || null,
+          parentOptional,
+        });
+      }
+    }
+  }
+  return rules;
 }
 
 // Summarize the rules a derivation skipped because of lexical exceptions.
@@ -691,6 +796,7 @@ export function surfaceForForm(form, project, languageId, options = {}) {
   const result = applyAllophony(input, compiled, context, {
     gloss: options.gloss,
     junctures: parsed.junctures,
+    optionalRuleIds: options.optionalRuleIds,
   });
   // Surface display adds the language's predicted stress and syllable dots.
   // Keeping it separate from `text` means every existing comparison and export
@@ -713,14 +819,16 @@ export function surfaceForForm(form, project, languageId, options = {}) {
 
 // A flat table of phoneme → allophone rows derived from the rules. Rules are
 // the source of truth; the table is a view, so it cannot drift from them.
-export function allophoneTable(project, languageId) {
+export function allophoneTable(project, languageId, options = {}) {
   const context = contextForAllophony(project, languageId);
   const language = getLineage(project, languageId).at(-1);
   const compiled = compileAllophonyRules(language?.allophony || [], context);
+  const optionalRuleIds = forcedRuleIds(options.optionalRuleIds);
   const rows = [];
   const seen = new Set();
   compiled.forEach((entry, index) => {
     if (!entry.ok || entry.rule?.enabled === false || entry.groupDisabled) return;
+    if (entry.rule?.optional === true && !optionalRuleIds.has(entry.rule.id)) return;
     const phonemes = new Set();
     for (const atom of entry.rule.target || []) {
       if (atom.type === "literal") phonemes.add(atom.value);
@@ -757,6 +865,8 @@ export function allophoneTable(project, languageId) {
         environment: entry.rule.environment || "",
         notation: entry.rule.source || entry.rule.notation || "",
         label: entry.number || String(index + 1),
+        optional: entry.rule.optional === true,
+        rate: normalizeRuleRate(entry.rule.rate),
       });
     }
   });
@@ -1871,18 +1981,19 @@ export function compileChainFrom(project, sourceId, targetId) {
 // combined in one pass, so the order of the list never changes which rules
 // apply. Two top-level rules that touch the same part of the form are a
 // conflict: the derivation stops with an error instead of guessing an order.
-function applyParallel(tokens, groups, context, gloss = "", junctures = null) {
+function applyParallel(tokens, groups, context, gloss = "", junctures = null, optionalRuleIds = new Set()) {
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const entries = [];
   for (const group of groups) {
-    const excepted = ruleExceptsGloss(group.rule, gloss);
-    const matches = excepted ? [] : findRuleMatches(tokens, group.compiled.rule, context, cuts);
-    const entry = { group, matches, excepted };
+    const optionalSkipped = group.rule.optional === true && !optionalRuleIds.has(group.rule.id);
+    const excepted = !optionalSkipped && ruleExceptsGloss(group.rule, gloss);
+    const matches = optionalSkipped || excepted ? [] : findRuleMatches(tokens, group.compiled.rule, context, cuts);
+    const entry = { group, matches, excepted, optionalSkipped };
     // A rule that matched nothing gets a diagnosis instead of a bare
     // "0 matches" — the tester shows this under its entry in the step list.
     // An exception is a deliberate skip, not a failed match, so it needs no
     // diagnosis.
-    if (!excepted && !matches.length) {
+    if (!optionalSkipped && !excepted && !matches.length) {
       entry.debug = explainRuleMiss(tokens, group.compiled.rule, context, cuts) || "";
     }
     entries.push(entry);
@@ -1954,6 +2065,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
   const errors = [];
   let fatal = false;
   const gloss = options.gloss || "";
+  const optionalRuleIds = forcedRuleIds(options.optionalRuleIds);
 
   for (const stage of stages) {
     const languageName = stage.language?.name || "";
@@ -1965,6 +2077,12 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
     // Empty rules are unfinished, so they produce a step but no hard error.
     const usable = [];
     for (const group of groups) {
+      if (group.rule.optional === true && !optionalRuleIds.has(group.rule.id)) {
+        // A skipped optional rule contributes an explanatory parallel entry,
+        // even if its notation is broken; its children stay skipped below.
+        usable.push(group);
+        continue;
+      }
       if (group.compiled.ok) {
         usable.push(group);
         continue;
@@ -1980,6 +2098,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         beforeJunctures: new Set(currentJunctures),
         afterJunctures: new Set(currentJunctures),
         changed: false,
+        optional: group.rule.optional === true,
         languageName,
       });
       if (!group.compiled.empty) errors.push(group.compiled.error);
@@ -1987,7 +2106,14 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
 
     const before = [...current];
     const beforeJunctures = new Set(currentJunctures);
-    const parallel = applyParallel(current, usable, stageContext, gloss, currentJunctures);
+    const parallel = applyParallel(
+      current,
+      usable,
+      stageContext,
+      gloss,
+      currentJunctures,
+      optionalRuleIds
+    );
     if (!parallel.ok) {
       steps.push({
         kind: "error",
@@ -2016,10 +2142,14 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         afterJunctures: parallel.junctures,
         changed: parallel.changed,
         entries: parallel.entries.map((entry) => ({
+          id: entry.group.rule.id,
           label: entry.group.label,
           notation: entry.group.rule.notation,
           matches: entry.matches.length,
           excepted: entry.excepted === true,
+          optional: entry.group.rule.optional === true,
+          optionalSkipped: entry.optionalSkipped === true,
+          rate: normalizeRuleRate(entry.group.rule.rate),
           debug: entry.debug || "",
         })),
         languageName,
@@ -2035,8 +2165,30 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
     let stageFailed = false;
     for (const group of groups) {
       if (stageFailed) break;
+      const parentOptionalSkipped =
+        group.rule.optional === true && !optionalRuleIds.has(group.rule.id);
       for (const child of group.children) {
         if (child.rule.enabled === false) continue;
+        const childOptionalSkipped =
+          child.rule.optional === true && !optionalRuleIds.has(child.rule.id);
+        if (parentOptionalSkipped || childOptionalSkipped) {
+          steps.push({
+            kind: "sequential",
+            label: child.label,
+            rule: child.rule,
+            compiled: child.compiled,
+            before: [...current],
+            after: [...current],
+            beforeJunctures: new Set(currentJunctures),
+            afterJunctures: new Set(currentJunctures),
+            changed: false,
+            optional: child.rule.optional === true || parentOptionalSkipped,
+            optionalSkipped: true,
+            optionalParentSkipped: parentOptionalSkipped,
+            languageName,
+          });
+          continue;
+        }
         if (!child.compiled.ok) {
           steps.push({
             kind: "error",
@@ -2049,6 +2201,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
             beforeJunctures: new Set(currentJunctures),
             afterJunctures: new Set(currentJunctures),
             changed: false,
+            optional: child.rule.optional === true,
             languageName,
           });
           if (!child.compiled.empty) errors.push(child.compiled.error);
@@ -2066,6 +2219,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
             afterJunctures: new Set(currentJunctures),
             changed: false,
             excepted: true,
+            optional: child.rule.optional === true,
             languageName,
           });
           continue;
@@ -2083,6 +2237,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
             beforeJunctures: new Set(currentJunctures),
             afterJunctures: new Set(currentJunctures),
             changed: false,
+            optional: child.rule.optional === true,
             languageName,
           });
           errors.push(result.error);
@@ -2104,6 +2259,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           debug: result.changed
             ? ""
             : explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures) || "",
+          optional: child.rule.optional === true,
+          rate: normalizeRuleRate(child.rule.rate),
           languageName,
         });
         current = result.tokens;
@@ -2126,7 +2283,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
 }
 
 export function deriveForm(form, project, languageId, options = {}) {
-  const { directOnly = false, gloss = "" } = options;
+  const { directOnly = false, gloss = "", optionalRuleIds } = options;
   const context = contextForLanguage(project, languageId);
   const lineage = getLineage(project, languageId);
   const languages = directOnly ? lineage.slice(-1) : lineage;
@@ -2140,7 +2297,11 @@ export function deriveForm(form, project, languageId, options = {}) {
   });
   const parsed = context.tokenizeWithStress(form);
   const tokens = parsed.tokens;
-  const derived = deriveStages(tokens, stages, context, { gloss, junctures: parsed.junctures });
+  const derived = deriveStages(tokens, stages, context, {
+    gloss,
+    junctures: parsed.junctures,
+    optionalRuleIds,
+  });
   return {
     input: tokens,
     inputJunctures: parsed.junctures,

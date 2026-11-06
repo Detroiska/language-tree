@@ -284,6 +284,17 @@ export function ruleExceptsGloss(rule, gloss) {
   return exceptions.some((entry) => String(entry).trim().toLowerCase() === key);
 }
 
+// Optional rules describe variation: the primary derivation skips them, while
+// a variant can force selected rule ids back in. The rate is descriptive (0–100)
+// and deliberately does not randomize output, so runs stay reproducible.
+export const DEFAULT_RULE_RATE = 50;
+
+export function normalizeRuleRate(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_RULE_RATE;
+  return Math.min(100, Math.max(0, Math.round(parsed)));
+}
+
 function ensureAllophony(value) {
   if (!Array.isArray(value)) return [];
   const items = [];
@@ -301,6 +312,8 @@ function ensureAllophony(value) {
       notation: typeof rule.notation === "string" ? rule.notation : "",
       note: typeof rule.note === "string" ? rule.note : "",
       enabled: rule.enabled !== false,
+      optional: rule.optional === true,
+      rate: normalizeRuleRate(rule.rate),
       iterative: rule.iterative === true,
       repeatLimit: normalizeAllophonyRepeatLimit(rule.repeatLimit),
       domain: normalizeAllophonyDomain(rule.domain),
@@ -555,6 +568,8 @@ export function ensureProject(raw) {
             notation: typeof rule.notation === "string" ? rule.notation : "",
             note: typeof rule.note === "string" ? rule.note : "",
             enabled: rule.enabled !== false,
+            optional: rule.optional === true,
+            rate: normalizeRuleRate(rule.rate),
             exceptions: normalizeRuleExceptions(rule.exceptions),
             parentId:
               typeof rule.parentId === "number"

@@ -503,7 +503,7 @@ function expandCandidates(candidates, rule, context, options) {
 // Apply only the top-level (parallel) rules of one stage. This is the forward
 // check used after reversing that pass; sequential children are handled by
 // their own single-rule checks before this point.
-function applyParallelOnly(tokens, groups, context, gloss = "", junctures = null) {
+function applyParallelOnly(tokens, groups, context, gloss = "", junctures = null, optionalRuleIds = []) {
   if (!groups.length) {
     return { ok: true, tokens: [...tokens], junctures: new Set(junctures || []), errors: [] };
   }
@@ -512,7 +512,13 @@ function applyParallelOnly(tokens, groups, context, gloss = "", junctures = null
     context,
     groups: groups.map((group) => ({ ...group, children: [] })),
   };
-  const result = deriveStages(tokens, [stage], context, { gloss, junctures });
+  const result = deriveStages(tokens, [stage], context, {
+    gloss,
+    junctures,
+    // Reconstruction treats optional changes as possible: the recorded form
+    // may or may not have undergone them.
+    optionalRuleIds,
+  });
   return {
     ok: !result.errors.length && !result.fatal,
     tokens: result.tokens,
@@ -527,16 +533,35 @@ function applyParallelOnly(tokens, groups, context, gloss = "", junctures = null
 export function invertRules(tokens, groups, context, options = {}) {
   const settings = optionsWithDefaults(options);
   const gloss = settings.gloss || "";
-  const usable = (groups || []).filter((group) => group.rule?.enabled !== false);
+  // `appliedOptional` selects which optional rules count as applied for this
+  // inversion. With no selection every optional rule is applied, preserving
+  // the behavior of the exported helper for callers that do not care about
+  // variation. reconstructForm tries each combination instead.
+  const appliedOptional =
+    options.appliedOptional instanceof Set
+      ? options.appliedOptional
+      : Array.isArray(options.appliedOptional)
+        ? new Set(options.appliedOptional)
+        : null;
+  const isApplied = (rule) =>
+    rule?.optional !== true || appliedOptional === null || appliedOptional.has(rule.id);
+
+  const enabledGroups = (groups || []).filter((group) => group.rule?.enabled !== false);
+  const usable = enabledGroups.filter((group) => isApplied(group.rule));
   const warnings = [];
   const exceptions = [];
-  for (const group of usable) {
+  const optional = [];
+  for (const group of enabledGroups) {
+    if (group.compiled?.ok && group.rule?.optional === true) optional.push(group.rule.id);
+    if (!isApplied(group.rule)) continue;
     if (ruleExceptsGloss(group.rule, gloss)) exceptions.push(group.label);
     else if (!group.compiled?.ok && !group.compiled?.empty) {
       warnings.push(group.compiled?.error || "A rule could not be compiled.");
     }
     for (const child of group.children || []) {
       if (child.rule.enabled === false) continue;
+      if (child.compiled?.ok && child.rule?.optional === true) optional.push(child.rule.id);
+      if (!isApplied(child.rule)) continue;
       if (ruleExceptsGloss(child.rule, gloss)) exceptions.push(child.label);
       else if (!child.compiled?.ok && !child.compiled?.empty) {
         warnings.push(child.compiled?.error || "A rule could not be compiled.");
@@ -550,12 +575,22 @@ export function invertRules(tokens, groups, context, options = {}) {
   for (const group of [...usable].reverse()) {
     for (const child of [...(group.children || [])].reverse()) {
       if (child.rule.enabled === false || !child.compiled?.ok) continue;
+      // An optional child not selected by this configuration is skipped, just
+      // as the forward derivation would have skipped it.
+      if (!isApplied(child.rule)) continue;
       if (ruleExceptsGloss(child.rule, gloss)) continue;
       const expanded = expandCandidates(candidates, child.compiled.rule, context, settings);
       candidates = expanded.candidates;
       truncated = truncated || expanded.truncated;
       if (!candidates.length) {
-        return { candidates: [], truncated, warnings, exceptions, loss: 0 };
+        return {
+          candidates: [],
+          truncated,
+          warnings,
+          exceptions,
+          optional: [...new Set(optional)],
+          loss: 0,
+        };
       }
     }
   }
@@ -573,12 +608,24 @@ export function invertRules(tokens, groups, context, options = {}) {
     candidates = expanded.candidates;
     truncated = truncated || expanded.truncated;
     if (!candidates.length) {
-      return { candidates: [], truncated, warnings, exceptions, loss: 0 };
+      return {
+        candidates: [],
+        truncated,
+        warnings,
+        exceptions,
+        optional: [...new Set(optional)],
+        loss: 0,
+      };
     }
   }
 
   const topGroups = usable.filter((group) => group.compiled?.ok);
   if (topGroups.length) {
+    // Only optional groups that survived the filter are applied here. A
+    // skipped optional group is absent from `topGroups`, so it is not forced.
+    const appliedTopOptional = topGroups
+      .filter((group) => group.rule?.optional === true)
+      .map((group) => group.rule.id);
     candidates = candidates.filter((candidate) => {
       if (!candidate.parallelTarget) return false;
       const forward = applyParallelOnly(
@@ -586,7 +633,8 @@ export function invertRules(tokens, groups, context, options = {}) {
         topGroups,
         context,
         gloss,
-        candidate.junctures
+        candidate.junctures,
+        appliedTopOptional
       );
       return (
         forward.ok &&
@@ -609,8 +657,26 @@ export function invertRules(tokens, groups, context, options = {}) {
     truncated,
     warnings: [...new Set(warnings)],
     exceptions: [...new Set(exceptions)],
+    optional: [...new Set(optional)],
     loss: list.length ? Math.max(...list.map((candidate) => candidate.loss)) : 0,
   };
+}
+
+// Optional changes are independent historical possibilities: a recorded form
+// may show any subset of them. Try each subset so reconstruction keeps the
+// unchanged analysis alongside the changed one. Each rule doubles the work, so
+// larger sets fall back to the two extremes (none applied, all applied).
+const MAX_OPTIONAL_CONFIGURATIONS = 16;
+
+function optionalConfigurations(ids) {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return [[]];
+  if (2 ** unique.length > MAX_OPTIONAL_CONFIGURATIONS) return [[], unique];
+  const configurations = [];
+  for (let mask = 0; mask < 2 ** unique.length; mask += 1) {
+    configurations.push(unique.filter((_, index) => mask & (1 << index)));
+  }
+  return configurations;
 }
 
 // Invert this language's own sound changes from a recorded form. `parent` is
@@ -666,7 +732,42 @@ export function reconstructForm(form, project, languageId, options = {}) {
   };
 
   const groups = compileRuleStages(language.soundChanges || [], context);
-  const inverted = invertRules(tokens, groups, context, { ...options, gloss, junctures, priority });
+  const optionalIds = [];
+  for (const group of groups) {
+    if (group.rule?.enabled === false) continue;
+    if (group.compiled?.ok && group.rule?.optional === true) optionalIds.push(group.rule.id);
+    for (const child of group.children || []) {
+      if (child.rule.enabled === false) continue;
+      if (child.compiled?.ok && child.rule?.optional === true) optionalIds.push(child.rule.id);
+    }
+  }
+
+  const settings = optionsWithDefaults(options);
+  const mergedCandidates = [];
+  const warnings = new Set();
+  const exceptions = new Set();
+  let truncated = false;
+  for (const appliedOptional of optionalConfigurations(optionalIds)) {
+    const inverted = invertRules(tokens, groups, context, {
+      ...options,
+      gloss,
+      junctures,
+      priority,
+      appliedOptional: new Set(appliedOptional),
+    });
+    truncated = truncated || inverted.truncated;
+    for (const warning of inverted.warnings || []) warnings.add(warning);
+    for (const label of inverted.exceptions || []) exceptions.add(label);
+    mergedCandidates.push(...inverted.candidates);
+  }
+  const ranked = rankCandidates(mergedCandidates, settings.maxCandidates, priority);
+  const inverted = {
+    candidates: ranked.candidates,
+    truncated: truncated || ranked.truncated,
+    warnings: [...warnings],
+    exceptions: [...exceptions],
+    optional: [...new Set(optionalIds)],
+  };
   const candidates = inverted.candidates.map((candidate) => {
     const text = joinSegments(candidate.tokens, candidate.junctures);
     const match = evidenceFor(text);
@@ -695,6 +796,7 @@ export function reconstructForm(form, project, languageId, options = {}) {
     truncated: inverted.truncated,
     warnings: inverted.warnings,
     exceptions: inverted.exceptions || [],
+    optional: inverted.optional || [],
   };
 }
 

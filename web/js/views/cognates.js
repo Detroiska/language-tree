@@ -4,11 +4,13 @@ import {
   deriveStages,
   exceptionRulesFromSteps,
   hasSurfaceDisplay,
+  optionalRulesInStages,
+  optionalSkippedRulesFromSteps,
   ruleCompileErrors,
   surfaceForForm,
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, joinSegments, stripStressMarks } from "../notation.js";
-import { derivationStepsMarkup } from "../derivation.js";
+import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { buildCorrespondences } from "../correspondences.js";
 import { esc, icon, toast } from "../ui.js";
@@ -18,6 +20,10 @@ import { esc, icon, toast } from "../ui.js";
 // its own staged rules to what it receives from its ancestor, so a
 // language's rules never re-apply to its own recorded forms. Chains compile
 // once per render and are reused for every gloss in the matrix.
+//
+// Optional rules are skipped in the primary chain. Tick one in the picker to
+// re-render the matrix or trace with that change forced on.
+const optionalVariantMemory = new Map();
 
 function normalizeGlossOf(value) {
   return String(value || "").trim().toLowerCase();
@@ -62,13 +68,31 @@ function buildRows(project, source) {
   for (const language of languagesByDepth(project)) {
     const depth = getLineage(project, language.id).length - 1;
     if (language.id === source.id) {
-      rows.push({ language, depth, isSource: true, descended: true, path: [], chain: null, errors: [] });
+      rows.push({
+        language,
+        depth,
+        isSource: true,
+        descended: true,
+        path: [],
+        chain: null,
+        errors: [],
+        optionalRules: [],
+      });
       continue;
     }
     const lineage = getLineage(project, language.id);
     const sourceIndex = lineage.findIndex((item) => item.id === source.id);
     if (sourceIndex === -1) {
-      rows.push({ language, depth, isSource: false, descended: false, path: [], chain: null, errors: [] });
+      rows.push({
+        language,
+        depth,
+        isSource: false,
+        descended: false,
+        path: [],
+        chain: null,
+        errors: [],
+        optionalRules: [],
+      });
       continue;
     }
     const chain = compileChainFrom(project, source.id, language.id);
@@ -81,12 +105,13 @@ function buildRows(project, source) {
       path: lineage.slice(sourceIndex + 1, lineage.length - 1),
       chain,
       errors,
+      optionalRules: chain.ok ? optionalRulesInStages(chain.stages) : [],
     });
   }
   return rows;
 }
 
-function deriveFor(row, sourceWord, project) {
+function deriveFor(row, sourceWord, project, optionalRuleIds = []) {
   if (!row.descended || row.isSource || !row.chain.ok) {
     const recorded = recordedFor(row.language, sourceWord.gloss);
     const sourceForm = row.isSource ? sourceWord.form : recorded?.form || "";
@@ -98,6 +123,7 @@ function deriveFor(row, sourceWord, project) {
       surface: surface?.errors.length ? "" : surface?.display || "",
       steps: [],
       exceptions: [],
+      skippedOptional: [],
       error: "",
       recorded,
     };
@@ -106,6 +132,7 @@ function deriveFor(row, sourceWord, project) {
   const result = deriveStages(parsed.tokens, row.chain.stages, row.chain.context, {
     gloss: sourceWord.gloss,
     junctures: parsed.junctures,
+    optionalRuleIds,
   });
   const derived = joinSegments(result.tokens, result.junctures);
   const surface = result.errors.length
@@ -116,6 +143,7 @@ function deriveFor(row, sourceWord, project) {
     surface: surface?.errors.length ? "" : surface?.display || "",
     steps: result.steps,
     exceptions: exceptionRulesFromSteps(result.steps),
+    skippedOptional: optionalSkippedRulesFromSteps(result.steps),
     error: row.errors[0] || result.errors[0] || "",
     recorded: recordedFor(row.language, sourceWord.gloss),
   };
@@ -130,6 +158,13 @@ function statusFor(sourceWord, row, cell) {
         cell.exceptions.length === 1 ? "exception" : "exceptions"
       }`
     : "";
+  const optionalSuffix = cell.skippedOptional?.length
+    ? ` · optional ${cell.skippedOptional.length === 1 ? "change" : "changes"} skipped (${cell.skippedOptional
+        .map((rule) => rule.label || rule.notation)
+        .filter(Boolean)
+        .join(", ")})`
+    : "";
+  const suffix = `${exceptionSuffix}${optionalSuffix}`;
   if (!cell.recorded || !cell.recorded.form.trim()) {
     return {
       kind: "missing",
@@ -143,14 +178,14 @@ function statusFor(sourceWord, row, cell) {
       kind: "match",
       label: "Matches",
       icon: "check",
-      detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"}${exceptionSuffix}.`,
+      detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"}${suffix}.`,
     };
   }
   return {
     kind: "differs",
     label: "Differs",
     icon: "warning",
-    detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"} · recorded ${formatPhonemic(cell.recorded.form) || "∅"}${exceptionSuffix}.`,
+    detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"} · recorded ${formatPhonemic(cell.recorded.form) || "∅"}${suffix}.`,
   };
 }
 
@@ -210,12 +245,14 @@ function introSummary(words, targetRows, cellsForMatrix) {
   let missing = 0;
   let errors = 0;
   let excepted = 0;
+  let optional = 0;
   if (cellsForMatrix) {
     for (const cell of cellsForMatrix) {
       if (cell.status.kind === "differs") differs += 1;
       else if (cell.status.kind === "error") errors += 1;
       else if (cell.status.kind === "missing") missing += 1;
       if (cell.cell?.exceptions?.length) excepted += 1;
+      if (cell.cell?.skippedOptional?.length) optional += 1;
     }
   }
   return `
@@ -226,6 +263,7 @@ function introSummary(words, targetRows, cellsForMatrix) {
       ${errors ? `<span><strong>${errors}</strong> rule ${errors === 1 ? "error" : "errors"}</span>` : ""}
       ${missing ? `<span><strong>${missing}</strong> unrecorded</span>` : ""}
       ${excepted ? `<span><strong>${excepted}</strong> with lexical ${excepted === 1 ? "exception" : "exceptions"}</span>` : ""}
+      ${optional ? `<span><strong>${optional}</strong> with optional changes skipped</span>` : ""}
     </div>`;
 }
 
@@ -252,7 +290,10 @@ function matrixMarkup(source, words, targetRows, matrixCells) {
   const columnTitles = targetRows.map((row) => {
     const via = row.path.length ? ` via ${row.path.map((item) => item.name).join(" › ")}` : " (direct daughter)";
     const broken = row.errors.length ? ` — rule error: ${row.errors[0]}` : "";
-    return `${row.language.name}${via}${broken}`;
+    const optional = row.optionalRules?.length
+      ? ` — ${row.optionalRules.length} optional ${row.optionalRules.length === 1 ? "change" : "changes"}`
+      : "";
+    return `${row.language.name}${via}${broken}${optional}`;
   });
 
   const rows = words
@@ -263,7 +304,21 @@ function matrixMarkup(source, words, targetRows, matrixCells) {
           <td class="cognate-sticky matrix-gloss">${esc(word.gloss)}</td>
           <td class="matrix-form-cell"><code class="ipa">${esc(formatPhonemic(word.form))}</code></td>
           ${cellStatuses
-            .map((item) => `<td class="cognate-cell">${chipMarkup(item.status, { compact: true })}</td>`)
+            .map(
+              (item) =>
+                `<td class="cognate-cell">${chipMarkup(item.status, { compact: true })}${
+                  item.cell.skippedOptional?.length
+                    ? `<span class="cognate-optional-mark" title="${esc(
+                        `${item.cell.skippedOptional.length} optional ${
+                          item.cell.skippedOptional.length === 1 ? "change" : "changes"
+                        } skipped: ${item.cell.skippedOptional
+                          .map((rule) => rule.notation || rule.label)
+                          .filter(Boolean)
+                          .join("; ")}`
+                      )}">opt</span>`
+                    : ""
+                }</td>`
+            )
             .join("")}
           <td class="row-actions">
             <button class="icon-button icon-button-small" type="button" data-matrix-trace="${esc(word.id)}" title="Trace this word step by step" aria-label="Trace this word">${icon("chevronRight")}</button>
@@ -298,7 +353,7 @@ function matrixMarkup(source, words, targetRows, matrixCells) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="check-foot">Each chip compares the recorded form with the output of that language’s chain of rules from ${esc(source.name)}. Click a row to see the derivation step by step.${words.length ? "" : " No glosses are recorded in the source language yet."}</p>`;
+    <p class="check-foot">Each chip compares the recorded form with the output of that language’s chain of rules from ${esc(source.name)}. Optional changes are skipped in the primary chain; “opt” marks a cell where one was skipped, and the trace view can include them. Click a row to see the derivation step by step.${words.length ? "" : " No glosses are recorded in the source language yet."}</p>`;
 }
 
 function correspondenceReflexTitle(reflex, count, glosses, tied = false) {
@@ -488,14 +543,14 @@ function correspondencePanelMarkup(data, source) {
     </section>`;
 }
 
-function traceMarkup(project, source, word, rows) {
+function traceMarkup(project, source, word, rows, optionalRuleIds = []) {
   const usable = rows.filter((row) => row.descended);
   const outside = rows.length - usable.length;
   const showSurface = usable.some((row) => hasSurfaceDisplay(row.language));
 
   const rowsMarkup = usable
     .map((row) => {
-      const cell = deriveFor(row, word, project);
+      const cell = deriveFor(row, word, project, optionalRuleIds);
       const status = statusFor(word, row, cell);
       // A differing reflex colors the segments that diverged: minimal
       // alignment over the language's own tokenizer, so the user sees which
@@ -516,7 +571,19 @@ function traceMarkup(project, source, word, rows) {
           <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(cell.derived)) || "—"}</code></td>
           ${showSurface ? `<td><code class="ipa surface-form">${esc(formatPhonetic(cell.surface)) || "—"}</code></td>` : ""}
           <td>${diff ? `<code class="ipa">${diff.right}</code>` : cell.recorded && cell.recorded.form.trim() ? `<code class="ipa">${esc(formatPhonemic(cell.recorded.form))}</code>` : `<span class="muted">not recorded</span>`}</td>
-          <td>${chipMarkup(status)}</td>
+          <td>
+            ${chipMarkup(status)}
+            ${
+              cell.skippedOptional?.length
+                ? `<span class="status-chip status-optional" title="${esc(
+                    cell.skippedOptional
+                      .map((rule) => `${rule.label || ""} ${rule.notation || ""}`.trim())
+                      .filter(Boolean)
+                      .join("; ")
+                  )}">${icon("info")}${cell.skippedOptional.length === 1 ? "Optional skipped" : `${cell.skippedOptional.length} optional skipped`}</span>`
+                : ""
+            }
+          </td>
           <td class="row-actions">
             <button class="icon-button icon-button-small" type="button" data-toggle-steps="${esc(row.language.id)}" title="Show derivation steps" aria-label="Show derivation steps">${icon("chevronRight")}</button>
             <button class="button button-quiet button-tiny" type="button" data-record-for="${esc(row.language.id)}" ${disabled} title="${row.isSource ? "Recorded in the source language" : `Record the derived phonemic form in ${esc(row.language.name)}`}">${recordLabel}</button>
@@ -546,7 +613,7 @@ function traceMarkup(project, source, word, rows) {
       </table>
     </div>
     <p class="check-foot">
-      The derived form applies every language’s staged sound changes along the path below ${esc(source.name)}; a language’s own rules never apply again to its recorded forms. Surface forms apply this language’s synchronic allophony afterwards, not as part of the chain.
+      The derived form applies every language’s staged sound changes along the path below ${esc(source.name)}; a language’s own rules never apply again to its recorded forms. Optional changes are skipped unless ticked above. Surface forms apply this language’s synchronic allophony afterwards, not as part of the chain.
       ${outside ? `${outside} language${outside === 1 ? "" : "s"} outside this line of descent ${outside === 1 ? "is" : "are"} not compared.` : ""}
       Record the derived form when a reflex is correct.
     </p>`;
@@ -574,6 +641,18 @@ export function renderCognates(container, ctx) {
   const targetRows = rows.filter((row) => row.descended && !row.isSource);
   const word = words.find((entry) => entry.id === route.wordId) || null;
   const singleMode = Boolean(word);
+  const allOptionalRules = [
+    ...new Map(
+      targetRows.flatMap((row) => row.optionalRules || []).map((rule) => [rule.id, rule])
+    ).values(),
+  ];
+  let optionalSelection = new Set(
+    [...(optionalVariantMemory.get(source.id) || [])].filter((id) =>
+      allOptionalRules.some((rule) => rule.id === id)
+    )
+  );
+  optionalVariantMemory.set(source.id, new Set(optionalSelection));
+  const optionalRuleIds = [...optionalSelection];
 
   // Derive once per (target language, gloss). The matrix reuses these cells;
   // in single-gloss mode only the traced word is derived.
@@ -582,7 +661,7 @@ export function renderCognates(container, ctx) {
     const traced = singleMode ? [word] : words;
     cellsByLanguage.set(
       row.language.id,
-      traced.map((entry) => ({ word: entry, ...deriveFor(row, entry, project) }))
+      traced.map((entry) => ({ word: entry, ...deriveFor(row, entry, project, optionalRuleIds) }))
     );
   }
 
@@ -635,8 +714,21 @@ export function renderCognates(container, ctx) {
           <span class="panel-icon">${icon("language")}</span>
         </header>
         ${
+          allOptionalRules.length
+            ? optionalRulesPickerMarkup(
+                allOptionalRules,
+                optionalSelection,
+                "data-cognate-optional",
+                {
+                  showLanguage: true,
+                  hint: "The primary chain skips optional changes. Tick a rule to derive a variant; the choice applies to every language that has it.",
+                }
+              )
+            : ""
+        }
+        ${
           singleMode
-            ? traceMarkup(project, source, word, rows)
+            ? traceMarkup(project, source, word, rows, optionalRuleIds)
             : words.length
               ? matrixMarkup(source, words, targetRows, matrixCells)
               : emptyWordsPanel(source)
@@ -658,6 +750,15 @@ export function renderCognates(container, ctx) {
 
   container.querySelector("[data-matrix-back]")?.addEventListener("click", () => {
     ctx.navigate(`#/cognates/${encodeURIComponent(source.id)}`);
+  });
+
+  container.querySelectorAll("[data-cognate-optional]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) optionalSelection.add(input.dataset.cognateOptional);
+      else optionalSelection.delete(input.dataset.cognateOptional);
+      optionalVariantMemory.set(source.id, new Set(optionalSelection));
+      renderCognates(container, ctx);
+    });
   });
 
   container.querySelectorAll("[data-matrix-word]").forEach((rowElement) => {
