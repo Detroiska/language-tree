@@ -74,7 +74,7 @@ const CONSONANT_PLACES = [
 const VOWEL_HEIGHTS = ["Close", "Near-close", "Close-mid", "Mid", "Open-mid", "Near-open", "Open"];
 const VOWEL_BACKNESS = ["Front", "Central", "Back"];
 
-export function defaultConsonantChart() {
+function defaultConsonantChart() {
   return {
     rows: CONSONANT_MANNERS.map((label) => axisNode(label, "row")),
     columns: CONSONANT_PLACES.map((label) => axisNode(label, "col")),
@@ -83,7 +83,7 @@ export function defaultConsonantChart() {
   };
 }
 
-export function defaultVowelChart() {
+function defaultVowelChart() {
   return {
     rows: VOWEL_HEIGHTS.map((label) => axisNode(label, "row")),
     columns: VOWEL_BACKNESS.map((label) =>
@@ -107,7 +107,7 @@ export function defaultInventory() {
 // Categories are the language's named sound classes (N, G, L, …) usable in
 // the template and forbidden sequences. Onsets and codas keep separate
 // allowed and forbidden lists so switching modes never rewrites the text.
-export function defaultPhonotactics() {
+function defaultPhonotactics() {
   return {
     template: "(C)V(C)",
     onsets: "",
@@ -151,7 +151,7 @@ export function createLanguage(
   };
 }
 
-export function createProject(title = "Untitled language family") {
+function createProject(title = "Untitled language family") {
   const now = new Date().toISOString();
   return {
     version: 1,
@@ -245,7 +245,7 @@ export function isAllophonyGroup(item) {
 // "word" may skip across the whole word, "syllable" only within the target's
 // syllable. Both are opt-in so existing rules keep their exact behavior.
 export const ALLOPHONY_REPEAT_LIMIT = 12;
-export const ALLOPHONY_DOMAINS = ["adjacent", "syllable", "word"];
+const ALLOPHONY_DOMAINS = ["adjacent", "syllable", "word"];
 
 export function normalizeAllophonyDomain(value) {
   return ALLOPHONY_DOMAINS.includes(value) ? value : "adjacent";
@@ -648,7 +648,7 @@ export function ensureProject(raw) {
   return project;
 }
 
-export function normalizeSiblingOrder(project) {
+function normalizeSiblingOrder(project) {
   // Arrays are the source of truth for sibling order. This helper exists to
   // make that convention explicit and gives migrations a stable landing point.
   return project.languages;
@@ -778,10 +778,6 @@ export function restoreDeletedLanguages(project, entries) {
   return restored;
 }
 
-export function depthOf(project, id) {
-  return Math.max(0, getLineage(project, id).length - 1);
-}
-
 export function descendantsCount(project, id) {
   return descendantIds(project, id).size;
 }
@@ -891,10 +887,6 @@ export function chartPhonemeList(chart) {
   return values;
 }
 
-export function inventoryPhonemes(language) {
-  return [...new Set([...chartPhonemeList(language.inventory.consonants), ...chartPhonemeList(language.inventory.vowels)])];
-}
-
 export function languageStats(language) {
   return {
     consonants: new Set(chartPhonemeList(language.inventory.consonants)).size,
@@ -960,24 +952,12 @@ export function ruleNumberMap(rules) {
   return numbers;
 }
 
-export function normalizeRuleOrder(rules) {
+function normalizeRuleOrder(rules) {
   const ordered = [];
   for (const group of ruleGroups(rules)) {
     ordered.push(group.rule, ...group.children);
   }
   return ordered;
-}
-
-export function ruleChain(project, languageId, { includeSelf = true } = {}) {
-  const lineage = getLineage(project, languageId);
-  const languages = includeSelf ? lineage : lineage.slice(0, -1);
-  const rules = [];
-  for (const language of languages) {
-    for (const rule of language.soundChanges) {
-      if (rule.enabled !== false) rules.push({ ...rule, sourceLanguage: language });
-    }
-  }
-  return rules;
 }
 
 export function formatDate(iso) {

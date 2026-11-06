@@ -134,6 +134,14 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         # The app is local-only; a remote page must not frame loopback and
         # clickjack destructive confirmations.
         self.send_header("X-Frame-Options", "DENY")
+        # Scripts are external modules only. Inline style attributes remain in
+        # the rendered markup, so styles need the inline allowance for now.
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+        )
         super().end_headers()
 
     def log_message(self, fmt: str, *args) -> None:

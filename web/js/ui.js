@@ -1,6 +1,9 @@
+import { esc, escapeDialogCopy } from "./escape.js";
+
+export { esc };
+
 const paths = {
   plus: '<path d="M12 5v14M5 12h14"/>',
-  minus: '<path d="M5 12h14"/>',
   tree: '<path d="M12 4v6M12 10 6 16M12 10l6 6"/><circle cx="12" cy="3.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="5" cy="17.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="17.5" r="1.7" fill="currentColor" stroke="none"/>',
   language: '<path d="M4 5.5h16M12 5.5v13M7.5 18.5h9"/><path d="M7 9.5h10M7.5 13h9"/>',
   edit: '<path d="M4 20h4.3L19.5 8.8a2.3 2.3 0 0 0 0-3.3l-1-1a2.3 2.3 0 0 0-3.3 0L4 15.7V20Z"/><path d="m13.8 6.2 4 4"/>',
@@ -24,7 +27,6 @@ const paths = {
   warning: '<path d="M12 4 3 20h18L12 4Z"/><path d="M12 9v5M12 17.2v.1"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.1"/>',
   save: '<path d="M5 3.5h12l2.5 2.5v14.5h-15V3.5Z"/><path d="M8 3.5v5h7v-5M8 20.5v-6h8v6"/>',
-  sparkles: '<path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 3ZM19 14l.7 2.3L22 17l-2.3.7L19 20l-.7-2.3L16 17l2.3-.7L19 14Z"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
@@ -42,20 +44,16 @@ export function icon(name, className = "") {
   return `<svg class="icon ${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }
 
+// Small "12 languages" summary used by the report-style tabs.
+export function summaryChip(label, value) {
+  return `<span><strong>${esc(String(value))}</strong> ${esc(label)}</span>`;
+}
+
 export function hydrateIcons(root = document) {
   root.querySelectorAll("[data-icon]").forEach((element) => {
     const name = element.getAttribute("data-icon");
     element.innerHTML = icon(name);
   });
-}
-
-export function esc(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 let toastCounter = 0;
@@ -156,7 +154,7 @@ export function openModal({ title, body, footer = "", width = "medium", onMount 
 }
 
 export function confirmDialog(title, message, options = {}) {
-  const { confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false } = options;
+  const { confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false, html = false } = options;
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
@@ -167,7 +165,7 @@ export function confirmDialog(title, message, options = {}) {
     openModal({
       title,
       width: "small",
-      body: `<p class="modal-copy">${message}</p>`,
+      body: `<p class="modal-copy">${escapeDialogCopy(message, html)}</p>`,
       footer: `
         <button type="button" class="button button-quiet" data-cancel>${esc(cancelLabel)}</button>
         <button type="button" class="button ${danger ? "button-danger" : "button-primary"}" data-confirm>${esc(confirmLabel)}</button>

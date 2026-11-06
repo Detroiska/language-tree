@@ -2,7 +2,7 @@
 
 A local-first web tool for documenting a constructed language family. It keeps the family tree, phoneme inventories, diachronic sound changes, synchronic allophony, and a small lexicon in one git-friendly JSON file.
 
-The app is dependency-free: a small Python standard-library server serves a vanilla JavaScript frontend. No build step, package manager, or database is required.
+The app is dependency-free: a small Python standard-library server serves a vanilla JavaScript frontend. No build step, package manager, or database is required to run it. Optional development tooling (ESLint, Playwright, and Ruff) is installed separately; see **Tests**.
 
 ## Run it
 
@@ -234,7 +234,7 @@ Top-level rules are applied together to the ancestral form. Within one rule, mat
 
 Insertions are zero-width, so two top-level insertion rules at the same boundary do not conflict: both apply, in list order. A replacement at that boundary still conflicts with either insertion. Use a sequential child when one insertion must feed another rule.
 
-The **Rule library** panel (Sound changes tab, beside the notation help) lists curated groups from real language history — Grimm's law, Verner's law, the High German consonant shift, the first Slavic palatalization, Insular Celtic lenition, and Latin rhotacism — each written in the notation above. **Insert** appends a group's rules to the current language as disabled drafts with notes `"<name> (illustrative): <description>"`, and a toast offers one-click undo; a group whose notations are all already present shows **Inserted** instead. The groups are illustrative, not universal: they assume PIE-style inventories, and every installed rule compiles against your language's charts and stays inert until enabled, so nothing applies before it is reviewed. The data lives in the DOM-free `web/js/soundlaws.js`, and both suites verify every library rule compiles warning-free against a reference inventory plus spot-check the historical outputs.
+The **Rule library** panel (Sound changes tab, beside the notation help) lists curated groups from real language history — Grimm's law, Verner's law, the High German consonant shift, the first Slavic palatalization, Insular Celtic lenition, and Latin rhotacism — each written in the notation above. **Insert** appends a group's rules to the current language as disabled drafts with notes `"<name> (illustrative): <description>"`, and a toast offers one-click undo; a group whose notations are all already present shows **Inserted** instead. The groups are illustrative, not universal: they assume PIE-style inventories, and every installed rule compiles against your language's charts and stays inert until enabled, so nothing applies before it is reviewed. The data lives in the DOM-free `web/js/soundlaws.js`, and the test suites verify every library rule compiles warning-free against a reference inventory plus spot-check the historical outputs.
 
 The **Rule tester** applies the current language’s rules to a form from its immediate ancestor and shows the ancestral pass and every sequential step. Its output is **phonemic** (`/…/`); when the language has allophony or stress, a **Surface** line applies it to show `[…]` with stress marks and syllable dots. A rule that matches nothing says why in its step: the input matched no part of the form, or the left/right environment failed at every place the input itself did match. When two top-level rules conflict over the same part of the ancestral form, the tester offers **Make rule N sequential under rule M** — one click converts the later rule into a sequential child of the earlier one as a single undo step (offered only when that rule has no children of its own). The **Inherited vocabulary check** compares the derived output with the current language’s recorded glosses, shows the surface form alongside it, and can record the derived phonemic form; a **Differs** row highlights exactly which segments diverged on both sides, and an empty form shows as `∅`. Derivations with a rule error cannot be recorded.
 
@@ -362,7 +362,16 @@ The server writes atomically (`.json.tmp` then replace), so an interrupted save 
 
 ## Tests
 
-The parser and derivation engines are plain ES modules without DOM dependencies, so they run directly under Node. The server suite also needs Python 3.10+ because it launches a temporary copy of `server.py`:
+The app itself has no runtime dependencies. The optional development tooling uses npm for ESLint and Playwright, and Ruff for Python linting:
+
+```sh
+npm install       # ESLint and Playwright
+npm test          # engine, bulk, and server suites
+npm run lint      # ESLint over web/js and tests, Ruff over server.py
+npm run test:ui   # Playwright UI smoke test
+```
+
+`npm test` runs the three plain-Node suites; each can also be run directly. The server suite also needs Python 3.10+ because it launches a temporary copy of `server.py`:
 
 ```sh
 node tests/engine.test.mjs
@@ -370,7 +379,9 @@ node tests/bulk.test.mjs
 node tests/server.test.mjs
 ```
 
-The suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, the IPA-table collision audit, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, echo outputs (literal exchange, class metathesis, category and chart-class echoes, glued lengthening and labialization, echo-with-deletion, allophony surfaces and phoneme-table inhibition, and their compile-time rejections), the attested sound-change library (every shipped rule compiles warning-free against a reference inventory, draft shapes and ids, and historical spot checks), the X-SAMPA converter (curated-table round trips with the documented foldings, digraph and underscore binding precedence, whole-form survival, and passthrough behavior), the stage migration and family timeline grouping (integer normalization, on-load stage fields, ascending stages with stored order, and the undated bucket), the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, stress placement and display across all systems, weight-sensitive heavy syllables (including macron nuclei), stress- and syllable-conditioned rules, morpheme-cut tokenization/display and cut-conditioned sound changes and allophony (including insertion and deletion at a cut), cut-preserving reconstruction, reconstruction of unchanged, one-to-one, merger, insertion, deletion, feature, sequential, and parallel alternatives, parent-lexicon evidence and gloss normalization, per-rule lexical exceptions (gloss normalization, case and whitespace matching, sequential and lineage application, exception step markers, allophony skips including iterative rules, reconstruction skips, and migration defaults), optional sound changes and allophony (migration defaults and rate clamping, primary-path skips, forced variants, optional top-level groups and independent children, rule listings, the primary allophone table, and reconstruction across skipped/applied combinations), subgrouping support/weak/unsupported classification, notation delimiter stripping, allophony parsing/order/surface forms, chained allophony feeding, iterative allophony with pass limits and runaway warnings, word- and syllable-bounded harmony, feature allophones and off-chart surface synthesis, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration (including id normalization for languages, rules, and words), the Markdown/HTML report builders, plus segment-level diff alignment, correspondence alignment and tabulation (recorded vs. derived, irregular singletons, insertions), rule-inertness explanations and top-level conflict detection, the lexicon analytics computations, and the class-autocomplete query/ranking policy. The bulk suite covers the word-list parser: RFC 4180 quoting (delimiters, doubled quotes, and line breaks inside quoted fields), headers in both column orders, delimiter detection, the JSON fast path and its table fallback, and the add/update/skip duplicate modes. The server suite starts an isolated copy of `server.py` on an ephemeral port and covers JSON error envelopes for unsupported methods, empty and oversized request bodies, gzip round trips and truncation, revision conflicts, concurrent reads and writes, the loopback Host check, and the framing/cache headers.
+The engine suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, the IPA-table collision audit, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, echo outputs (literal exchange, class metathesis, category and chart-class echoes, glued lengthening and labialization, echo-with-deletion, allophony surfaces and phoneme-table inhibition, and their compile-time rejections), the attested sound-change library (every shipped rule compiles warning-free against a reference inventory, draft shapes and ids, and historical spot checks), the X-SAMPA converter (curated-table round trips with the documented foldings, digraph and underscore binding precedence, whole-form survival, and passthrough behavior), the stage migration and family timeline grouping (integer normalization, on-load stage fields, ascending stages with stored order, and the undated bucket), the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, stress placement and display across all systems, weight-sensitive heavy syllables (including macron nuclei), stress- and syllable-conditioned rules, morpheme-cut tokenization/display and cut-conditioned sound changes and allophony (including insertion and deletion at a cut), cut-preserving reconstruction, reconstruction of unchanged, one-to-one, merger, insertion, deletion, feature, sequential, and parallel alternatives, parent-lexicon evidence and gloss normalization, per-rule lexical exceptions (gloss normalization, case and whitespace matching, sequential and lineage application, exception step markers, allophony skips including iterative rules, reconstruction skips, and migration defaults), optional sound changes and allophony (migration defaults and rate clamping, primary-path skips, forced variants, optional top-level groups and independent children, rule listings, the primary allophone table, and reconstruction across skipped/applied combinations), subgrouping support/weak/unsupported classification, notation delimiter stripping, allophony parsing/order/surface forms, chained allophony feeding, iterative allophony with pass limits and runaway warnings, word- and syllable-bounded harmony, feature allophones and off-chart surface synthesis, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration (including id normalization for languages, rules, and words), the Markdown/HTML report builders, plus segment-level diff alignment, correspondence alignment and tabulation (recorded vs. derived, irregular singletons, insertions), rule-inertness explanations and top-level conflict detection, the lexicon analytics computations, and the class-autocomplete query/ranking policy. The bulk suite covers the word-list parser: RFC 4180 quoting (delimiters, doubled quotes, and line breaks inside quoted fields), headers in both column orders, delimiter detection, the JSON fast path and its table fallback, and the add/update/skip duplicate modes. The server suite starts an isolated copy of `server.py` on an ephemeral port and covers JSON error envelopes for unsupported methods, empty and oversized request bodies, gzip round trips and truncation, revision conflicts, concurrent reads and writes, the loopback Host check, and the framing/cache/CSP headers.
+
+The Playwright smoke test (`tests/ui/smoke.spec.mjs`) starts the app against a throwaway copy of the repository, adds a root language, adds and edits a sound-change rule, and reads the saved document back through the API. The tracked `data/project.json` is never modified. `npm run lint` runs ESLint over `web/js` and `tests` and Ruff over `server.py` (install Ruff with `pip install ruff` if it is not already on `PATH`). CI runs the linters, all three Node suites, and the UI smoke test on every pull request and on `main`.
 
 ## Project layout
 
@@ -378,8 +389,21 @@ The suite covers rule compilation and application, chart-derived classes, the IP
 language-tree/
 ├─ server.py               # local HTTP server + JSON API
 ├─ start.bat               # Windows launcher
+├─ start.sh                # macOS / Linux launcher
+├─ package.json            # dev-only test and lint scripts
+├─ eslint.config.mjs       # ESLint configuration
+├─ pyproject.toml          # Ruff configuration
+├─ playwright.config.mjs   # UI smoke-test configuration
+├─ CONTRIBUTING.md
+├─ CHANGELOG.md
 ├─ data/
 │  └─ project.json         # the complete project document
+├─ tests/
+│  ├─ engine.test.mjs
+│  ├─ bulk.test.mjs
+│  ├─ server.test.mjs
+│  ├─ ui-server.mjs        # throwaway app server for Playwright
+│  └─ ui/smoke.spec.mjs
 └─ web/
    ├─ index.html
    ├─ css/styles.css
@@ -388,8 +412,10 @@ language-tree/
       ├─ store.js          # load, autosave, save status
       ├─ api.js
       ├─ model.js          # data model, defaults, tree/chart helpers
+      ├─ routes.js         # hash decoding and language links
       ├─ notation.js       # /…/ and […] display helpers; strips level marks
       ├─ naturalclasses.js # chart-derived natural classes (plosive.plain, V.back)
+      ├─ categories.js     # custom sound categories (N, G, OBS, …)
       ├─ features.js       # IPA feature table, overrides, bundles, α-notation
       ├─ phonology.js      # sound-change parser, allophony engine, derivation
       ├─ reconstruction.js # reverse rule application, inherited alternatives, ambiguity
@@ -403,9 +429,17 @@ language-tree/
       ├─ analytics.js      # lexicon/inventory analytics computations
       ├─ search.js         # Ctrl+K quick search palette
       ├─ autocomplete.js   # chart-class autocomplete for rule fields
+      ├─ keyboard.js       # phoneme keyboard palette for IPA fields
+      ├─ languageActions.js # add/rename language actions shared by tree and tabs
+      ├─ derivation.js     # shared derivation-step renderer
+      ├─ ruleEditor.js     # shared sound-change and allophony editor pieces
+      ├─ soundlaws.js      # attested sound-change library
+      ├─ escape.js         # HTML escaping for DOM-free builders
+      ├─ gloss.js          # gloss normalization shared by lexicon and reports
       ├─ bulk.js           # vocabulary import/export parsing and writers
       ├─ xsampa.js         # X-SAMPA <-> IPA conversion for stored forms
-      ├─ report.js         # Markdown/HTML family report + JSON backup
+      ├─ report.js         # Markdown/HTML family report builders
+      ├─ reportUi.js       # browser-only report downloads and menu
       ├─ ui.js             # icons, modals, menus, toasts
       └─ views/
          ├─ tree.js
@@ -442,3 +476,11 @@ The local server exposes only three endpoints:
 - `GET /api/health` — return a small liveness response.
 
 It binds to `127.0.0.1` by default. Set `--host 0.0.0.0` only on a trusted network; there is no authentication layer.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, test and lint commands, project conventions, and the pull-request workflow. Release history lives in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

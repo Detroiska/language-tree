@@ -1,4 +1,4 @@
-import { esc } from "./ui.js";
+import { esc } from "./escape.js";
 
 // Segment-level comparison for recorded vs. derived forms.
 //

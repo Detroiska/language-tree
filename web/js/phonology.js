@@ -12,7 +12,7 @@ import {
 } from "./model.js";
 import { compileClasses } from "./categories.js";
 import { buildClassIndex, classForText } from "./naturalclasses.js";
-import { joinSegments, normalizeForm, stripLevelMarks } from "./notation.js";
+import { joinSegments, normalizeForm, sameJunctures, sameTokens, stripLevelMarks } from "./notation.js";
 import { compilePhonotactics, syllabifyTokens } from "./phonotactics.js";
 import { prosodyFallback, prosodyFromSyllables, normalizeStressSystem } from "./prosody.js";
 import {
@@ -72,7 +72,7 @@ function absorbSegmentEnd(source, end, hasTie = false) {
   return end;
 }
 
-export class SegmentContext {
+class SegmentContext {
   constructor({
     known = [],
     vowels = [],
@@ -1759,7 +1759,7 @@ function syllableBoundsAt(start, end, prosody) {
   return record ? { start: record.start, end: record.end } : null;
 }
 
-export function findRuleMatches(tokens, compiled, context, junctures = null) {
+function findRuleMatches(tokens, compiled, context, junctures = null) {
   const matches = [];
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const domain =
@@ -2017,16 +2017,6 @@ export function replacementForMatch(tokens, match, compiled, context) {
   return { ok: true, replacement: [resolved.sound], sound: resolved.sound };
 }
 
-function sameTokens(left, right) {
-  return left.length === right.length && left.every((token, index) => token === right[index]);
-}
-
-function sameJunctures(left, right) {
-  if (left.size !== right.size) return false;
-  for (const value of left) if (!right.has(value)) return false;
-  return true;
-}
-
 // Move zero-width morpheme cuts through a set of edits. A cut before an edit
 // stays before it, a cut after an edit shifts by the length change, and a cut
 // strictly inside a rewritten span disappears with the segments it separated.
@@ -2105,13 +2095,6 @@ export function applyRule(tokens, compiled, context, junctures = null) {
     junctures: outputJunctures,
     changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
   };
-}
-
-export function compileRules(rules, context) {
-  return rules.map((rule) => {
-    const result = compileRule(rule.notation, context);
-    return { rule, ...result };
-  });
 }
 
 // Compile a language's rules into top-level groups and their sequential
@@ -2511,11 +2494,6 @@ export function ruleCompileErrors(stages) {
     }
   }
   return errors;
-}
-
-export function firstRuleError(compiledRules) {
-  const broken = compiledRules.find((item) => !item.ok && !item.empty);
-  return broken ? broken.error : "";
 }
 
 export { normalizeForm };

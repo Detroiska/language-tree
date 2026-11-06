@@ -1,8 +1,6 @@
 import {
   childrenOf,
-  createAncestor,
   createLanguage,
-  createSibling,
   deleteLanguage,
   descendantIds,
   descendantsCount,
@@ -11,8 +9,10 @@ import {
   restoreDeletedLanguages,
   rootLanguages,
 } from "../model.js";
+import { addAncestor, addRootLanguage, addSibling, renameLanguage } from "../languageActions.js";
+import { languageHref } from "../routes.js";
 import { confirmDialog, esc, icon, openMenu, promptDialog, toast } from "../ui.js";
-import { openReportMenu } from "../report.js";
+import { openReportMenu } from "../reportUi.js";
 
 const NODE_WIDTH = 196;
 const NODE_HEIGHT = 86;
@@ -135,58 +135,8 @@ async function addChild(ctx, language) {
   ctx.project.languages.push(child);
   ctx.touch({ label: `Add language ${child.name}` });
   ctx.refresh();
-  ctx.navigate(`#/language/${child.id}/overview`);
+  ctx.navigate(languageHref(child));
   toast(`Created ${child.name}. Its chart was copied from ${language.name}.`, { type: "success" });
-}
-
-async function addAncestor(ctx, language) {
-  const name = await promptDialog({
-    title: "Add an ancestor",
-    label: `Name of the language ancestral to ${language.name}`,
-    value: `Proto-${language.name}`,
-    placeholder: "e.g. Proto-Coastal",
-    confirmLabel: "Create ancestor",
-    help: `${language.name} becomes its daughter. Its chart starts as a copy of ${language.name}, so you can work backwards from a descendant.`,
-  });
-  if (!name) return;
-  const ancestor = createAncestor(ctx.project, language.id, name);
-  if (!ancestor) return;
-  ctx.touch({ label: `Add language ${ancestor.name}` });
-  ctx.refresh();
-  ctx.navigate(`#/language/${ancestor.id}/overview`);
-  toast(`Created ${ancestor.name} above ${language.name}.`, { type: "success" });
-}
-
-async function addSibling(ctx, language) {
-  const siblingOf = language.parentId ? "sister" : "sibling root";
-  const name = await promptDialog({
-    title: `Add a ${siblingOf}`,
-    label: `Name of the new language beside ${language.name}`,
-    value: `${language.name} sister`,
-    placeholder: "e.g. Old Inland",
-    confirmLabel: "Create language",
-    help: `It shares ${language.name}'s parent and starts with a copy of its chart.`,
-  });
-  if (!name) return;
-  const sibling = createSibling(ctx.project, language.id, name);
-  if (!sibling) return;
-  ctx.touch({ label: `Add language ${sibling.name}` });
-  ctx.refresh();
-  ctx.navigate(`#/language/${sibling.id}/overview`);
-  toast(`Created ${sibling.name} beside ${language.name}.`, { type: "success" });
-}
-
-async function renameLanguage(ctx, language) {
-  const name = await promptDialog({
-    title: "Rename language",
-    label: "Language name",
-    value: language.name,
-    confirmLabel: "Rename",
-  });
-  if (!name || name === language.name) return;
-  language.name = name;
-  ctx.touch({ label: "Rename language" });
-  ctx.refresh();
 }
 
 async function removeLanguage(ctx, language) {
@@ -201,6 +151,7 @@ async function removeLanguage(ctx, language) {
   const confirmed = await confirmDialog("Delete this language?", message, {
     confirmLabel: descendants ? `Delete ${descendants + 1} languages` : "Delete language",
     danger: true,
+    html: true,
   });
   if (!confirmed) return;
   const removed = ctx.project.languages
@@ -227,7 +178,7 @@ async function removeLanguage(ctx, language) {
 
 function openNodeMenu(ctx, anchor, language) {
   openMenu(anchor, [
-    { label: "Open language", icon: "edit", onClick: () => ctx.navigate(`#/language/${language.id}/overview`) },
+    { label: "Open language", icon: "edit", onClick: () => ctx.navigate(languageHref(language)) },
     { label: "Add daughter", icon: "plus", onClick: () => addChild(ctx, language) },
     { label: "Add sibling", icon: "plus", onClick: () => addSibling(ctx, language) },
     { label: "Add ancestor", icon: "arrowUp", onClick: () => addAncestor(ctx, language) },
@@ -297,23 +248,7 @@ export function renderTree(container, ctx) {
     </section>
   `;
 
-  const addRoot = async () => {
-    const name = await promptDialog({
-      title: "Add a root language",
-      label: "Name of the root language",
-      value: "Proto-Language",
-      placeholder: "e.g. Proto-North",
-      confirmLabel: "Create language",
-      help: "A root has no ancestor. It starts with the default consonant and vowel charts.",
-    });
-    if (!name) return;
-    const language = createLanguage(name, null);
-    ctx.project.languages.push(language);
-    ctx.touch({ label: `Add language ${language.name}` });
-    ctx.refresh();
-    ctx.navigate(`#/language/${language.id}/overview`);
-    toast(`Created root language ${language.name}.`, { type: "success" });
-  };
+  const addRoot = () => addRootLanguage(ctx);
 
   container.querySelector("#add-root")?.addEventListener("click", addRoot);
   container.querySelector("#empty-add-root")?.addEventListener("click", addRoot);
@@ -416,7 +351,7 @@ export function renderTree(container, ctx) {
       return;
     }
     if (action === "open" || !action) {
-      ctx.navigate(`#/language/${language.id}/overview`);
+      ctx.navigate(languageHref(language));
     }
   });
 

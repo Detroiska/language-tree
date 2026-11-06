@@ -1,5 +1,5 @@
 import { subgroupingEvidence } from "../subgrouping.js";
-import { esc, icon } from "../ui.js";
+import { esc, icon, summaryChip } from "../ui.js";
 
 // A family-level report: every internal node with two or more daughters is a
 // claim that its descendants form a clade. The comparative method tests that
@@ -115,10 +115,6 @@ function nodePanel(node) {
         </div>
       </div>
     </section>`;
-}
-
-function summaryChip(label, value) {
-  return `<span><strong>${esc(value)}</strong> ${esc(label)}</span>`;
 }
 
 function emptyState() {

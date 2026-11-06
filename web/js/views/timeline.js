@@ -1,15 +1,11 @@
 import { timelineStages } from "../timeline.js";
-import { esc, icon } from "../ui.js";
+import { esc, icon, summaryChip } from "../ui.js";
 
 // A family-level report: the sound changes of every language grouped by their
 // documentation-only stage. A stage is an integer the editor picks per rule, so
 // stages order changes relative to each other — they are not calendar dates —
 // and nothing in a derivation reads them. Rules without an exact integer stage
 // are undated and listed in their own group at the end.
-
-function summaryChip(label, value) {
-  return `<span><strong>${esc(String(value))}</strong> ${esc(label)}</span>`;
-}
 
 function stageRuleMarkup(entry) {
   const { rule, language } = entry;

@@ -406,6 +406,7 @@ function deleteAxisNode(ctx, chart, axis, nodeId) {
   confirmDialog("Delete chart section?", message, {
     confirmLabel: "Delete",
     danger: true,
+    html: true,
   }).then((confirmed) => {
     if (!confirmed) return;
     for (const [key] of Object.entries(chart.cells)) {
@@ -708,7 +709,7 @@ function featureEditorMarkup(sound, bundle) {
       </fieldset>`
   ).join("");
   return `
-    <form class="form-stack feature-editor" onsubmit="return false">
+    <form class="form-stack feature-editor">
       <div class="feature-editor-head">
         <code class="ipa feature-editor-sound">${esc(sound)}</code>
         <p class="field-help">Changes are saved as a complete override for this language.</p>
@@ -768,6 +769,7 @@ function openFeatureEditor(ctx, sound) {
         const derived = root.querySelector("[data-feature-derived]");
         if (derived) derived.innerHTML = derivedFeatureMarkup(current);
       };
+      root.querySelector(".feature-editor")?.addEventListener("submit", (event) => event.preventDefault());
       root.querySelector(".feature-editor")?.addEventListener("change", refreshPreview);
       root.querySelector("[data-feature-cancel]")?.addEventListener("click", close);
       root.querySelector("[data-feature-save]")?.addEventListener("click", () => {

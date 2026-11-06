@@ -37,6 +37,30 @@ export function normalizeForm(value) {
   return String(value || "").normalize("NFC");
 }
 
+// Recorded forms are compared for identity across the lexicon, sound-change
+// previews, and cognate tables. Stress and separators that are presentation
+// only (syllable dots, hyphens, morpheme cuts, whitespace) do not make two
+// forms different.
+export function sameForm(left, right) {
+  const normalize = (value) =>
+    stripStressMarks(String(value || "").normalize("NFC"))
+      .replace(/[.\-·+\s]+/gu, "")
+      .trim();
+  return normalize(left) === normalize(right);
+}
+
+export function sameTokens(left, right) {
+  return left.length === right.length && left.every((token, index) => token === right[index]);
+}
+
+export function sameJunctures(left, right) {
+  const leftCuts = left instanceof Set ? left : new Set(left || []);
+  const rightCuts = right instanceof Set ? right : new Set(right || []);
+  if (leftCuts.size !== rightCuts.size) return false;
+  for (const value of leftCuts) if (!rightCuts.has(value)) return false;
+  return true;
+}
+
 // Search and filters compare bare segment strings: level delimiters, stress
 // marks, and morpheme cuts are presentation, so a stored kat+ta still matches
 // a typed kata.

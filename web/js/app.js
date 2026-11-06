@@ -1,6 +1,5 @@
 import {
   childrenOf,
-  createLanguage,
   findLanguage,
   projectStats,
 } from "./model.js";
@@ -17,9 +16,10 @@ import {
 import { createQuickSearch } from "./search.js";
 import { initPhonemeKeyboard } from "./keyboard.js";
 import { initClassAutocomplete } from "./autocomplete.js";
+import { addRootLanguage } from "./languageActions.js";
 import { decodeHashPart } from "./routes.js";
 import { renderCognates } from "./views/cognates.js";
-import { renderLanguage } from "./views/language.js";
+import { renderLanguage, TABS } from "./views/language.js";
 import { renderSubgrouping } from "./views/subgrouping.js";
 import { renderTimeline } from "./views/timeline.js";
 import { renderTree } from "./views/tree.js";
@@ -38,7 +38,7 @@ const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
 const undoButton = document.getElementById("undo-button");
 const redoButton = document.getElementById("redo-button");
-const TAB_IDS = new Set(["overview", "phonology", "phonotactics", "changes", "allophony", "vocabulary", "analytics"]);
+const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 
 let currentRoute = null;
 let booted = false;
@@ -151,25 +151,6 @@ function renderSidebar(route) {
     sidebarTimelineLink.classList.toggle("is-active", route?.view === "timeline");
     sidebarTimelineLink.setAttribute("aria-current", route?.view === "timeline" ? "page" : "false");
   }
-}
-
-async function addRootLanguage() {
-  if (!store.project) return;
-  const name = await promptDialog({
-    title: "Add a root language",
-    label: "Name of the root language",
-    value: "Proto-Language",
-    placeholder: "e.g. Proto-North",
-    confirmLabel: "Create language",
-    help: "A root has no ancestor and starts with the default consonant and vowel charts.",
-  });
-  if (!name) return;
-  const language = createLanguage(name, null);
-  store.project.languages.push(language);
-  store.touch({ label: `Add language ${language.name}` });
-  render();
-  store.navigate(`#/language/${language.id}/overview`);
-  toast(`Created root language ${language.name}.`, { type: "success" });
 }
 
 function makeContext(route) {
@@ -449,7 +430,7 @@ async function init() {
     renderSidebar(currentRoute);
     toast("Project renamed.", { type: "success" });
   });
-  sidebarAddRoot.addEventListener("click", addRootLanguage);
+  sidebarAddRoot.addEventListener("click", () => addRootLanguage(makeContext({ view: "tree" })));
   sidebarTree.addEventListener("click", (event) => {
     const button = event.target.closest("[data-sidebar-lang]");
     if (!button) return;

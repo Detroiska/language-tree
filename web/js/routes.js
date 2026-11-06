@@ -10,3 +10,9 @@ export function decodeHashPart(value) {
     return value;
   }
 }
+
+// Ids are percent-encoded so a hand-edited id can never break out of the href
+// attribute; decodeHashPart() decodes each segment again when routing.
+export function languageHref(language, tab = "overview") {
+  return `#/language/${encodeURIComponent(language.id)}/${tab}`;
+}
