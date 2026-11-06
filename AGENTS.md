@@ -31,6 +31,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 ### Git
 - One task = one branch; never commit to main.
 - Push the branch to origin and open a pull request without asking, once both suites pass locally.
+- File a GitHub issue (`gh issue create`) for any bug you find outside the current task; if you also fix it, reference the issue in the pull request.
 - Merge with `gh pr merge --squash --delete-branch`, and only when the pull request's CI run is green. Never merge red CI, never push to main directly, never force-push.
 - Fix a red branch with a new commit on the same branch.
 - Never `git add -A`; stage only files you intentionally changed.
