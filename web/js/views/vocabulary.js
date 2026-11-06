@@ -211,7 +211,7 @@ function openBulkDialog(ctx, language, words) {
   let parsed = parseWordList("");
   const modal = openModal({
     title: `Import / export — ${language.name}`,
-    width: "large",
+    width: "wide",
     body: `
       <div class="bulk-tabs" role="tablist">
         <button type="button" class="bulk-tab is-active" data-bulk-tab="import">Import</button>
