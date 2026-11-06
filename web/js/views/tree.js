@@ -12,7 +12,7 @@ import {
   rootLanguages,
 } from "../model.js";
 import { confirmDialog, esc, icon, openMenu, promptDialog, toast } from "../ui.js";
-import { openReportMenu } from "../report.js";
+import { openReportMenu } from "../reportUi.js";
 
 const NODE_WIDTH = 196;
 const NODE_HEIGHT = 86;

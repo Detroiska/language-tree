@@ -1,6 +1,5 @@
 import { uid } from "./model.js";
 import { stripLevelMarks } from "./notation.js";
-import { toast } from "./ui.js";
 
 // Bulk word import/export: the paste-and-go side door for spreadsheets and
 // word lists. Text is parsed as JSON when it looks like JSON, otherwise as a
@@ -303,48 +302,4 @@ export function toJson(words) {
   );
 }
 
-async function copyToClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const helper = document.createElement("textarea");
-      helper.value = text;
-      helper.setAttribute("readonly", "");
-      helper.style.position = "fixed";
-      helper.style.opacity = "0";
-      document.body.appendChild(helper);
-      helper.select();
-      const done = document.execCommand("copy");
-      helper.remove();
-      return done;
-    } catch {
-      return false;
-    }
-  }
-}
 
-export async function copyWords(words, format = "tsv") {
-  const content = format === "json" ? toJson(words) : toTsv(words);
-  const done = await copyToClipboard(content);
-  if (done) toast(`Copied ${words.length} word${words.length === 1 ? "" : "s"} as ${format.toUpperCase()}.`, { type: "success" });
-  else toast("Copy failed — select the text and copy manually.", { type: "info" });
-  return done;
-}
-
-export function downloadWords(words, languageName, format) {
-  const extension = format === "json" ? "json" : "tsv";
-  const content = format === "json" ? toJson(words) : toTsv(words);
-  const name = `${String(languageName || "vocabulary").replace(/[^\w-]+/g, "_").replace(/^_+|_+$/g, "")}-vocabulary.${extension}`;
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-  toast(`Downloading ${words.length} word${words.length === 1 ? "" : "s"} as ${name}.`, { type: "success", duration: 3000 });
-}

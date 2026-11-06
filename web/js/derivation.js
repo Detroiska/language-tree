@@ -1,4 +1,4 @@
-import { esc } from "./ui.js";
+import { esc } from "./escape.js";
 import { joinSegments } from "./notation.js";
 import { normalizeRuleRate } from "./model.js";
 

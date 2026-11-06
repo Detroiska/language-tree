@@ -1,3 +1,7 @@
+import { esc } from "./escape.js";
+
+export { esc };
+
 const paths = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   tree: '<path d="M12 4v6M12 10 6 16M12 10l6 6"/><circle cx="12" cy="3.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="5" cy="17.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="17.5" r="1.7" fill="currentColor" stroke="none"/>',
@@ -45,15 +49,6 @@ export function hydrateIcons(root = document) {
     const name = element.getAttribute("data-icon");
     element.innerHTML = icon(name);
   });
-}
-
-export function esc(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 let toastCounter = 0;

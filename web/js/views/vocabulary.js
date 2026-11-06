@@ -1,5 +1,5 @@
 import { allophonyRules, ancestorsOf, uid } from "../model.js";
-import { applyWordList, copyWords, downloadWords, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
+import { applyWordList, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
 import {
   deriveForm,
   exceptionRulesFromSteps,
@@ -12,8 +12,8 @@ import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
 import { ipaToXSampa } from "../xsampa.js";
 import { esc, icon, openModal, toast } from "../ui.js";
 
-// Same clipboard fallback bulk.js uses: the direct API first, then a hidden
-// textarea for contexts where the async clipboard is unavailable.
+// Clipboard and download actions stay with the vocabulary view; bulk.js is
+// only the DOM-free parser and writer.
 async function copyToClipboard(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -34,6 +34,30 @@ async function copyToClipboard(text) {
       return false;
     }
   }
+}
+
+async function copyWords(words, format = "tsv") {
+  const content = format === "json" ? toJson(words) : toTsv(words);
+  const done = await copyToClipboard(content);
+  if (done) toast(`Copied ${words.length} word${words.length === 1 ? "" : "s"} as ${format.toUpperCase()}.`, { type: "success" });
+  else toast("Copy failed — select the text and copy manually.", { type: "info" });
+  return done;
+}
+
+function downloadWords(words, languageName, format) {
+  const extension = format === "json" ? "json" : "tsv";
+  const content = format === "json" ? toJson(words) : toTsv(words);
+  const name = `${String(languageName || "vocabulary").replace(/[^\w-]+/g, "_").replace(/^_+|_+$/g, "")}-vocabulary.${extension}`;
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast(`Downloading ${words.length} word${words.length === 1 ? "" : "s"} as ${name}.`, { type: "success", duration: 3000 });
 }
 
 function parentFor(ctx) {
