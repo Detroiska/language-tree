@@ -1,9 +1,7 @@
 import {
   canSetParent,
   childrenOf,
-  createAncestor,
   createLanguage,
-  createSibling,
   deleteLanguage,
   descendantIds,
   descendantsCount,
@@ -13,6 +11,8 @@ import {
   restoreDeletedLanguages,
   setParent,
 } from "../model.js";
+import { addAncestor, addSibling, renameLanguage } from "../languageActions.js";
+import { languageHref } from "../routes.js";
 import {
   confirmDialog,
   esc,
@@ -28,7 +28,7 @@ import { renderPhonotactics } from "./phonotactics.js";
 import { renderChanges } from "./soundchanges.js";
 import { renderVocabulary } from "./vocabulary.js";
 
-const TABS = [
+export const TABS = [
   { id: "overview", label: "Overview" },
   { id: "phonology", label: "Phonology" },
   { id: "allophony", label: "Allophony" },
@@ -42,18 +42,12 @@ function tabId(value) {
   return TABS.some((tab) => tab.id === value) ? value : "overview";
 }
 
-function languageTabHref(language, tab) {
-  // Ids are percent-encoded so a hand-edited id can never break out of the
-  // href attribute; parseRoute() decodes each segment again.
-  return `#/language/${encodeURIComponent(language.id)}/${tab}`;
-}
-
 function headerActions(ctx) {
   openMenu(ctx.anchor, [
     { label: "Open in family tree", icon: "tree", onClick: () => ctx.navigate("#/tree") },
     { label: "Add daughter language", icon: "plus", onClick: () => addDaughter(ctx) },
-    { label: "Add sibling language", icon: "plus", onClick: () => addSibling(ctx) },
-    { label: "Add ancestor language", icon: "arrowUp", onClick: () => addAncestor(ctx) },
+    { label: "Add sibling language", icon: "plus", onClick: () => addSibling(ctx, ctx.language) },
+    { label: "Add ancestor language", icon: "arrowUp", onClick: () => addAncestor(ctx, ctx.language) },
     { separator: true },
     { label: "Delete language…", icon: "trash", danger: true, onClick: () => deleteCurrent(ctx) },
   ]);
@@ -80,58 +74,8 @@ async function addDaughter(ctx) {
   ctx.project.languages.push(child);
   ctx.touch({ label: `Add language ${child.name}` });
   ctx.refresh();
-  ctx.navigate(languageTabHref(child, "overview"));
+  ctx.navigate(languageHref(child));
   toast(`Created ${child.name}.`, { type: "success" });
-}
-
-async function addAncestor(ctx) {
-  const name = await promptDialog({
-    title: "Add an ancestor language",
-    label: `Name of the language ancestral to ${ctx.language.name}`,
-    value: `Proto-${ctx.language.name}`,
-    placeholder: "e.g. Proto-Coastal",
-    confirmLabel: "Create ancestor",
-    help: `${ctx.language.name} becomes its daughter. Its chart starts as a copy of ${ctx.language.name}, so you can work backwards from a descendant.`,
-  });
-  if (!name) return;
-  const ancestor = createAncestor(ctx.project, ctx.language.id, name);
-  if (!ancestor) return;
-  ctx.touch({ label: `Add language ${ancestor.name}` });
-  ctx.refresh();
-  ctx.navigate(languageTabHref(ancestor, "overview"));
-  toast(`Created ${ancestor.name} above ${ctx.language.name}.`, { type: "success" });
-}
-
-async function addSibling(ctx) {
-  const siblingOf = ctx.language.parentId ? "sister language" : "sibling root language";
-  const name = await promptDialog({
-    title: `Add a ${siblingOf}`,
-    label: `Name of the new language beside ${ctx.language.name}`,
-    value: `${ctx.language.name} sister`,
-    placeholder: "e.g. Old Inland",
-    confirmLabel: "Create language",
-    help: `It shares ${ctx.language.name}'s parent and starts with a copy of its chart.`,
-  });
-  if (!name) return;
-  const sibling = createSibling(ctx.project, ctx.language.id, name);
-  if (!sibling) return;
-  ctx.touch({ label: `Add language ${sibling.name}` });
-  ctx.refresh();
-  ctx.navigate(languageTabHref(sibling, "overview"));
-  toast(`Created ${sibling.name} beside ${ctx.language.name}.`, { type: "success" });
-}
-
-async function renameLanguage(ctx) {
-  const name = await promptDialog({
-    title: "Rename language",
-    label: "Language name",
-    value: ctx.language.name,
-    confirmLabel: "Rename",
-  });
-  if (!name || name === ctx.language.name) return;
-  ctx.language.name = name;
-  ctx.touch({ label: "Rename language" });
-  ctx.refresh();
 }
 
 async function deleteCurrent(ctx) {
@@ -153,7 +97,7 @@ async function deleteCurrent(ctx) {
   deleteLanguage(ctx.project, ctx.language.id);
   ctx.touch({ label: `Delete language ${languageName}` });
   ctx.refresh();
-  if (parentId && findLanguage(ctx.project, parentId)) ctx.navigate(languageTabHref({ id: parentId }, "overview"));
+  if (parentId && findLanguage(ctx.project, parentId)) ctx.navigate(languageHref({ id: parentId }, "overview"));
   else ctx.navigate("#/tree");
   toast(`Deleted ${languageName}.`, {
     type: "info",
@@ -181,7 +125,7 @@ function languageHeader(ctx, activeTab) {
       <div class="language-head-main">
         <nav class="breadcrumbs" aria-label="Breadcrumb">
           <a href="#/tree">Family tree</a>
-          ${parent ? `<span class="crumb-sep">${icon("chevronRight")}</span><a href="${languageTabHref(parent, "overview")}">${esc(parent.name)}</a>` : ""}
+          ${parent ? `<span class="crumb-sep">${icon("chevronRight")}</span><a href="${languageHref(parent, "overview")}">${esc(parent.name)}</a>` : ""}
           <span class="crumb-sep">${icon("chevronRight")}</span>
           <span class="crumb-current">${esc(language.name)}</span>
         </nav>
@@ -190,7 +134,7 @@ function languageHeader(ctx, activeTab) {
           <button class="icon-button title-edit" type="button" data-rename-language title="Rename language" aria-label="Rename language">${icon("edit")}</button>
         </div>
         <p class="page-subtitle">
-          ${parent ? `Daughter of <a href="${languageTabHref(parent, "overview")}">${esc(parent.name)}</a>` : "Root language"}
+          ${parent ? `Daughter of <a href="${languageHref(parent, "overview")}">${esc(parent.name)}</a>` : "Root language"}
           <span class="subtitle-dot">·</span>
           ${childCount} ${childCount === 1 ? "daughter" : "daughters"}
           <span class="subtitle-dot">·</span>
@@ -206,7 +150,7 @@ function languageHeader(ctx, activeTab) {
     <nav class="tabs" aria-label="Language sections">
       ${TABS.map(
         (tab) => `
-          <a class="tab ${activeTab === tab.id ? "is-active" : ""}" href="${languageTabHref(language, tab.id)}" ${activeTab === tab.id ? 'aria-current="page"' : ""}>
+          <a class="tab ${activeTab === tab.id ? "is-active" : ""}" href="${languageHref(language, tab.id)}" ${activeTab === tab.id ? 'aria-current="page"' : ""}>
             <span>${tab.label}</span>
             ${
               tab.id === "phonology"
@@ -296,7 +240,7 @@ function renderOverview(content, ctx) {
               ? `<div class="child-list">${children
                   .map((child) => {
                     const childStats = languageStats(child);
-                    return `<a class="child-row" href="${languageTabHref(child, "overview")}">
+                    return `<a class="child-row" href="${languageHref(child, "overview")}">
                       <span class="child-marker"></span>
                       <span class="child-copy"><strong>${esc(child.name)}</strong><span>${childStats.changes} rules · ${childStats.words} words</span></span>
                       ${icon("chevronRight")}
@@ -330,7 +274,7 @@ function renderOverview(content, ctx) {
                 ${lineage
                   .map((item, index) => {
                     const current = index === lineage.length - 1;
-                    return `${index > 0 ? `<span class="lineage-arrow">${icon("chevronRight")}</span>` : ""}<a class="lineage-chip ${current ? "is-current" : ""}" href="${languageTabHref(item, "overview")}">${esc(item.name)}</a>`;
+                    return `${index > 0 ? `<span class="lineage-arrow">${icon("chevronRight")}</span>` : ""}<a class="lineage-chip ${current ? "is-current" : ""}" href="${languageHref(item, "overview")}">${esc(item.name)}</a>`;
                   })
                   .join("")}
               </div>
@@ -366,7 +310,7 @@ function renderOverview(content, ctx) {
   });
 
   content.querySelectorAll("[data-goto-tab]").forEach((button) => {
-    button.addEventListener("click", () => ctx.navigate(languageTabHref(language, button.dataset.gotoTab)));
+    button.addEventListener("click", () => ctx.navigate(languageHref(language, button.dataset.gotoTab)));
   });
 
   content.querySelectorAll("[data-add-daughter]").forEach((button) => {
