@@ -1273,7 +1273,7 @@ code {
   justify-content: flex-end;
 }
 
-.inventory-summary span {
+.inventory-summary > span {
   display: inline-flex;
   height: 30px;
   align-items: center;
