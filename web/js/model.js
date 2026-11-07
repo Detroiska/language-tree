@@ -632,7 +632,9 @@ export function ensureProject(raw) {
     const seen = new Set([language.id]);
     while (cursor) {
       if (seen.has(cursor.id)) {
-        language.parentId = null;
+        // Detach the language that closes the loop, not the descendant whose
+        // walk found it; the chain above the corrupt link is still valid.
+        cursor.parentId = null;
         break;
       }
       seen.add(cursor.id);
