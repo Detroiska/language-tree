@@ -9,7 +9,16 @@
 // revision conflicts, the loopback Host check, and the framing/content headers.
 
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,18 +63,21 @@ function resolvePython() {
   throw new Error("Python 3.10+ is required for the server suite (set PYTHON to override the interpreter).");
 }
 
-async function startServer(python, files = { "project.json": project }) {
-  const root = mkdtempSync(join(tmpdir(), "language-tree-server-"));
-  copyFileSync(SERVER_PY, join(root, "server.py"));
-  mkdirSync(join(root, "data"), { recursive: true });
-  mkdirSync(join(root, "web"), { recursive: true });
-  for (const [name, content] of Object.entries(files)) {
-    writeFileSync(
-      join(root, "data", name),
-      typeof content === "string" ? content : `${JSON.stringify(content, null, 2)}\n`
-    );
+async function startServer(python, files = { "project.json": project }, sharedRoot = null) {
+  let root = sharedRoot;
+  if (!root) {
+    root = mkdtempSync(join(tmpdir(), "language-tree-server-"));
+    copyFileSync(SERVER_PY, join(root, "server.py"));
+    mkdirSync(join(root, "data"), { recursive: true });
+    mkdirSync(join(root, "web"), { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(
+        join(root, "data", name),
+        typeof content === "string" ? content : `${JSON.stringify(content, null, 2)}\n`
+      );
+    }
+    writeFileSync(join(root, "web", "index.html"), "<!doctype html><title>Language Tree test</title>\n");
   }
-  writeFileSync(join(root, "web", "index.html"), "<!doctype html><title>Language Tree test</title>\n");
 
   const child = spawn(python, ["-u", join(root, "server.py"), "--no-browser", "--port", "0"], {
     cwd: root,
@@ -110,7 +122,7 @@ async function startServer(python, files = { "project.json": project }) {
   return { root, child, url };
 }
 
-async function stopServer(server) {
+async function stopServer(server, { removeRoot = true } = {}) {
   if (server.child.exitCode === null) {
     await new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -124,7 +136,9 @@ async function stopServer(server) {
       server.child.kill();
     });
   }
-  rmSync(server.root, { recursive: true, force: true });
+  // A second process may still use the shared directory as its cwd; the last
+  // owner of the root removes it.
+  if (removeRoot) rmSync(server.root, { recursive: true, force: true });
 }
 
 async function call(server, path, options = {}) {
@@ -232,6 +246,23 @@ try {
   equal("malformed JSON is 400", invalidJson.status, 400);
   truthy("malformed JSON names the parse failure", /Invalid JSON/.test(invalidJson.json?.error || ""));
 
+  let nestedJson;
+  try {
+    nestedJson = await call(server, "/api/project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: "[".repeat(60000) + "]".repeat(60000),
+    });
+  } catch {
+    // Before the fix the handler thread dies and drops the connection.
+    nestedJson = { status: 0, json: null };
+  }
+  equal("deeply nested JSON is 400 instead of a dropped connection", nestedJson.status, 400);
+  truthy(
+    "deeply nested JSON returns the error envelope",
+    /nested|Invalid JSON/i.test(nestedJson.json?.error || "")
+  );
+
   const invalidProject = await call(server, "/api/project", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -257,6 +288,11 @@ try {
   equal("gzip PUT saves the project", gzipSave.status, 200);
   const afterGzip = await call(server, "/api/project");
   equal("gzip PUT persists the project", afterGzip.json?.title, project.title);
+  equal(
+    "atomic saves leave no temporary files behind",
+    readdirSync(join(server.root, "data")).filter((name) => name.endsWith(".tmp")),
+    []
+  );
 
   const truncatedGzip = gzipSync(Buffer.from(JSON.stringify(project))).subarray(0, 12);
   const badGzip = await call(server, "/api/project", {
@@ -361,6 +397,14 @@ try {
     join(server.root, "data", "shape.json"),
     `${JSON.stringify({ languages: [] }, null, 2)}\n`
   );
+  mkdirSync(join(server.root, "data", "folder.json"));
+  let symlinkCreated = false;
+  try {
+    symlinkSync(join(server.root, "data", "project.json"), join(server.root, "data", "alias.json"), "file");
+    symlinkCreated = true;
+  } catch {
+    // Windows may require developer mode or elevation for symlinks.
+  }
 
   const projects = await call(server, "/api/projects");
   equal("GET /api/projects returns 200", projects.status, 200);
@@ -380,6 +424,25 @@ try {
     /title/.test(projects.json?.projects?.find((entry) => entry.file === "shape.json")?.error || ""),
     true
   );
+  equal(
+    "GET /api/projects skips directories with a .json name",
+    projects.json?.projects?.some((entry) => entry.file === "folder.json"),
+    false
+  );
+  if (symlinkCreated) {
+    equal(
+      "GET /api/projects skips symlinked projects",
+      projects.json?.projects?.some((entry) => entry.file === "alias.json"),
+      false
+    );
+  }
+
+  const directoryProject = await call(server, "/api/project?file=folder.json");
+  equal("a non-regular project file is not opened", directoryProject.status, 404);
+  if (symlinkCreated) {
+    const linkedProject = await call(server, "/api/project?file=alias.json");
+    equal("a skipped symlink is not openable under its link name", linkedProject.status, 400);
+  }
 
   const selectHeaders = { "Content-Type": "application/json" };
   const selected = await call(server, "/api/projects/active", {
@@ -458,6 +521,31 @@ try {
   const missingProjectQuery = await call(server, "/api/project?file=missing.json");
   equal("GET /api/project reports a missing file", missingProjectQuery.status, 404);
 
+  // Root can read a mode-000 file, so this check only runs as a normal POSIX
+  // user. Windows ACLs do not map onto chmod, so it is skipped there.
+  if (process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() !== 0) {
+    const lockedPath = join(server.root, "data", "locked.json");
+    writeFileSync(lockedPath, `${JSON.stringify(project, null, 2)}\n`);
+    chmodSync(lockedPath, 0o000);
+    try {
+      const denied = await call(server, "/api/project?file=locked.json");
+      equal(
+        "an unreadable project returns a generic error",
+        [denied.status, denied.json?.error],
+        [500, "Could not read the project file."]
+      );
+      truthy("a read error does not leak the data path", !denied.text.includes(server.root));
+      const deniedList = await call(server, "/api/projects");
+      equal(
+        "a listing error does not leak the data path",
+        deniedList.json?.projects?.find((entry) => entry.file === "locked.json")?.error,
+        "Could not read the project file."
+      );
+    } finally {
+      chmodSync(lockedPath, 0o600);
+    }
+  }
+
   /* ---- fresh data directory ---------------------------------------------- */
 
   const fresh = await startServer(python, {});
@@ -485,6 +573,13 @@ try {
     const response = await call(server, "/api/project", { method });
     equal(`${method} /api/project returns 405 JSON`, [response.status, response.json?.error?.startsWith("Method not allowed.")], [405, true]);
   }
+  // fetch refuses TRACE, so the raw client covers the inherited stdlib verb.
+  const trace = await rawCall(server, { method: "TRACE", path: "/api/project" });
+  equal(
+    "TRACE /api/project returns 405 JSON",
+    [trace.status, trace.json?.error?.startsWith("Method not allowed.")],
+    [405, true]
+  );
 
   const unknown = await call(server, "/api/nope");
   equal("unknown API endpoint is JSON 404", [unknown.status, unknown.json?.error], [404, "Unknown API endpoint."]);
@@ -494,6 +589,55 @@ try {
   const badHost = await rawCall(server, { headers: { Host: "evil.example" } });
   equal("unexpected Host is refused", badHost.status, 403);
   equal("unexpected Host returns JSON", badHost.json?.error, "Unexpected Host header.");
+
+  const badHeadHost = await rawCall(server, {
+    method: "HEAD",
+    path: "/index.html",
+    headers: { Host: "evil.example" },
+  });
+  equal("HEAD checks the Host header too", badHeadHost.status, 403);
+  equal("HEAD rejects with the JSON envelope", badHeadHost.headers["content-type"], "application/json; charset=utf-8");
+  const goodHead = await rawCall(server, { method: "HEAD", path: "/index.html" });
+  equal("HEAD still serves static metadata", goodHead.status, 200);
+
+  /* ---- two instances sharing one data directory (#57) -------------------- */
+
+  const shared = await startServer(python, { "shared.json": project });
+  const peer = await startServer(python, {}, shared.root);
+  try {
+    const sharedPayload = JSON.stringify({
+      ...project,
+      title: "Shared save",
+      languages: [
+        {
+          ...project.languages[0],
+          vocabulary: Array.from({ length: 4000 }, (_, index) => ({
+            id: `shared_${index}`,
+            gloss: `gloss ${index}`,
+            form: "kasa",
+            note: "",
+          })),
+        },
+      ],
+    });
+    const saves = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        call(index % 2 ? peer : shared, "/api/project?file=shared.json", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: sharedPayload,
+        })
+      )
+    );
+    equal(
+      "two server instances save the same project without errors",
+      saves.filter((response) => response.status !== 200).map((response) => [response.status, response.json?.error]),
+      []
+    );
+  } finally {
+    await stopServer(peer, { removeRoot: false });
+    await stopServer(shared);
+  }
 } finally {
   await stopServer(server);
 }

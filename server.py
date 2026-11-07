@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 import threading
 import webbrowser
 import zlib
@@ -61,7 +62,13 @@ def project_names() -> list[str]:
     if not DATA_DIR.is_dir():
         return []
     return sorted(
-        (entry.name for entry in DATA_DIR.iterdir() if entry.is_file() and entry.suffix.lower() == ".json"),
+        (
+            entry.name
+            for entry in DATA_DIR.iterdir()
+            # A link is listed but cannot be opened through its link name
+            # (project_path rejects the resolved name), so hide it instead.
+            if entry.is_file() and not entry.is_symlink() and entry.suffix.lower() == ".json"
+        ),
         key=str.casefold,
     )
 
@@ -81,23 +88,61 @@ def project_path(name: object) -> Path:
 
 
 def read_project_file(name: str) -> dict:
-    with project_path(name).open("r", encoding="utf-8") as handle:
+    path = project_path(name)
+    # Opening a FIFO or a directory can block forever while SAVE_LOCK is held;
+    # only regular files are projects.
+    if not path.is_file():
+        raise FileNotFoundError("Project file not found.")
+    with path.open("r", encoding="utf-8") as handle:
         project = json.load(handle)
     validate_project(project)
     return project
 
 
+def fsync_directory(directory: Path) -> None:
+    """Persist a rename on POSIX; Windows has no directory fsync."""
+    if os.name == "nt":
+        return
+    try:
+        descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        # Some filesystems reject directory fsync; the file itself is synced.
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write through a unique temporary file, then rename it into place."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
+    fsync_directory(path.parent)
+
+
 def write_project(project: dict, name: str) -> None:
     """Write pretty JSON atomically, preserving a single-file git workflow."""
     path = project_path(name)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f"{path.name}.tmp")
     text = json.dumps(project, ensure_ascii=False, indent=2) + "\n"
-    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    atomic_write_text(path, text)
 
 
 def read_active_name() -> str | None:
@@ -110,13 +155,7 @@ def read_active_name() -> str | None:
 
 def write_active_name(name: str) -> None:
     project_path(name)  # Refuse anything that is not a plain project filename.
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    temporary = ACTIVE_FILE.with_name(f"{ACTIVE_FILE.name}.tmp")
-    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(f"{name}\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, ACTIVE_FILE)
+    atomic_write_text(ACTIVE_FILE, f"{name}\n")
 
 
 def resolve_active_name() -> str | None:
@@ -185,7 +224,10 @@ def project_summary(name: str) -> dict:
     summary: dict = {"file": name}
     try:
         project = read_project_file(name)
-    except (OSError, ValueError) as exc:
+    except OSError:
+        summary["error"] = "Could not read the project file."
+        return summary
+    except ValueError as exc:
         summary["error"] = str(exc)
         return summary
     summary["title"] = project["title"]
@@ -243,6 +285,11 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_HEAD(self) -> None:  # noqa: N802 (stdlib naming)
+        if not self.host_allowed():
+            return
+        super().do_HEAD()
+
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
         if not self.host_allowed():
             return
@@ -258,6 +305,7 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             self.send_json({"active": active, "projects": projects})
             return
         if path == "/api/project":
+            name: str | None = None
             try:
                 name = requested_project_name(urlparse(self.path).query)
                 if name is None:
@@ -276,8 +324,18 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             except InvalidProjectRequest as exc:
                 self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
-            except (OSError, ValueError) as exc:
-                self.send_json({"error": f"Could not read project: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            except ValueError as exc:
+                self.send_json(
+                    {"error": f"Project file is not valid: {exc}"},
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+            except OSError as exc:
+                self.log_error("Could not read project %r: %s", name, exc)
+                self.send_json(
+                    {"error": "Could not read the project file."},
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
                 return
             self.send_json(project)
             return
@@ -317,6 +375,11 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             self.send_json({"error": f"Invalid JSON: {exc}"}, HTTPStatus.BAD_REQUEST)
+        except RecursionError:
+            self.send_json(
+                {"error": "Invalid JSON: the document is nested too deeply."},
+                HTTPStatus.BAD_REQUEST,
+            )
         except (zlib.error, ValueError) as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         return False, None
@@ -375,7 +438,11 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
                 project["updatedAt"] = utc_now()
                 write_project(project, name)
         except OSError as exc:
-            self.send_json({"error": f"Could not save project: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            self.log_error("Could not save project %r: %s", name, exc)
+            self.send_json(
+                {"error": "Could not save the project file."},
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
             return
         self.send_json({"ok": True, "savedAt": project["updatedAt"], "file": name})
 
@@ -408,7 +475,11 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": f"Project file is not valid: {exc}"}, HTTPStatus.BAD_REQUEST)
             return
         except OSError as exc:
-            self.send_json({"error": f"Could not switch project: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            self.log_error("Could not switch to project %r: %s", name, exc)
+            self.send_json(
+                {"error": "Could not switch the project file."},
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
             return
         self.send_json({"ok": True, "active": name})
 
@@ -445,6 +516,12 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         self.method_not_allowed()
 
     def do_PATCH(self) -> None:  # noqa: N802 (stdlib naming)
+        self.method_not_allowed()
+
+    def do_TRACE(self) -> None:  # noqa: N802 (stdlib naming)
+        self.method_not_allowed()
+
+    def do_CONNECT(self) -> None:  # noqa: N802 (stdlib naming)
         self.method_not_allowed()
 
 
