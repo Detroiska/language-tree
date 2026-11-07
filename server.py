@@ -283,7 +283,11 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # A HEAD response carries the GET headers, including Content-Length,
+        # but no body; writing one makes strict clients treat it as garbage
+        # after the response.
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def do_HEAD(self) -> None:  # noqa: N802 (stdlib naming)
         if not self.host_allowed():
