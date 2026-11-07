@@ -2085,6 +2085,68 @@ equal(
   migratedNotation.languages[0].inventory.consonants.cells["r_Plosive|c_Bilabial"],
   ["p", "b"]
 );
+
+// Interior groups migrate their cell to the group's leftmost leaf. Earlier
+// versions wrote that result back into the object being iterated, so a later
+// leaf entry for the same column could overwrite it depending on JSON order.
+function chartMigrationProject(cells) {
+  return ensureProject({
+    title: "Chart migration order",
+    languages: [
+      {
+        id: "only",
+        name: "Only",
+        parentId: null,
+        inventory: {
+          consonants: {
+            rows: [
+              {
+                id: "r_group",
+                label: "Group",
+                children: [
+                  { id: "r_first", label: "First", children: [] },
+                  { id: "r_second", label: "Second", children: [] },
+                ],
+              },
+            ],
+            columns: [{ id: "c_only", label: "Only", children: [] }],
+            cells,
+            notes: "",
+          },
+          vowels: defaultInventory().vowels,
+        },
+        soundChanges: [],
+        allophony: [],
+        vocabulary: [],
+      },
+    ],
+  }).languages[0].inventory.consonants;
+}
+const interiorFirstCells = {
+  "r_group|c_only": ["ʔ"],
+  "r_second|c_only": ["m"],
+};
+const leafFirstCells = {
+  "r_second|c_only": ["m"],
+  "r_group|c_only": ["ʔ"],
+};
+const interiorFirstChart = chartMigrationProject(interiorFirstCells);
+const leafFirstChart = chartMigrationProject(leafFirstCells);
+equal(
+  "an interior chart cell migrates to the first leaf",
+  interiorFirstChart.cells["r_first|c_only"],
+  ["ʔ"]
+);
+equal(
+  "chart migration is independent of JSON key order",
+  Object.entries(leafFirstChart.cells).sort(),
+  Object.entries(interiorFirstChart.cells).sort()
+);
+equal(
+  "the leaf cell keeps its own sounds next to the migrated ones",
+  leafFirstChart.cells["r_second|c_only"],
+  ["m"]
+);
 equal(
   "word form delimiters are stripped on load",
   migratedNotation.languages[0].vocabulary.map((word) => word.form),
@@ -2591,6 +2653,43 @@ equal(
 equal(
   "a derived affricate keeps aspiration from its release",
   resolver.bundleFor("t͡sʰ").spread_glottis,
+  true
+);
+const crossPlaceAffricate = resolver.bundleFor("t͡ʃʰ");
+equal(
+  "a cross-place affricate takes the release place",
+  [crossPlaceAffricate?.place, crossPlaceAffricate?.place === resolver.bundleFor("t͡ʃ").place],
+  ["postalveolar", true]
+);
+equal(
+  "a cross-place affricate keeps release aspiration",
+  featureDistance(crossPlaceAffricate, {
+    ...resolver.bundleFor("t͡ʃ"),
+    spread_glottis: true,
+  }),
+  0
+);
+const labializedPostalveolar = resolver.bundleFor("d͡ʒʷ");
+equal(
+  "a labialized cross-place affricate keeps its modifier",
+  [
+    featureDistance(labializedPostalveolar, {
+      ...resolver.bundleFor("d͡ʒ"),
+      labialized: true,
+    }),
+    labializedPostalveolar?.labialized,
+    labializedPostalveolar?.voice,
+  ],
+  [0, true, true]
+);
+equal(
+  "a labialized labiodental affricate derives its release place",
+  [resolver.bundleFor("p͡fʷ")?.place, resolver.bundleFor("p͡fʷ")?.labialized],
+  ["labiodental", true]
+);
+equal(
+  "a labialized velar affricate keeps its modifier",
+  resolver.bundleFor("k͡xʷ")?.labialized,
   true
 );
 equal(
@@ -4301,6 +4400,20 @@ equal(
   ["a~", "a~"],
 );
 equal("precomposed cedilla still uses its documented letter", ipaToXSampa("\u00E7"), "C");
+
+// X-SAMPA reuses underscore and backtick spellings for tie pairs and retroflex
+// letters. When a modifier would produce one of those ambiguous spellings, the
+// encoder must keep the IPA chunk rather than emit ASCII that decodes to a
+// different phoneme.
+for (const sound of ["n\u032A", "\u014B\u0330", "g\u02E0", "t\u02DE", "s\u02DE"]) {
+  const encoded = ipaToXSampa(sound);
+  equal(
+    `ambiguous modifier spelling for ${sound} keeps its phoneme`,
+    xSampaToIPA(encoded),
+    sound.normalize("NFD")
+  );
+}
+equal("documented encode aliases still fold under modifiers", ipaToXSampa("\u0261\u02B7"), "g_w");
 
 /* ---- dated sound-change stages ---------------------------------------------- */
 
