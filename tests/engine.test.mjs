@@ -600,6 +600,80 @@ equal(
   ["vata", "fata"]
 );
 
+// A chain shift is the classic parallel interaction: each rule changes a
+// segment that a sister rule targets, and both match the frozen ancestral
+// form. Inverting one rule at a time must not reject an unchanged sister rule
+// merely because that sister would apply to the intermediate output.
+const chainShiftConsonants = makeChart(
+  ["Plosive"],
+  ["Alveolar"],
+  [["Plosive", "Alveolar", ["t"]]]
+);
+const chainShiftVowels = makeChart(
+  ["Close", "Open"],
+  ["Central"],
+  [
+    ["Close", "Central", ["o", "oː"]],
+    ["Open", "Central", ["a", "aː"]],
+  ]
+);
+const chainShiftCtx = contextForInventory({
+  consonants: chainShiftConsonants,
+  vowels: chainShiftVowels,
+});
+const chainShiftChanges = [
+  { id: "r1", notation: "aː > oː", note: "", enabled: true, parentId: null },
+  { id: "r2", notation: "oː > aː", note: "", enabled: true, parentId: null },
+];
+const chainShiftGroups = compileRuleStages(chainShiftChanges, chainShiftCtx);
+equal(
+  "a parallel chain shift inverts against the frozen ancestral form",
+  invertRules(chainShiftCtx.tokenize("toː"), chainShiftGroups, chainShiftCtx).candidates.map(
+    (candidate) => candidate.tokens.join("")
+  ),
+  ["taː"]
+);
+const reversedChainShiftGroups = compileRuleStages(
+  [...chainShiftChanges].reverse(),
+  chainShiftCtx
+);
+equal(
+  "a parallel chain shift inverts the same way in either display order",
+  invertRules(chainShiftCtx.tokenize("toː"), reversedChainShiftGroups, chainShiftCtx).candidates.map(
+    (candidate) => candidate.tokens.join("")
+  ),
+  ["taː"]
+);
+const chainShiftProject = {
+  title: "Chain shift",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory: { consonants: chainShiftConsonants, vowels: chainShiftVowels },
+      phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+      soundChanges: [],
+      vocabulary: [],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      inventory: { consonants: chainShiftConsonants, vowels: chainShiftVowels },
+      phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+      soundChanges: chainShiftChanges,
+      vocabulary: [],
+    },
+  ],
+};
+const chainShiftReconstruction = reconstructForm("toː", chainShiftProject, "child");
+equal(
+  "reconstructForm reverses a derivation under parallel rules",
+  [chainShiftReconstruction.ok, chainShiftReconstruction.candidates.map((candidate) => candidate.text)],
+  [true, ["taː"]]
+);
+
 const noInverse = invert("a > e", "aka");
 equal("a form the rules cannot produce has no inverse", noInverse.candidates, []);
 
