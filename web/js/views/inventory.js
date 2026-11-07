@@ -169,18 +169,36 @@ function splitPhonemes(value) {
   ];
 }
 
-function updateChartCount(container, chart, kind) {
+function updateChartCount(container, chart, kind, ctx) {
   const target = container.querySelector(`[data-chart-count="${kind}"]`);
-  if (!target) return;
   const count = new Set(chartPhonemeList(chart)).size;
-  target.textContent = `${count} ${count === 1 ? "phoneme" : "phonemes"}`;
+  if (target) {
+    target.textContent = `${count} ${count === 1 ? "phoneme" : "phonemes"}`;
+  }
+  if (!ctx) return;
+  // The intro totals and the language header are rendered outside the chart
+  // panel, so an in-place cell edit must refresh them too.
+  const consonants = new Set(chartPhonemeList(ctx.language.inventory.consonants)).size;
+  const vowels = new Set(chartPhonemeList(ctx.language.inventory.vowels)).size;
+  const summary = {
+    consonants: container.querySelector('[data-inventory-count="consonants"]'),
+    vowels: container.querySelector('[data-inventory-count="vowels"]'),
+  };
+  if (summary.consonants) summary.consonants.textContent = String(consonants);
+  if (summary.vowels) summary.vowels.textContent = String(vowels);
+  const page = container.closest(".language-page");
+  const total = consonants + vowels;
+  const headerTotal = page?.querySelector("[data-chart-total]");
+  if (headerTotal) headerTotal.textContent = String(total);
+  const tabCount = page?.querySelector('[data-tab-count="phonology"]');
+  if (tabCount) tabCount.textContent = String(total);
 }
 
-function refreshCell(td, chart, values, container, kind) {
+function refreshCell(td, chart, values, container, kind, ctx) {
   const chips = td.querySelector(".phoneme-chips");
   chips.innerHTML = chipsMarkup(values);
   td.classList.toggle("is-empty", values.length === 0);
-  updateChartCount(container, chart, kind);
+  updateChartCount(container, chart, kind, ctx);
 }
 
 function addValuesToCell(chart, rowId, columnId, values) {
@@ -211,8 +229,11 @@ function bindCellEditing(container, ctx, chart, kind) {
       const values = splitPhonemes(input.value);
       if (values.length) {
         const next = addValuesToCell(chart, td.dataset.rowId, td.dataset.colId, values);
-        refreshCell(td, chart, next, container, kind);
-        ctx.touch({ label: "Edit chart" });
+        refreshCell(td, chart, next, container, kind, ctx);
+        ctx.touch({
+          label: "Edit chart",
+          coalesceKey: `cell:${kind}:${td.dataset.rowId}|${td.dataset.colId}`,
+        });
       }
     }
     input.remove();
@@ -249,8 +270,11 @@ function bindCellEditing(container, ctx, chart, kind) {
         const values = splitPhonemes(input.value);
         if (values.length) {
           const next = addValuesToCell(chart, td.dataset.rowId, td.dataset.colId, values);
-          refreshCell(td, chart, next, container, kind);
-          ctx.touch({ label: "Edit chart" });
+          refreshCell(td, chart, next, container, kind, ctx);
+          ctx.touch({
+            label: "Edit chart",
+            coalesceKey: `cell:${kind}:${td.dataset.rowId}|${td.dataset.colId}`,
+          });
         }
         input.value = "";
       } else if (event.key === "Escape") {
@@ -276,8 +300,11 @@ function bindCellEditing(container, ctx, chart, kind) {
       event.stopPropagation();
       const index = Number(removeButton.dataset.chipIndex);
       const values = removeValueFromCell(chart, td.dataset.rowId, td.dataset.colId, index);
-      refreshCell(td, chart, values, container, kind);
-      ctx.touch({ label: "Edit chart" });
+      refreshCell(td, chart, values, container, kind, ctx);
+      ctx.touch({
+        label: "Edit chart",
+        coalesceKey: `cell:${kind}:${td.dataset.rowId}|${td.dataset.colId}`,
+      });
       return;
     }
     if (event.target.closest(".cell-input")) return;
@@ -290,7 +317,7 @@ function bindNotes(container, ctx, chart, kind) {
   if (!notes) return;
   notes.addEventListener("input", () => {
     chart.notes = notes.value;
-    ctx.touch({ label: "Edit chart notes" });
+    ctx.touch({ label: "Edit chart notes", coalesceKey: `notes:${kind}` });
   });
 }
 
@@ -382,7 +409,7 @@ function renameAxisNode(ctx, chart, axis, nodeId) {
   }).then((label) => {
     if (!label || label === node.label) return;
     node.label = label;
-    ctx.touch({ label: "Rename chart label" });
+    ctx.touch({ label: "Rename chart label", coalesceKey: node.id });
     ctx.refresh();
   });
 }
@@ -778,7 +805,7 @@ function openFeatureEditor(ctx, sound) {
           ...(ctx.language.featureOverrides || {}),
           [soundKey(sound)]: current,
         };
-        ctx.touch({ label: `Edit features for ${sound}` });
+        ctx.touch({ label: `Edit features for ${sound}`, coalesceKey: `features:${sound}` });
         ctx.refresh();
         close();
         toast(`Saved features for ${sound}.`, { type: "success" });
@@ -787,7 +814,7 @@ function openFeatureEditor(ctx, sound) {
         const next = { ...(ctx.language.featureOverrides || {}) };
         delete next[soundKey(sound)];
         ctx.language.featureOverrides = next;
-        ctx.touch({ label: `Remove feature override for ${sound}` });
+        ctx.touch({ label: `Remove feature override for ${sound}`, coalesceKey: `features:${sound}` });
         ctx.refresh();
         close();
         toast(`Removed the feature override for ${sound}.`, { type: "success" });
@@ -820,8 +847,8 @@ export function renderInventory(container, ctx) {
           <p class="section-copy">Lay out contrastive sounds on a chart. Charts are independent per language; when you create a daughter, it starts with a copy of its ancestor’s chart. How those sounds combine into syllables is set in <a href="#/language/${encodeURIComponent(language.id)}/phonotactics">Phonotactics</a>.</p>
         </div>
         <div class="inventory-summary">
-          <span><strong>${new Set(chartPhonemeList(consonants)).size}</strong> consonants</span>
-          <span><strong>${new Set(chartPhonemeList(vowels)).size}</strong> vowels</span>
+          <span><strong data-inventory-count="consonants">${new Set(chartPhonemeList(consonants)).size}</strong> consonants</span>
+          <span><strong data-inventory-count="vowels">${new Set(chartPhonemeList(vowels)).size}</strong> vowels</span>
         </div>
       </section>
       ${chartPanel(ctx, consonants, "consonants", "Consonants", "Manner of articulation × place of articulation")}

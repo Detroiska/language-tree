@@ -139,7 +139,7 @@ function languageHeader(ctx, activeTab) {
           <span class="subtitle-dot">·</span>
           ${childCount} ${childCount === 1 ? "daughter" : "daughters"}
           <span class="subtitle-dot">·</span>
-          ${stats.consonants + stats.vowels} charted sounds
+          <span data-chart-total>${stats.consonants + stats.vowels}</span> charted sounds
         </p>
       </div>
       <div class="page-actions">
@@ -155,7 +155,7 @@ function languageHeader(ctx, activeTab) {
             <span>${tab.label}</span>
             ${
               tab.id === "phonology"
-                ? `<span class="tab-count">${stats.consonants + stats.vowels}</span>`
+                ? `<span class="tab-count" data-tab-count="phonology">${stats.consonants + stats.vowels}</span>`
                 : tab.id === "changes"
                   ? `<span class="tab-count">${stats.changes}</span>`
                   : tab.id === "allophony"
@@ -307,7 +307,7 @@ function renderOverview(content, ctx) {
   const notes = content.querySelector("[data-language-notes]");
   notes.addEventListener("input", () => {
     language.notes = notes.value;
-    ctx.touch({ label: "Edit notes" });
+    ctx.touch({ label: "Edit notes", coalesceKey: `notes:${language.id}` });
   });
 
   content.querySelectorAll("[data-goto-tab]").forEach((button) => {
@@ -338,7 +338,7 @@ function renderOverview(content, ctx) {
       toast("Could not change the parent language.", { type: "error" });
       return;
     }
-    ctx.touch({ label: "Change parent language" });
+    ctx.touch({ label: "Change parent language", coalesceKey: language.id });
     ctx.refresh();
     toast(nextParent ? "Parent language updated. Inherited checks now use the new ancestor." : "Language is now a root.", { type: "success" });
   });
