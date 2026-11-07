@@ -319,11 +319,11 @@ function renderOverview(content, ctx) {
   });
 
   content.querySelectorAll("[data-add-ancestor]").forEach((button) => {
-    button.addEventListener("click", () => addAncestor(ctx));
+    button.addEventListener("click", () => addAncestor(ctx, language));
   });
 
   content.querySelectorAll("[data-add-sibling]").forEach((button) => {
-    button.addEventListener("click", () => addSibling(ctx));
+    button.addEventListener("click", () => addSibling(ctx, language));
   });
 
   const parentSelect = content.querySelector("[data-parent-select]");
@@ -355,7 +355,9 @@ export function renderLanguage(container, ctx, tabValue) {
 
   const content = container.querySelector("[data-language-content]");
   const headerCtx = { ...ctx, anchor: null };
-  container.querySelector("[data-rename-language]").addEventListener("click", () => renameLanguage(ctx));
+  container
+    .querySelector("[data-rename-language]")
+    .addEventListener("click", () => renameLanguage(ctx, ctx.language));
   container.querySelectorAll("[data-view-tree]").forEach((button) => button.addEventListener("click", () => ctx.navigate("#/tree")));
   container.querySelectorAll("[data-add-daughter]").forEach((button) => button.addEventListener("click", () => addDaughter(ctx)));
   const menuButton = container.querySelector("[data-language-menu]");
