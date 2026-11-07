@@ -257,6 +257,17 @@ function bindUnderscore(out, text, index, lastX) {
   return { index: position, lastX };
 }
 
+// Encode aliases fold onto a different glyph (script-g becomes plain g, for
+// example), so a modifier chunk's round trip compares those documented
+// canonical folds rather than the literal input.
+const DECODE_ALIASES = { "\u0261": "g", "\u0269": "\u026A", "\u0277": "\u028A", "\u1D00": "\u0251", "\u1D07": "\u025B" };
+
+function foldDecodeAliases(text) {
+  let result = text.normalize("NFC");
+  for (const [from, to] of Object.entries(DECODE_ALIASES)) result = result.replaceAll(from, to);
+  return result;
+}
+
 export function ipaToXSampa(text) {
   if (text === null || text === undefined) return "";
   // Decompose first so NFC input and NFD input take the same path.
@@ -268,12 +279,28 @@ export function ipaToXSampa(text) {
     const rest = chars.slice(position).join("");
     const entry = longestMatch(ipaToXEntries, (item) => item.ipa, rest, 0);
     if (entry) {
+      const chunkStart = position;
+      const encodedStart = out.length;
       out.push(entry.x);
       position += [...entry.ipa].length;
+      let modified = false;
       // Modifier loop: superscripts and combining marks bind to the segment.
       while (position < chars.length && MODIFIERS[chars[position]]) {
         out.push(MODIFIERS[chars[position]]);
+        modified = true;
         position += 1;
+      }
+      // Some modifier spellings are ambiguous in X-SAMPA: `n_d` is the
+      // documented tie pair n͡d, `t`` is retroflex ʈ, and `g_G` is the
+      // affricate ɡ͡ɣ. When the decoder would not read our spelling back as
+      // this chunk, keep the IPA chunk unchanged instead of corrupting it.
+      if (modified) {
+        const chunk = chars.slice(chunkStart, position).join("");
+        const decoded = xSampaToIPA(out.slice(encodedStart).join(""));
+        if (foldDecodeAliases(decoded) !== foldDecodeAliases(chunk)) {
+          out.length = encodedStart;
+          out.push(chunk);
+        }
       }
       continue;
     }

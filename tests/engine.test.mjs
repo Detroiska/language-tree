@@ -4364,6 +4364,20 @@ equal(
 );
 equal("precomposed cedilla still uses its documented letter", ipaToXSampa("\u00E7"), "C");
 
+// X-SAMPA reuses underscore and backtick spellings for tie pairs and retroflex
+// letters. When a modifier would produce one of those ambiguous spellings, the
+// encoder must keep the IPA chunk rather than emit ASCII that decodes to a
+// different phoneme.
+for (const sound of ["n\u032A", "\u014B\u0330", "g\u02E0", "t\u02DE", "s\u02DE"]) {
+  const encoded = ipaToXSampa(sound);
+  equal(
+    `ambiguous modifier spelling for ${sound} keeps its phoneme`,
+    xSampaToIPA(encoded),
+    sound.normalize("NFD")
+  );
+}
+equal("documented encode aliases still fold under modifiers", ipaToXSampa("\u0261\u02B7"), "g_w");
+
 /* ---- dated sound-change stages ---------------------------------------------- */
 
 // Stage numbers are documentation: the normalizer keeps exact integers (zero
