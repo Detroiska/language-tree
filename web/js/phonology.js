@@ -462,7 +462,15 @@ export function normalizeAllophonyNotation(notation) {
 
 // The tokenizer needs to know non-charted allophone symbols so [pʰ] is one
 // segment, not p + ʰ. Collect output chunks from the rules lexically; this
-// must work before the rules have been compiled.
+// must work before the rules have been compiled. Only a chunk that reads as a
+// single segment is taught: an unspaced `ea` is two sounds, not one, and must
+// be tokenized as such when the rule applies.
+function isSingleSegment(chunk) {
+  const first = Array.from(chunk)[0] || "";
+  if (!first || COMBINING.test(first) || isSegmentModifier(first)) return false;
+  return absorbSegmentEnd(chunk, first.length, TIE_BARS.has(first)) === chunk.length;
+}
+
 export function allophoneCandidates(rules) {
   const candidates = [];
   for (const rule of rules || []) {
@@ -484,7 +492,7 @@ export function allophoneCandidates(rules) {
       }
     }
     for (const chunk of pieces) {
-      if (chunk && chunk !== "∅" && chunk !== "0") candidates.push(chunk);
+      if (chunk && chunk !== "∅" && chunk !== "0" && isSingleSegment(chunk)) candidates.push(chunk);
     }
   }
   return [...new Set(candidates)];

@@ -1618,6 +1618,43 @@ equal("an uncharted allophone stays one token", childSurface.tokens, ["kʰ", "a"
 equal("surface input accepts level delimiters", childSurface.input.join(""), "kasa");
 equal("a disabled allophony rule is skipped", surfaceForForm("pata", allophonyProject, "child").text, "pata");
 
+// An unspaced multi-symbol output is two segments, just as it would be in a
+// sound-change rule. Teaching the tokenizer the whole chunk made `ea` a single
+// unfettered token with no feature bundle.
+const fusedAllophoneProject = ensureProject({
+  title: "Fused allophone",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [
+        { id: "f1", notation: "/a/ > [ea]", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const fusedAllophoneSurface = surfaceForForm("ka", fusedAllophoneProject, "only");
+equal(
+  "an unspaced allophone output is not taught as one segment",
+  fusedAllophoneSurface.tokens,
+  ["k", "e", "a"]
+);
+equal("an unspaced allophone output keeps its segment count", fusedAllophoneSurface.text, "kea");
+fusedAllophoneProject.languages[0].allophony = [
+  { id: "f1", notation: "/a/ > [aa]", note: "", enabled: true },
+  { id: "f2", notation: "/V/ > [e] / _ #", note: "", enabled: true },
+];
+const fusedCascadeSurface = surfaceForForm("ka", fusedAllophoneProject, "only");
+equal(
+  "a multi-symbol allophone output feeds later rules as separate segments",
+  [fusedCascadeSurface.text, fusedCascadeSurface.tokens],
+  ["kae", ["k", "a", "e"]]
+);
+
 const orderProject = ensureProject({
   title: "Order",
   languages: [
