@@ -169,7 +169,9 @@ function derivedFeatureValue(bundle, name) {
   const def = FEATURE_DEFINITIONS[name];
   if (!def || def.type !== "derived") return null;
   const place = bundle?.place || null;
-  if (!place) return false;
+  // Place classes describe consonants. A vowel has no place, so the feature is
+  // not applicable, not false: matching either sign must fail.
+  if (!place) return null;
   return def.values.includes(place);
 }
 
