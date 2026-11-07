@@ -500,8 +500,12 @@ export function renderVocabulary(container, ctx) {
         (statusFilter === "invalid" && status === "invalid") ||
         (statusFilter === "differs" && status === "differs");
       const show = matchesText && matchesStatus;
-      row.hidden = !show;
-      if (show) visible += 1;
+      // Keep the row being edited visible: hiding it on the first keystroke
+      // would drop focus mid-edit. Blur re-runs the filters and lets the row
+      // disappear once the pointer or focus has left it.
+      const editing = row.contains(document.activeElement);
+      row.hidden = !show && !editing;
+      if (!row.hidden) visible += 1;
     });
     const count = container.querySelector("[data-filter-count]");
     if (count) count.textContent = filtering ? `${visible} of ${words.length} shown` : "";
@@ -567,7 +571,12 @@ export function renderVocabulary(container, ctx) {
           const summary = container.querySelector("[data-phonotactics-summary]");
           if (summary) summary.textContent = validitySummary(words, checker);
         }
-        applyFilters();
+        // Do not filter on every keystroke: a status filter such as "Drafts"
+        // would hide this row as soon as its form stops being empty. Re-run
+        // the filters after focus leaves the row instead.
+      });
+      input.addEventListener("blur", () => {
+        window.setTimeout(applyFilters, 0);
       });
       if (input.dataset.wordField === "form") {
         input.addEventListener("blur", () => {
