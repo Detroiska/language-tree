@@ -181,13 +181,26 @@ const xToIpaTokens = [
   ...TIE_CLUSTERS,
 ].sort((a, b) => b.x.length - a.x.length);
 
+// Stored forms are NFC, but the encoder walks NFD so a precomposed accented
+// letter is read as its base plus combining mark. Add decomposed twins for
+// entries such as ç whose combining mark is part of the segment itself.
+function withDecomposedVariants(entries) {
+  const result = [];
+  for (const entry of entries) {
+    result.push(entry);
+    const decomposed = entry.ipa.normalize("NFD");
+    if (decomposed !== entry.ipa) result.push({ ...entry, ipa: decomposed });
+  }
+  return result;
+}
+
 // IPA -> X-SAMPA lookup, multi-codepoint clusters first (the generic
 // longest-match walks it front to back).
 const ipaToXEntries = [
   ...identityLower.map((letter) => ({ ipa: letter, x: letter })),
-  ...SEGMENTS.map((entry) => ({ ipa: entry.ipa, x: entry.x })),
+  ...withDecomposedVariants(SEGMENTS),
   ...ENCODE_ALIASES,
-  ...TIE_CLUSTERS.map((entry) => ({ ipa: entry.ipa, x: entry.x })),
+  ...withDecomposedVariants(TIE_CLUSTERS),
 ].sort((a, b) => b.ipa.length - a.ipa.length);
 
 // Superscripts and combining marks bind to the previous segment. Bare tilde,
@@ -246,7 +259,8 @@ function bindUnderscore(out, text, index, lastX) {
 
 export function ipaToXSampa(text) {
   if (text === null || text === undefined) return "";
-  const source = String(text);
+  // Decompose first so NFC input and NFD input take the same path.
+  const source = String(text).normalize("NFD");
   const chars = [...source];
   const out = [];
   let position = 0;

@@ -144,18 +144,23 @@ export function parseWordList(text) {
       const rows = entries
         .map((entry, index) => rowFromJsonEntry(entry && typeof entry === "object" ? entry : {}, index))
         .filter((row) => row.gloss || row.form);
+      if (!rows.length) {
+        warnings.push(
+          "The pasted JSON is valid but is not a word list: no row has a gloss or form. Nothing was imported.",
+        );
+      }
       return { delimiter: "JSON", headerSkipped: false, rows, warnings, parseError: "" };
     }
     if (entries && typeof entries === "object") {
       // A single {gloss, form, note} object imports as one row.
       const row = rowFromJsonEntry(entries, 0);
-      return {
-        delimiter: "JSON",
-        headerSkipped: false,
-        rows: row.gloss || row.form ? [row] : [],
-        warnings,
-        parseError: "",
-      };
+      if (row.gloss || row.form) {
+        return { delimiter: "JSON", headerSkipped: false, rows: [row], warnings, parseError: "" };
+      }
+      warnings.push(
+        "The pasted JSON is valid but is not a word list: it has no gloss or form. Nothing was imported.",
+      );
+      return { delimiter: "JSON", headerSkipped: false, rows: [], warnings, parseError: "" };
     }
     // A valid JSON scalar is not a word list; the table parser below still
     // shows the text in the preview.
