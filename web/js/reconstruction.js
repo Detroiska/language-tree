@@ -310,6 +310,18 @@ function substitutionCandidates(tokens, rule, context, combos, options) {
     if (!sameJunctures(applied.junctures, targetJunctures)) continue;
     verified.push(candidate);
   }
+  if (options.keepIdentity) {
+    // Parallel rules are checked together after every sister rule has been
+    // reversed. A rule may look applicable to the intermediate form even
+    // though it did not apply to the frozen ancestral form (a sister rule
+    // created its input), so its unchanged predecessor must survive until the
+    // final whole-group check instead of being pruned here.
+    const identity = identityCandidate(tokens, targetJunctures);
+    const key = candidateKey(identity.tokens, identity.junctures);
+    if (!verified.some((candidate) => candidateKey(candidate.tokens, candidate.junctures) === key)) {
+      verified.push(identity);
+    }
+  }
   return { candidates: verified, truncated };
 }
 
@@ -381,12 +393,23 @@ function deletionCandidates(tokens, rule, context, combos, options) {
       exact.push({ tokens: pred.tokens, junctures: pred.junctures, score: loss, loss });
     }
     if (exact.length) {
-      const candidates = identityValid ? [...exact, identity] : exact;
+      const candidates = [...exact];
+      if ((identityValid || options.keepIdentity) && !candidates.some(
+        (candidate) =>
+          sameTokens(candidate.tokens, identity.tokens) &&
+          sameJunctures(candidate.junctures, identity.junctures)
+      )) {
+        candidates.push(identity);
+      }
       return { candidates, truncated, loss };
     }
   }
 
-  return { candidates: identityValid ? [identity] : [], truncated: false, loss: 0 };
+  return {
+    candidates: identityValid || options.keepIdentity ? [identity] : [],
+    truncated: false,
+    loss: 0,
+  };
 }
 
 function invertRuleAll(tokens, compiled, context, options = {}) {
@@ -619,7 +642,13 @@ export function invertRules(tokens, groups, context, options = {}) {
 
   for (const group of [...usable].reverse()) {
     if (!group.compiled?.ok || ruleExceptsGloss(group.rule, gloss)) continue;
-    const expanded = expandCandidates(candidates, group.compiled.rule, context, settings);
+    // Top-level rules are parallel: keep each rule's unchanged predecessor so
+    // the whole-group check below, not a single-rule check, decides whether it
+    // is valid.
+    const expanded = expandCandidates(candidates, group.compiled.rule, context, {
+      ...settings,
+      keepIdentity: true,
+    });
     candidates = expanded.candidates;
     truncated = truncated || expanded.truncated;
     if (!candidates.length) {

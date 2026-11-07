@@ -39,19 +39,39 @@ const VOWEL_FALLBACK = new Set([
 const COMBINING = /\p{M}/u;
 const TIE_BARS = new Set(["\u0361", "\u035c"]);
 
+// Spacing modifier letters such as length ː, aspiration ʰ, labialization ʷ,
+// and velarization ˠ are part of the segment before them. Stress marks share
+// the same Unicode block but are handled as separate, zero-width tokens, so
+// they must not be absorbed. Release letters (ˡ, ⁿ) and the modifier
+// apostrophe are included too.
+function isSegmentModifier(char) {
+  if (!char) return false;
+  const code = char.codePointAt(0);
+  if (code === 0x02bc || code === 0x207f) return true;
+  if (code >= 0x02e0 && code <= 0x02e4) return true;
+  return code >= 0x02b0 && code <= 0x02d1 && code !== 0x02c8 && code !== 0x02cc;
+}
+
 function stripMarks(text) {
   return text.normalize("NFD").replace(/\p{M}/gu, "");
 }
 
+// The first letter of a segment ignores both combining marks and spacing
+// modifiers: `aː` is an `a` for vowel classification even when the charted
+// phoneme is the long form and the short one is unlisted.
 function firstBase(text) {
-  const stripped = stripMarks(text);
-  return Array.from(stripped)[0] || "";
+  const stripped = Array.from(stripMarks(text));
+  let index = 0;
+  while (index < stripped.length && isSegmentModifier(stripped[index])) index += 1;
+  return stripped[index] || "";
 }
 
 // Combining marks belong to the segment before them. A tie bar also pulls in
 // the following base, so an uncharted `t͡ʃ` stays one segment even when `t`
-// and `ʃ` are charted separately. Without this, the tokenizer's known-symbol
-// branch would match `t`, then start the next token at the stray tie bar.
+// and `ʃ` are charted separately. Spacing modifiers likewise attach to the
+// preceding segment so an uncharted `aː` or `pʰ` is not split into a base and
+// a stray mark. Without this, the tokenizer's known-symbol branch would match
+// `t`, then start the next token at the stray tie bar.
 function absorbSegmentEnd(source, end, hasTie = false) {
   while (end < source.length) {
     const next = source.codePointAt(end);
@@ -59,6 +79,10 @@ function absorbSegmentEnd(source, end, hasTie = false) {
     const nextChar = String.fromCodePoint(next);
     if (COMBINING.test(nextChar)) {
       if (TIE_BARS.has(nextChar)) hasTie = true;
+      end += nextChar.length;
+      continue;
+    }
+    if (isSegmentModifier(nextChar)) {
       end += nextChar.length;
       continue;
     }
@@ -154,6 +178,8 @@ class SegmentContext {
 
   isConsonant(token) {
     if (this.consonants.has(token)) return true;
+    // A stranded modifier mark has no base and is not a consonant of its own.
+    if (!firstBase(token)) return false;
     return !this.isVowel(token);
   }
 
@@ -436,7 +462,15 @@ export function normalizeAllophonyNotation(notation) {
 
 // The tokenizer needs to know non-charted allophone symbols so [pʰ] is one
 // segment, not p + ʰ. Collect output chunks from the rules lexically; this
-// must work before the rules have been compiled.
+// must work before the rules have been compiled. Only a chunk that reads as a
+// single segment is taught: an unspaced `ea` is two sounds, not one, and must
+// be tokenized as such when the rule applies.
+function isSingleSegment(chunk) {
+  const first = Array.from(chunk)[0] || "";
+  if (!first || COMBINING.test(first) || isSegmentModifier(first)) return false;
+  return absorbSegmentEnd(chunk, first.length, TIE_BARS.has(first)) === chunk.length;
+}
+
 export function allophoneCandidates(rules) {
   const candidates = [];
   for (const rule of rules || []) {
@@ -458,7 +492,7 @@ export function allophoneCandidates(rules) {
       }
     }
     for (const chunk of pieces) {
-      if (chunk && chunk !== "∅" && chunk !== "0") candidates.push(chunk);
+      if (chunk && chunk !== "∅" && chunk !== "0" && isSingleSegment(chunk)) candidates.push(chunk);
     }
   }
   return [...new Set(candidates)];

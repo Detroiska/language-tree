@@ -262,6 +262,27 @@ equal(
   looseTieCtx.tokenize("am͜ba"),
   ["a", "m͜b", "a"]
 );
+// Spacing modifier letters attach to the preceding segment even when the
+// full compound is absent from the chart. Otherwise a stray length or
+// aspiration mark becomes its own token and counts as a consonant.
+equal("an uncharted long vowel stays one segment", ctx.tokenize("kaːtu"), ["k", "aː", "t", "u"]);
+equal("an uncharted aspirated stop stays one segment", ctx.tokenize("pʰa"), ["pʰ", "a"]);
+equal(
+  "an uncharted long vowel is still a vowel",
+  [ctx.isVowel("aː"), ctx.isConsonant("aː")],
+  [true, false]
+);
+equal("a stranded modifier is not a consonant", ctx.isConsonant("ː"), false);
+equal(
+  "vowel deletion keeps an uncharted length mark attached",
+  apply("V > ∅ / _ C", "kaːtu"),
+  { out: "ktu" }
+);
+equal(
+  "consonant deletion does not remove an uncharted length mark",
+  apply("C > ∅ / V _ C", "kaːtu"),
+  { out: "kaːtu" }
+);
 
 /* ---- inert-rule warnings ------------------------------------------------ */
 
@@ -577,6 +598,80 @@ equal(
   "parallel rules report the unchanged form and every valid source",
   parallelInverse.candidates.map((candidate) => candidate.tokens.join("")),
   ["vata", "fata"]
+);
+
+// A chain shift is the classic parallel interaction: each rule changes a
+// segment that a sister rule targets, and both match the frozen ancestral
+// form. Inverting one rule at a time must not reject an unchanged sister rule
+// merely because that sister would apply to the intermediate output.
+const chainShiftConsonants = makeChart(
+  ["Plosive"],
+  ["Alveolar"],
+  [["Plosive", "Alveolar", ["t"]]]
+);
+const chainShiftVowels = makeChart(
+  ["Close", "Open"],
+  ["Central"],
+  [
+    ["Close", "Central", ["o", "oː"]],
+    ["Open", "Central", ["a", "aː"]],
+  ]
+);
+const chainShiftCtx = contextForInventory({
+  consonants: chainShiftConsonants,
+  vowels: chainShiftVowels,
+});
+const chainShiftChanges = [
+  { id: "r1", notation: "aː > oː", note: "", enabled: true, parentId: null },
+  { id: "r2", notation: "oː > aː", note: "", enabled: true, parentId: null },
+];
+const chainShiftGroups = compileRuleStages(chainShiftChanges, chainShiftCtx);
+equal(
+  "a parallel chain shift inverts against the frozen ancestral form",
+  invertRules(chainShiftCtx.tokenize("toː"), chainShiftGroups, chainShiftCtx).candidates.map(
+    (candidate) => candidate.tokens.join("")
+  ),
+  ["taː"]
+);
+const reversedChainShiftGroups = compileRuleStages(
+  [...chainShiftChanges].reverse(),
+  chainShiftCtx
+);
+equal(
+  "a parallel chain shift inverts the same way in either display order",
+  invertRules(chainShiftCtx.tokenize("toː"), reversedChainShiftGroups, chainShiftCtx).candidates.map(
+    (candidate) => candidate.tokens.join("")
+  ),
+  ["taː"]
+);
+const chainShiftProject = {
+  title: "Chain shift",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      inventory: { consonants: chainShiftConsonants, vowels: chainShiftVowels },
+      phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+      soundChanges: [],
+      vocabulary: [],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      inventory: { consonants: chainShiftConsonants, vowels: chainShiftVowels },
+      phonotactics: { template: "(C)V(C)", onsets: "", codas: "", forbidden: "", notes: "", classes: [] },
+      soundChanges: chainShiftChanges,
+      vocabulary: [],
+    },
+  ],
+};
+const chainShiftReconstruction = reconstructForm("toː", chainShiftProject, "child");
+equal(
+  "reconstructForm reverses a derivation under parallel rules",
+  [chainShiftReconstruction.ok, chainShiftReconstruction.candidates.map((candidate) => candidate.text)],
+  [true, ["taː"]]
 );
 
 const noInverse = invert("a > e", "aka");
@@ -1596,6 +1691,43 @@ equal("allophony applies in list order", childSurface.text, "kʰaza");
 equal("an uncharted allophone stays one token", childSurface.tokens, ["kʰ", "a", "z", "a"]);
 equal("surface input accepts level delimiters", childSurface.input.join(""), "kasa");
 equal("a disabled allophony rule is skipped", surfaceForForm("pata", allophonyProject, "child").text, "pata");
+
+// An unspaced multi-symbol output is two segments, just as it would be in a
+// sound-change rule. Teaching the tokenizer the whole chunk made `ea` a single
+// unfettered token with no feature bundle.
+const fusedAllophoneProject = ensureProject({
+  title: "Fused allophone",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      soundChanges: [],
+      allophony: [
+        { id: "f1", notation: "/a/ > [ea]", note: "", enabled: true },
+      ],
+      vocabulary: [],
+    },
+  ],
+});
+const fusedAllophoneSurface = surfaceForForm("ka", fusedAllophoneProject, "only");
+equal(
+  "an unspaced allophone output is not taught as one segment",
+  fusedAllophoneSurface.tokens,
+  ["k", "e", "a"]
+);
+equal("an unspaced allophone output keeps its segment count", fusedAllophoneSurface.text, "kea");
+fusedAllophoneProject.languages[0].allophony = [
+  { id: "f1", notation: "/a/ > [aa]", note: "", enabled: true },
+  { id: "f2", notation: "/V/ > [e] / _ #", note: "", enabled: true },
+];
+const fusedCascadeSurface = surfaceForForm("ka", fusedAllophoneProject, "only");
+equal(
+  "a multi-symbol allophone output feeds later rules as separate segments",
+  [fusedCascadeSurface.text, fusedCascadeSurface.tokens],
+  ["kae", ["k", "a", "e"]]
+);
 
 const orderProject = ensureProject({
   title: "Order",
