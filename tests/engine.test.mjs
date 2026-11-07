@@ -4210,6 +4210,7 @@ truthy(
   xsampaStrict + xsampaFolded === Object.keys(IPA_FEATURES).length
 );
 equal("script-g canonicalizes to the plain velar stop", [xSampaToIPA("g"), ipaToXSampa("\u0261"), xSampaToIPA(ipaToXSampa("g"))], ["g", "g", "g"]);
+equal("a stray trailing underscore stays literal instead of looping", xSampaToIPA("a_"), "a_");
 equal("deprecated glyph variants fold onto their modern symbols", [xSampaToIPA(ipaToXSampa("\u0269")), xSampaToIPA(ipaToXSampa("\u1D00"))], ["\u026A", "\u0251"]);
 truthy("segments with no documented X-SAMPA pass through non-ASCII", [...ipaToXSampa("\u027F")].every((character) => character.codePointAt(0) > 0x7e));
 

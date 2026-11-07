@@ -238,9 +238,10 @@ function bindUnderscore(out, text, index, lastX) {
     out.push("\u0361", next.ipa);
     return { index: position + nextX.length, lastX: nextX };
   }
-  // Stray underscore with nothing bindable after it: keep it literally.
+  // Stray underscore with nothing bindable after it: keep it literally and
+  // consume it, so the caller does not retry the same underscore forever.
   out.push("_");
-  return { index, lastX };
+  return { index: position, lastX };
 }
 
 export function ipaToXSampa(text) {
