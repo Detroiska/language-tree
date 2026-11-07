@@ -262,6 +262,27 @@ equal(
   looseTieCtx.tokenize("am͜ba"),
   ["a", "m͜b", "a"]
 );
+// Spacing modifier letters attach to the preceding segment even when the
+// full compound is absent from the chart. Otherwise a stray length or
+// aspiration mark becomes its own token and counts as a consonant.
+equal("an uncharted long vowel stays one segment", ctx.tokenize("kaːtu"), ["k", "aː", "t", "u"]);
+equal("an uncharted aspirated stop stays one segment", ctx.tokenize("pʰa"), ["pʰ", "a"]);
+equal(
+  "an uncharted long vowel is still a vowel",
+  [ctx.isVowel("aː"), ctx.isConsonant("aː")],
+  [true, false]
+);
+equal("a stranded modifier is not a consonant", ctx.isConsonant("ː"), false);
+equal(
+  "vowel deletion keeps an uncharted length mark attached",
+  apply("V > ∅ / _ C", "kaːtu"),
+  { out: "ktu" }
+);
+equal(
+  "consonant deletion does not remove an uncharted length mark",
+  apply("C > ∅ / V _ C", "kaːtu"),
+  { out: "kaːtu" }
+);
 
 /* ---- inert-rule warnings ------------------------------------------------ */
 
