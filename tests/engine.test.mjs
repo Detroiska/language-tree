@@ -70,6 +70,7 @@ import {
   derivedFeatures,
   featureDistance,
   featureMembers,
+  matchFeatureTerms,
   resolveFeatureBundle,
 } from "../web/js/features.js";
 import { compilePhonotactics } from "../web/js/phonotactics.js";
@@ -878,6 +879,19 @@ equal(
 );
 truthy("the weak shared change is marked non-unique", weakX.shared[0].unique === false);
 
+const spacingSubgroup = subgroupingEvidence({
+  languages: [
+    { id: "root", name: "Root", parentId: null, soundChanges: [] },
+    { id: "a", name: "A", parentId: "root", soundChanges: [{ id: "a1", notation: "p > f" }] },
+    { id: "b", name: "B", parentId: "root", soundChanges: [{ id: "b1", notation: "p->f" }] },
+  ],
+});
+equal(
+  "arrow spacing does not hide a shared innovation",
+  spacingSubgroup.nodes.find((node) => node.language.id === "root").shared.map((rule) => rule.key),
+  ["p > f"],
+);
+
 const chainConsonants = makeChart(
   ["Plosive", "Nasal"],
   ["Bilabial", "Alveolar", "Velar"],
@@ -1082,6 +1096,20 @@ truthy(
 );
 equal("parent links follow a regenerated id", fineId.parentId, craftedId.id);
 truthy("duplicate ids get a fresh id", duplicateId.id !== "ok" && duplicateId.id !== craftedId.id);
+
+const repairedCycleProject = ensureProject({
+  title: "Cycle repair",
+  languages: [
+    { id: "a", name: "A", parentId: "b" },
+    { id: "b", name: "B", parentId: "c" },
+    { id: "c", name: "C", parentId: "c" },
+  ],
+});
+equal(
+  "cycle repair detaches only the language that closes the loop",
+  repairedCycleProject.languages.map((item) => [item.id, item.parentId]),
+  [["a", "b"], ["b", "c"], ["c", null]],
+);
 const dupWordProject = ensureProject({
   title: "Dup",
   languages: [
@@ -1247,6 +1275,12 @@ const noStressRule = compileRule("a > ə / ˈ _", ctx);
 truthy(
   "a stress environment warns when the language has no stress system",
   noStressRule.ok && noStressRule.warnings.some((warning) => warning.includes("no stress system"))
+);
+const gluedStressRule = compileRule("a > e / aˈ _", stressCtx);
+equal(
+  "a stress mark glued to an environment chunk becomes its own atom",
+  gluedStressRule.rule?.left.map((atom) => atom.type),
+  ["literal", "stress"],
 );
 
 const stressProject = ensureProject({
@@ -2539,6 +2573,16 @@ equal(
   [true, true, "alveolar"]
 );
 equal("place derives the coronal feature", derivedFeatures(nasalBundle), ["coronal"]);
+const vowelBundle = resolver.bundleFor("a");
+equal("vowels do not derive place-class features", derivedFeatures(vowelBundle), []);
+truthy(
+  "a vowel does not match a negative place feature",
+  !matchFeatureTerms(vowelBundle, [{ kind: "bool", feature: "dorsal", value: false }]),
+);
+truthy(
+  "a vowel does not match a positive place feature",
+  !matchFeatureTerms(vowelBundle, [{ kind: "bool", feature: "dorsal", value: true }]),
+);
 equal(
   "tie-bar variants resolve to the same bundle",
   featureDistance(resolver.bundleFor("t͡ʃ"), resolver.bundleFor("t͜ʃ")),
@@ -4246,6 +4290,17 @@ equal("glued ejective affricates keep tie, release, and length", ipaToXSampa(glu
 equal("the glued ejective affricate round-trips", xSampaToIPA(ipaToXSampa(gluedEjective)), gluedEjective);
 equal("unknown characters pass through unchanged", [ipaToXSampa("a;b"), xSampaToIPA("$")], ["a;b", "$"]);
 equal("empty and null input stay empty", [ipaToXSampa(""), xSampaToIPA(""), ipaToXSampa(null), xSampaToIPA(null)], ["", "", "", ""]);
+equal(
+  "NFC accented letters encode through their combining mark",
+  [ipaToXSampa("\u00E3"), [...ipaToXSampa("\u00E3")].every((character) => character.codePointAt(0) <= 0x7e)],
+  ["a~", true],
+);
+equal(
+  "NFC and NFD accented input share one X-SAMPA encoding",
+  [ipaToXSampa("\u00E3"), ipaToXSampa("a\u0303")],
+  ["a~", "a~"],
+);
+equal("precomposed cedilla still uses its documented letter", ipaToXSampa("\u00E7"), "C");
 
 /* ---- dated sound-change stages ---------------------------------------------- */
 

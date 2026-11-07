@@ -166,6 +166,18 @@ truthy(
   "the fallback keeps its JSON warning",
   parseWordList("[apa] father").warnings.some((warning) => /JSON/.test(warning))
 );
+for (const [name, text] of [
+  ["an array of scalars", "[1,2,3]"],
+  ["an object without word fields", '{"foo":"bar"}'],
+  ["an array of unrelated objects", '[{"name":"x"}]'],
+]) {
+  const parsed = parseWordList(text);
+  truthy(`${name} imports no rows`, parsed.rows.length === 0);
+  truthy(
+    `${name} explains that it is not a word list`,
+    parsed.warnings.some((warning) => /word list|gloss/i.test(warning)),
+  );
+}
 
 /* ---- duplicates and apply ------------------------------------------------- */
 

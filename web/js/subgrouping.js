@@ -22,6 +22,8 @@ function normalizeNotation(value) {
     .normalize("NFC")
     .replaceAll("→", ">")
     .replaceAll("->", ">")
+    // The rule parser accepts both "p > f" and "p>f"; subgrouping must too.
+    .replace(/\s*>\s*/g, " > ")
     .replace(/\s+/g, " ")
     .trim();
 }

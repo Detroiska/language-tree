@@ -924,7 +924,16 @@ function chunksOf(text) {
       continue;
     }
     let end = index;
-    while (end < text.length && !/\s/.test(text[end]) && text[end] !== "[" && text[end] !== "#") end += 1;
+    while (
+      end < text.length &&
+      !/\s/.test(text[end]) &&
+      text[end] !== "[" &&
+      text[end] !== "#" &&
+      text[end] !== "ˈ" &&
+      text[end] !== "ˌ"
+    ) {
+      end += 1;
+    }
     if (end === index) end += 1;
     const raw = text.slice(index, end);
     // A leading “+” is feature syntax ([+voice] is already handled as one
