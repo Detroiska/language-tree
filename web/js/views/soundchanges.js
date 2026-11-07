@@ -1,6 +1,7 @@
 import {
   DEFAULT_RULE_RATE,
   ancestorsOf,
+  findLanguage,
   getLineage,
   languageStats,
   normalizeRuleDate,
@@ -482,6 +483,7 @@ function libraryGroupsMarkup(language) {
 }
 
 function openRuleLibrary(language, ctx) {
+  const languageId = language.id;
   openModal({
     title: "Rule library",
     width: "wide",
@@ -490,17 +492,21 @@ function openRuleLibrary(language, ctx) {
       <div class="library-modal-body" data-library-body>${libraryGroupsMarkup(language)}</div>`,
     onMount({ root }) {
       const body = root.querySelector("[data-library-body]");
+      // The modal and its toasts outlive the view that opened them, so resolve
+      // the language at click time instead of mutating the render-time object.
+      const currentLanguage = () => findLanguage(ctx.project, languageId);
       function bindInsertButtons() {
         body.querySelectorAll("[data-insert-laws]").forEach((button) => {
           button.addEventListener("click", () => {
+            const target = currentLanguage();
+            if (!target) return;
             const group = soundChangeLibrary.find((item) => item.id === button.dataset.insertLaws);
             if (!group) return;
-            const drafts = newLibraryRules(group, presentLibraryNotations(language));
+            const drafts = newLibraryRules(group, presentLibraryNotations(target));
             if (!drafts.length) return;
-            // The block lands at the end of the list; remembering where it
-            // starts lets the undo splice exactly those drafts back out.
-            const startIndex = language.soundChanges.length;
-            language.soundChanges.push(...drafts);
+            // The block lands at the end of the list; its ids let the undo
+            // callback remove exactly these drafts even after other edits.
+            target.soundChanges.push(...drafts);
             ctx.touch({ label: "Insert library rules" });
             ctx.refresh();
             refresh();
@@ -510,7 +516,10 @@ function openRuleLibrary(language, ctx) {
               action: {
                 label: "Undo",
                 onClick: () => {
-                  language.soundChanges.splice(startIndex, drafts.length);
+                  const current = currentLanguage();
+                  if (!current) return;
+                  const inserted = new Set(drafts.map((draft) => draft.id));
+                  current.soundChanges = current.soundChanges.filter((rule) => !inserted.has(rule.id));
                   ctx.touch({ label: "Remove library rules" });
                   ctx.refresh();
                   if (body.isConnected) refresh();
@@ -521,8 +530,10 @@ function openRuleLibrary(language, ctx) {
         });
       }
       function refresh() {
+        const target = currentLanguage();
+        if (!target) return;
         const scrollTop = body.scrollTop;
-        body.innerHTML = libraryGroupsMarkup(language);
+        body.innerHTML = libraryGroupsMarkup(target);
         bindInsertButtons();
         body.scrollTop = scrollTop;
       }
@@ -1131,7 +1142,11 @@ export function renderChanges(container, ctx) {
           action: {
             label: "Undo",
             onClick: () => {
-              language.soundChanges.splice(index, 0, removed);
+              // Resolve the language at click time: a global undo/redo replaces
+              // the render-time language object with a deep clone.
+              const current = findLanguage(ctx.project, language.id);
+              if (!current || current.soundChanges.some((entry) => entry.id === removed.id)) return;
+              current.soundChanges.splice(Math.min(index, current.soundChanges.length), 0, removed);
               ctx.touch({ label: "Restore rule", coalesceKey: removed.id });
               ctx.refresh();
             },
@@ -1157,8 +1172,12 @@ export function renderChanges(container, ctx) {
           action: {
             label: "Undo",
             onClick: () => {
-              language.soundChanges.splice(index, 0, ...block);
-              ctx.touch({ label: "Restore rule group" });
+              const current = findLanguage(ctx.project, language.id);
+              if (!current) return;
+              const ids = new Set(block.map((entry) => entry.id));
+              if (current.soundChanges.some((entry) => ids.has(entry.id))) return;
+              current.soundChanges.splice(Math.min(index, current.soundChanges.length), 0, ...block);
+              ctx.touch({ label: "Restore rule group", coalesceKey: group.rule.id });
               ctx.refresh();
             },
           },

@@ -42,6 +42,10 @@ import { esc, icon, toast } from "../ui.js";
 // Optional allophony is a view-only variant, remembered per language just like
 // the sound-change tester's selection.
 const alloTesterOptionalMemory = new Map();
+// The tester input is re-created on every render, and the rule toggles
+// re-render the whole view. Remember the typed form (and its gloss) per
+// language so exploring a custom word does not reset it to the first entry.
+const alloTesterMemory = new Map();
 
 function optionalAllophonyRules(compiled) {
   return (compiled || [])
@@ -245,6 +249,8 @@ function allophoneTableMarkup(data) {
 
 function testPanelMarkup(language, optionalRules = []) {
   const sample = language.vocabulary.find((word) => word.form.trim())?.form || "";
+  const remembered = alloTesterMemory.get(language.id);
+  const initialValue = remembered?.form ?? sample;
   const suggestions = language.vocabulary.filter((word) => word.form.trim()).slice(0, 4);
   const selectedOptional = alloTesterOptionalMemory.get(language.id) || new Set();
   return `
@@ -258,7 +264,7 @@ function testPanelMarkup(language, optionalRules = []) {
       </header>
       <div class="test-input-wrap">
         <label class="field-label" for="allo-test-word">Phonemic input <span class="field-optional">/…/</span></label>
-        <input class="input ipa-input" id="allo-test-word" data-allo-test-input value="${esc(sample)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+        <input class="input ipa-input" id="allo-test-word" data-allo-test-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
         ${
           suggestions.length
             ? `<div class="word-suggestions">${suggestions
@@ -460,7 +466,9 @@ export function renderAllophony(container, ctx) {
   const testPanel = container.querySelector("[data-allo-test-panel]");
   const testInput = testPanel?.querySelector("[data-allo-test-input]");
   const tablePanel = container.querySelector("[data-allo-table-panel]");
-  let testGloss = language.vocabulary.find((word) => word.form.trim())?.gloss || "";
+  const rememberedTest = alloTesterMemory.get(language.id);
+  let testGloss =
+    rememberedTest?.gloss ?? (language.vocabulary.find((word) => word.form.trim())?.gloss || "");
   let testOptional = new Set(
     [...(alloTesterOptionalMemory.get(language.id) || [])].filter((id) =>
       optionalRules.some((rule) => rule.id === id)
@@ -470,6 +478,7 @@ export function renderAllophony(container, ctx) {
 
   const runTest = () => {
     if (!testPanel || !testInput) return;
+    alloTesterMemory.set(language.id, { form: testInput.value, gloss: testGloss });
     const result = surfaceForForm(stripLevelMarks(testInput.value), ctx.project, language.id, {
       gloss: testGloss,
       optionalRuleIds: [...testOptional],
