@@ -119,6 +119,20 @@ truthy(
 /* ---- delimiters ---------------------------------------------------------- */
 
 equal(
+  "a quoted separator does not choose the table delimiter",
+  [
+    parseWordList('"hello; world",a house\nkasa,house2').delimiter,
+    rowOf(parseWordList('"hello; world",a house\nkasa,house2'), 0),
+    rowOf(parseWordList('"hello; world",a house\nkasa,house2'), 1),
+  ],
+  [
+    ",",
+    { gloss: "hello; world", form: "a house", note: "", index: 1 },
+    { gloss: "kasa", form: "house2", note: "", index: 2 },
+  ]
+);
+
+equal(
   "tab-delimited rows parse",
   rowOf(parseWordList("house\tkasa\tplain")),
   { gloss: "house", form: "kasa", note: "plain", index: 1 }

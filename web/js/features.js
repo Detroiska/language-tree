@@ -720,25 +720,38 @@ function deriveContour(sound) {
     });
   }
 
-  // Affricate: a stop followed by a homorganic fricative.
+  // Affricate: a stop followed by a fricative. The release may be at a
+  // different place, as in the curated t͡ʃ, t͡ɕ, p͡f, and d͡ʒ entries; derive
+  // the whole affricate from the stop with the release's place and modifiers.
   if (
     first.consonantal === true &&
     first.continuant === false &&
     second.consonantal === true &&
     second.continuant === true &&
+    second.sonorant === false &&
     first.place &&
-    first.place === second.place
+    second.place
   ) {
     return canonicalizeBundle({
       ...first,
+      place: second.place,
       delayed_release: true,
       continuant: false,
       voice: second.voice,
       anterior: second.anterior,
-      // The release carries the laryngeal setting: an affricate written with
-      // an aspirated fricative should stay aspirated after derivation.
+      // The release carries the laryngeal setting and secondary articulation:
+      // an affricate written with an aspirated or labialized fricative should
+      // keep those marks after derivation.
       spread_glottis: second.spread_glottis,
       constricted_glottis: second.constricted_glottis,
+      labialized: second.labialized,
+      palatalized: second.palatalized,
+      velarized: second.velarized,
+      pharyngealized: second.pharyngealized,
+      long: second.long,
+      rhotic: second.rhotic,
+      lateral: second.lateral,
+      nasal: second.nasal,
     });
   }
 
