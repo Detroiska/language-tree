@@ -4328,6 +4328,59 @@ equal(
   [0, 0, 0]
 );
 
+/* ---- project store ------------------------------------------------------- */
+
+// store.js is a UI module, but the switch guard is worth testing directly:
+// stub the two globals it registers listeners on, then drive its API object.
+globalThis.window = {
+  location: { hash: "" },
+  addEventListener() {},
+  setTimeout() {
+    return 0;
+  },
+  clearTimeout() {},
+};
+globalThis.document = {
+  body: { classList: { contains: () => false } },
+  addEventListener() {},
+};
+const { store } = await import("../web/js/store.js");
+const { api } = await import("../web/js/api.js");
+const storeProjectA = JSON.parse(
+  JSON.stringify(ensureProject({ title: "Store A", languages: [] }))
+);
+const storeProjectB = JSON.parse(
+  JSON.stringify(ensureProject({ title: "Store B", languages: [] }))
+);
+api.saveProject = async () => ({ savedAt: new Date().toISOString() });
+api.listProjects = async () => ({
+  active: "a.json",
+  projects: [{ file: "a.json" }, { file: "b.json" }],
+});
+store.projectFile = "a.json";
+await store.load(storeProjectA);
+let selectionChanged = false;
+api.selectProject = async () => {
+  selectionChanged = true;
+  return { ok: true };
+};
+api.loadProject = async () => {
+  // An edit typed while the remote document is in flight.
+  store.touch({ label: "Edit during switch" });
+  return storeProjectB;
+};
+let switched = false;
+try {
+  switched = await store.switchProject("b.json");
+} catch {
+  // The switch is expected to abort and keep the edited project open.
+}
+equal(
+  "a project switch aborts when an edit arrives while loading",
+  [switched, store.project.title, store.projectFile, selectionChanged, store.dirty],
+  [false, "Store A", "a.json", false, true]
+);
+
 /* ---- summary ------------------------------------------------------------- */
 
 console.log(`${passed} passed, ${failures.length} failed`);

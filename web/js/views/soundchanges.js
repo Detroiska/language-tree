@@ -1052,35 +1052,38 @@ export function renderChanges(container, ctx) {
 
     notation.addEventListener("input", () => {
       rule.notation = notation.value;
-      ctx.touch({ label: "Edit rule" });
+      ctx.touch({ label: "Edit rule", coalesceKey: rule.id });
       updateRuleStatus(card, context, rule, parentDisabled);
       runTest();
       refreshCheckSoon();
     });
     note.addEventListener("input", () => {
       rule.note = note.value;
-      ctx.touch({ label: "Edit rule" });
+      ctx.touch({ label: "Edit rule", coalesceKey: rule.id });
     });
     const exceptionsInput = card.querySelector(".rule-exception-input");
     const exceptionCount = card.querySelector("[data-rule-exception-count]");
     exceptionsInput?.addEventListener("input", () => {
       rule.exceptions = normalizeRuleExceptions(exceptionsInput.value.split(","));
       if (exceptionCount) exceptionCount.textContent = exceptionSummary(rule.exceptions);
-      ctx.touch({ label: "Edit rule exceptions" });
+      ctx.touch({ label: "Edit rule exceptions", coalesceKey: rule.id });
       runTest();
       refreshCheckSoon();
     });
     optionalInput?.addEventListener("change", () => {
       rule.optional = optionalInput.checked;
       rule.rate = normalizeRuleRate(rule.rate);
-      ctx.touch({ label: rule.optional ? "Mark rule optional" : "Make rule mandatory" });
+      ctx.touch({
+        label: rule.optional ? "Mark rule optional" : "Make rule mandatory",
+        coalesceKey: rule.id,
+      });
       // Re-render so the optional picker and the rule badge reflect the change.
       ctx.refresh();
     });
     rateInput?.addEventListener("change", () => {
       rule.rate = normalizeRuleRate(rateInput.value);
       rateInput.value = String(rule.rate);
-      ctx.touch({ label: "Change optional rule rate" });
+      ctx.touch({ label: "Change optional rule rate", coalesceKey: rule.id });
       runTest();
       refreshCheckSoon();
     });
@@ -1089,11 +1092,14 @@ export function renderChanges(container, ctx) {
     stageInput?.addEventListener("change", () => {
       rule.date = normalizeRuleDate(stageInput.value);
       stageInput.value = rule.date === null ? "" : String(rule.date);
-      ctx.touch({ label: "Change rule stage" });
+      ctx.touch({ label: "Change rule stage", coalesceKey: rule.id });
     });
     toggle.addEventListener("change", () => {
       rule.enabled = toggle.checked;
-      ctx.touch({ label: rule.enabled ? "Enable rule" : "Disable rule" });
+      ctx.touch({
+        label: rule.enabled ? "Enable rule" : "Disable rule",
+        coalesceKey: rule.id,
+      });
       // Re-render so children of a disabled parent also show that they are
       // inactive. The rule tester and inherited check rerun with the view.
       ctx.refresh();
@@ -1104,12 +1110,12 @@ export function renderChanges(container, ctx) {
     });
     card.querySelector("[data-rule-up]")?.addEventListener("click", () => {
       if (!moveRule(rule, -1)) return;
-      ctx.touch({ label: "Move rule" });
+      ctx.touch({ label: "Move rule", coalesceKey: rule.id });
       ctx.refresh();
     });
     card.querySelector("[data-rule-down]")?.addEventListener("click", () => {
       if (!moveRule(rule, 1)) return;
-      ctx.touch({ label: "Move rule" });
+      ctx.touch({ label: "Move rule", coalesceKey: rule.id });
       ctx.refresh();
     });
     card.querySelector("[data-rule-delete]")?.addEventListener("click", () => {
@@ -1117,7 +1123,7 @@ export function renderChanges(container, ctx) {
         const index = language.soundChanges.indexOf(rule);
         if (index < 0) return;
         const [removed] = language.soundChanges.splice(index, 1);
-        ctx.touch({ label: "Delete rule" });
+        ctx.touch({ label: "Delete rule", coalesceKey: rule.id });
         ctx.refresh();
         toast("Rule deleted.", {
           type: "info",
@@ -1126,7 +1132,7 @@ export function renderChanges(container, ctx) {
             label: "Undo",
             onClick: () => {
               language.soundChanges.splice(index, 0, removed);
-              ctx.touch({ label: "Restore rule" });
+              ctx.touch({ label: "Restore rule", coalesceKey: removed.id });
               ctx.refresh();
             },
           },
@@ -1139,7 +1145,7 @@ export function renderChanges(container, ctx) {
       const index = language.soundChanges.indexOf(group.rule);
       const extra = block.length - 1;
       language.soundChanges.splice(index, block.length);
-      ctx.touch({ label: extra ? "Delete rule group" : "Delete rule" });
+      ctx.touch({ label: extra ? "Delete rule group" : "Delete rule", coalesceKey: rule.id });
       ctx.refresh();
       toast(
         extra

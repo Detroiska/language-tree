@@ -747,7 +747,7 @@ export function renderAllophony(container, ctx) {
 
     notation.addEventListener("input", () => {
       rule.notation = notation.value;
-      ctx.touch({ label: "Edit allophony rule" });
+      ctx.touch({ label: "Edit allophony rule", coalesceKey: rule.id });
       const next = parentDisabled
         ? { kind: "off", label: "Group disabled" }
         : statusFor(rule, contextForAllophony(ctx.project, language.id));
@@ -759,14 +759,14 @@ export function renderAllophony(container, ctx) {
     });
     note.addEventListener("input", () => {
       rule.note = note.value;
-      ctx.touch({ label: "Edit allophony note" });
+      ctx.touch({ label: "Edit allophony note", coalesceKey: rule.id });
     });
     const exceptionsInput = card.querySelector(".rule-exception-input");
     const exceptionCount = card.querySelector("[data-allo-rule-exception-count]");
     exceptionsInput?.addEventListener("input", () => {
       rule.exceptions = normalizeRuleExceptions(exceptionsInput.value.split(","));
       if (exceptionCount) exceptionCount.textContent = exceptionSummary(rule.exceptions);
-      ctx.touch({ label: "Edit allophony rule exceptions" });
+      ctx.touch({ label: "Edit allophony rule exceptions", coalesceKey: rule.id });
       runTest();
       refreshTable();
     });
@@ -775,19 +775,20 @@ export function renderAllophony(container, ctx) {
       if (limitInput) limitInput.disabled = !iterativeInput.checked;
       ctx.touch({
         label: rule.iterative ? "Repeat allophony until stable" : "Apply allophony once",
+        coalesceKey: rule.id,
       });
       runTest();
     });
     domainInput?.addEventListener("change", () => {
       rule.domain = normalizeAllophonyDomain(domainInput.value);
-      ctx.touch({ label: "Change allophony domain" });
+      ctx.touch({ label: "Change allophony domain", coalesceKey: rule.id });
       runTest();
       refreshTable();
     });
     limitInput?.addEventListener("change", () => {
       rule.repeatLimit = normalizeAllophonyRepeatLimit(limitInput.value);
       limitInput.value = String(rule.repeatLimit);
-      ctx.touch({ label: "Change allophony pass limit" });
+      ctx.touch({ label: "Change allophony pass limit", coalesceKey: rule.id });
       runTest();
     });
     optionalInput?.addEventListener("change", () => {
@@ -800,12 +801,15 @@ export function renderAllophony(container, ctx) {
     rateInput?.addEventListener("change", () => {
       rule.rate = normalizeRuleRate(rateInput.value);
       rateInput.value = String(rule.rate);
-      ctx.touch({ label: "Change optional allophony rate" });
+      ctx.touch({ label: "Change optional allophony rate", coalesceKey: rule.id });
       runTest();
     });
     toggle.addEventListener("change", () => {
       rule.enabled = toggle.checked;
-      ctx.touch({ label: rule.enabled ? "Enable allophony rule" : "Disable allophony rule" });
+      ctx.touch({
+        label: rule.enabled ? "Enable allophony rule" : "Disable allophony rule",
+        coalesceKey: rule.id,
+      });
       ctx.refresh();
     });
 
@@ -814,7 +818,7 @@ export function renderAllophony(container, ctx) {
       const index = collection.indexOf(rule);
       if (index <= 0) return;
       [collection[index - 1], collection[index]] = [collection[index], collection[index - 1]];
-      ctx.touch({ label: "Move allophony rule" });
+      ctx.touch({ label: "Move allophony rule", coalesceKey: rule.id });
       ctx.refresh();
     });
     card.querySelector("[data-allo-rule-down]")?.addEventListener("click", () => {
@@ -822,7 +826,7 @@ export function renderAllophony(container, ctx) {
       const index = collection.indexOf(rule);
       if (index < 0 || index >= collection.length - 1) return;
       [collection[index], collection[index + 1]] = [collection[index + 1], collection[index]];
-      ctx.touch({ label: "Move allophony rule" });
+      ctx.touch({ label: "Move allophony rule", coalesceKey: rule.id });
       ctx.refresh();
     });
     card.querySelector("[data-allo-rule-delete]")?.addEventListener("click", () => {
@@ -830,7 +834,7 @@ export function renderAllophony(container, ctx) {
       const index = collection.indexOf(rule);
       if (index < 0) return;
       const [removed] = collection.splice(index, 1);
-      ctx.touch({ label: "Delete allophony rule" });
+      ctx.touch({ label: "Delete allophony rule", coalesceKey: rule.id });
       ctx.refresh();
       toast("Allophony rule deleted.", {
         type: "info",
@@ -840,7 +844,7 @@ export function renderAllophony(container, ctx) {
           onClick: () => {
             const current = findLanguage(ctx.project, language.id);
             if (!current || !restoreAllophonyRule(current, removed, parentGroup, index)) return;
-            ctx.touch({ label: "Restore allophony rule" });
+            ctx.touch({ label: "Restore allophony rule", coalesceKey: removed.id });
             ctx.refresh();
           },
         },

@@ -87,9 +87,27 @@ class ProjectStore {
     }
     // Fetch before changing the active pointer or the open document: a broken
     // or missing file must leave the current project exactly as it was.
-    const remote = await api.loadProject(file);
-    await api.selectProject(file);
     const previousFile = this.projectFile;
+    const revisionAtStart = this.revision;
+    const wasDirty = this.dirty;
+    const remote = await api.loadProject(file);
+    const changedDuringLoad = () =>
+      wasDirty || this.dirty || this.revision !== revisionAtStart || this.#inFlight;
+    if (changedDuringLoad()) {
+      throw new Error("The project changed while it was loading. Your edits are still here; try switching again.");
+    }
+    await api.selectProject(file);
+    if (changedDuringLoad()) {
+      // Do not leave the startup pointer on a project this tab did not open.
+      if (previousFile && previousFile !== file) {
+        try {
+          await api.selectProject(previousFile);
+        } catch {
+          // The in-memory project is still intact; a stale pointer is harmless.
+        }
+      }
+      throw new Error("The project changed while it was loading. Your edits are still here; try switching again.");
+    }
     this.projectFile = file;
     try {
       await this.load(remote);
