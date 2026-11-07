@@ -28,11 +28,33 @@ function lastWordWithGloss(vocabulary, gloss) {
 // split the gloss apart.
 const ALIGNED_DELIMITER = "aligned";
 
+// Delimiter detection must ignore separators inside quoted fields: a gloss
+// like `"hello; world"` must not turn an otherwise comma-separated paste into
+// a semicolon table. Doubled quotes are escapes, same as splitQuotedRows.
+function unquotedText(line) {
+  let text = "";
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        index += 1;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes) text += character;
+  }
+  return text;
+}
+
 function detectDelimiter(text) {
-  if (text.includes("\t")) return "\t";
-  if (text.includes(";")) return ";";
-  if (text.includes(",")) return ",";
-  if (/\S\s{2,}\S/.test(text)) return ALIGNED_DELIMITER;
+  const unquoted = unquotedText(text);
+  if (unquoted.includes("\t")) return "\t";
+  if (unquoted.includes(";")) return ";";
+  if (unquoted.includes(",")) return ",";
+  if (/\S\s{2,}\S/.test(unquoted)) return ALIGNED_DELIMITER;
   return " ";
 }
 
