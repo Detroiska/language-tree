@@ -2655,6 +2655,43 @@ equal(
   resolver.bundleFor("t͡sʰ").spread_glottis,
   true
 );
+const crossPlaceAffricate = resolver.bundleFor("t͡ʃʰ");
+equal(
+  "a cross-place affricate takes the release place",
+  [crossPlaceAffricate?.place, crossPlaceAffricate?.place === resolver.bundleFor("t͡ʃ").place],
+  ["postalveolar", true]
+);
+equal(
+  "a cross-place affricate keeps release aspiration",
+  featureDistance(crossPlaceAffricate, {
+    ...resolver.bundleFor("t͡ʃ"),
+    spread_glottis: true,
+  }),
+  0
+);
+const labializedPostalveolar = resolver.bundleFor("d͡ʒʷ");
+equal(
+  "a labialized cross-place affricate keeps its modifier",
+  [
+    featureDistance(labializedPostalveolar, {
+      ...resolver.bundleFor("d͡ʒ"),
+      labialized: true,
+    }),
+    labializedPostalveolar?.labialized,
+    labializedPostalveolar?.voice,
+  ],
+  [0, true, true]
+);
+equal(
+  "a labialized labiodental affricate derives its release place",
+  [resolver.bundleFor("p͡fʷ")?.place, resolver.bundleFor("p͡fʷ")?.labialized],
+  ["labiodental", true]
+);
+equal(
+  "a labialized velar affricate keeps its modifier",
+  resolver.bundleFor("k͡xʷ")?.labialized,
+  true
+);
 equal(
   "feature members enumerate the charted nasals",
   featureMembers(["m", "n", "s", "p"], resolver, [{ kind: "bool", feature: "nasal", value: true }]),
