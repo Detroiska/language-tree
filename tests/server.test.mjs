@@ -597,6 +597,12 @@ try {
   });
   equal("HEAD checks the Host header too", badHeadHost.status, 403);
   equal("HEAD rejects with the JSON envelope", badHeadHost.headers["content-type"], "application/json; charset=utf-8");
+  equal("HEAD sends no JSON error body", badHeadHost.text, "");
+  equal(
+    "HEAD reports the GET body length without sending it",
+    badHeadHost.headers["content-length"],
+    badHost.headers["content-length"]
+  );
   const goodHead = await rawCall(server, { method: "HEAD", path: "/index.html" });
   equal("HEAD still serves static metadata", goodHead.status, 200);
 
