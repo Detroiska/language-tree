@@ -2085,6 +2085,68 @@ equal(
   migratedNotation.languages[0].inventory.consonants.cells["r_Plosive|c_Bilabial"],
   ["p", "b"]
 );
+
+// Interior groups migrate their cell to the group's leftmost leaf. Earlier
+// versions wrote that result back into the object being iterated, so a later
+// leaf entry for the same column could overwrite it depending on JSON order.
+function chartMigrationProject(cells) {
+  return ensureProject({
+    title: "Chart migration order",
+    languages: [
+      {
+        id: "only",
+        name: "Only",
+        parentId: null,
+        inventory: {
+          consonants: {
+            rows: [
+              {
+                id: "r_group",
+                label: "Group",
+                children: [
+                  { id: "r_first", label: "First", children: [] },
+                  { id: "r_second", label: "Second", children: [] },
+                ],
+              },
+            ],
+            columns: [{ id: "c_only", label: "Only", children: [] }],
+            cells,
+            notes: "",
+          },
+          vowels: defaultInventory().vowels,
+        },
+        soundChanges: [],
+        allophony: [],
+        vocabulary: [],
+      },
+    ],
+  }).languages[0].inventory.consonants;
+}
+const interiorFirstCells = {
+  "r_group|c_only": ["ʔ"],
+  "r_second|c_only": ["m"],
+};
+const leafFirstCells = {
+  "r_second|c_only": ["m"],
+  "r_group|c_only": ["ʔ"],
+};
+const interiorFirstChart = chartMigrationProject(interiorFirstCells);
+const leafFirstChart = chartMigrationProject(leafFirstCells);
+equal(
+  "an interior chart cell migrates to the first leaf",
+  interiorFirstChart.cells["r_first|c_only"],
+  ["ʔ"]
+);
+equal(
+  "chart migration is independent of JSON key order",
+  Object.entries(leafFirstChart.cells).sort(),
+  Object.entries(interiorFirstChart.cells).sort()
+);
+equal(
+  "the leaf cell keeps its own sounds next to the migrated ones",
+  leafFirstChart.cells["r_second|c_only"],
+  ["m"]
+);
 equal(
   "word form delimiters are stripped on load",
   migratedNotation.languages[0].vocabulary.map((word) => word.form),

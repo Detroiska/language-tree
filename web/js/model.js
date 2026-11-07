@@ -201,15 +201,16 @@ function ensureChart(chart, fallbackFactory, kind) {
   };
   const rowAnchors = anchorMap(base.rows);
   const columnAnchors = anchorMap(base.columns);
-  // Drop malformed cell values but keep valid phoneme arrays.
+  // Drop malformed cell values but keep valid phoneme arrays. Migrations
+  // accumulate in a separate object: writing them back into base.cells while
+  // iterating its snapshot let a later leaf entry overwrite an earlier
+  // interior-group merge, so the same document depended on JSON key order.
+  const cells = {};
   for (const [key, value] of Object.entries(base.cells)) {
     const { rowId, columnId } = splitCellKey(key);
     const rowTarget = rowAnchors.get(rowId);
     const columnTarget = columnAnchors.get(columnId);
-    if (!rowTarget || !columnTarget || !Array.isArray(value)) {
-      delete base.cells[key];
-      continue;
-    }
+    if (!rowTarget || !columnTarget || !Array.isArray(value)) continue;
     const values = [
       ...new Set(
         value
@@ -218,20 +219,14 @@ function ensureChart(chart, fallbackFactory, kind) {
           .filter(Boolean)
       ),
     ];
-    if (!values.length) {
-      delete base.cells[key];
-      continue;
-    }
+    if (!values.length) continue;
     const targetKey = cellKey(rowTarget, columnTarget);
-    if (targetKey === key) {
-      base.cells[key] = values;
-      continue;
-    }
-    // Migrate: merge into the leaf cell, deduping sounds already there.
-    const merged = [...new Set([...(base.cells[targetKey] || []), ...values])];
-    delete base.cells[key];
-    if (merged.length) base.cells[targetKey] = merged;
+    // Migrate interior keys and direct leaf entries into one leaf cell,
+    // deduping sounds already there regardless of iteration order.
+    const merged = [...new Set([...(cells[targetKey] || []), ...values])];
+    if (merged.length) cells[targetKey] = merged;
   }
+  base.cells = cells;
   return base;
 }
 
