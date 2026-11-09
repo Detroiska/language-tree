@@ -19,7 +19,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,6 +139,47 @@ async function stopServer(server, { removeRoot = true } = {}) {
   // A second process may still use the shared directory as its cwd; the last
   // owner of the root removes it.
   if (removeRoot) rmSync(server.root, { recursive: true, force: true });
+}
+
+function spawnServer(python, root, port) {
+  const child = spawn(python, ["-u", join(root, "server.py"), "--no-browser", "--port", String(port)], {
+    cwd: root,
+    env: { ...process.env, PYTHONUNBUFFERED: "1" },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  return { child, output: () => ({ stdout, stderr }) };
+}
+
+function waitForExit(started, timeout = 8000) {
+  return new Promise((resolve, reject) => {
+    if (started.child.exitCode !== null) {
+      resolve({ code: started.child.exitCode, timedOut: false, ...started.output() });
+      return;
+    }
+    const timer = setTimeout(() => {
+      started.child.kill("SIGKILL");
+      resolve({ code: null, timedOut: true, ...started.output() });
+    }, timeout);
+    started.child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    started.child.once("exit", (code) => {
+      clearTimeout(timer);
+      resolve({ code, timedOut: false, ...started.output() });
+    });
+  });
 }
 
 async function call(server, path, options = {}) {
@@ -605,6 +646,53 @@ try {
   );
   const goodHead = await rawCall(server, { method: "HEAD", path: "/index.html" });
   equal("HEAD still serves static metadata", goodHead.status, 200);
+
+  /* ---- duplicate server prevention -------------------------------------- */
+
+  // Windows SO_REUSEADDR lets a second process bind an occupied port, so two
+  // servers end up splitting requests; stale instances then answer the page
+  // shell while failing the API. A repeat launch must refuse instead.
+  const duplicate = spawnServer(python, server.root, new URL(server.url).port);
+  const duplicateExit = await waitForExit(duplicate);
+  equal(
+    "a second server on the same port exits instead of sharing it",
+    [duplicateExit.code, duplicateExit.timedOut],
+    [0, false]
+  );
+  truthy(
+    "the second server explains that the app is already running",
+    /already running/i.test(duplicateExit.stdout)
+  );
+  truthy(
+    "the second server does not reach the listening banner",
+    !/Press Ctrl\+C to stop/.test(duplicateExit.stdout)
+  );
+
+  // A port owned by an unrelated program must fail clearly, not half-start.
+  const blocker = createServer((request, response) => {
+    response.statusCode = 404;
+    response.end("not Language Tree");
+  });
+  const blockerPort = await new Promise((resolve, reject) => {
+    blocker.once("error", reject);
+    blocker.listen(0, "127.0.0.1", () => resolve(blocker.address().port));
+  });
+  try {
+    const blocked = spawnServer(python, server.root, blockerPort);
+    const blockedExit = await waitForExit(blocked);
+    equal(
+      "a port owned by another program is refused",
+      [blockedExit.code, blockedExit.timedOut],
+      [1, false]
+    );
+    truthy(
+      "the port-in-use error is actionable",
+      /Cannot start[\s\S]*already in use/i.test(blockedExit.stdout + blockedExit.stderr)
+    );
+  } finally {
+    blocker.closeAllConnections?.();
+    await new Promise((resolve) => blocker.close(resolve));
+  }
 
   /* ---- two instances sharing one data directory (#57) -------------------- */
 
