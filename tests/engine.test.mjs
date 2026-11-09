@@ -224,6 +224,50 @@ truthy(
   "a consonant cluster is not mistaken for a mistyped class",
   literalCluster.ok && !literalCluster.warnings?.length
 );
+const shortTypo = compileRule("t > k / _ bak", typoCtx);
+truthy(
+  "a three-letter literal run still warns",
+  shortTypo.ok && shortTypo.warnings?.some((warning) => warning.includes("bak") && warning.includes("literal"))
+);
+const glideConsonants = makeChart(
+  ["Plosive", "Glide"],
+  ["Bilabial", "Alveolar", "Palatal"],
+  [
+    ["Plosive", "Bilabial", ["p"]],
+    ["Plosive", "Alveolar", ["t"]],
+    ["Glide", "Bilabial", ["w"]],
+    ["Glide", "Palatal", ["j"]],
+  ]
+);
+const glideVowels = makeChart(
+  ["Open", "Mid"],
+  ["Front", "Back"],
+  [
+    ["Open", "Front", ["a"]],
+    ["Open", "Back", ["ɑ"]],
+    ["Mid", "Front", ["e"]],
+    ["Mid", "Back", ["o"]],
+  ]
+);
+const glideCtx = contextForInventory({ consonants: glideConsonants, vowels: glideVowels });
+const glideApply = (notation, form) => {
+  const compiled = compileRule(notation, glideCtx);
+  if (!compiled.ok) return { error: compiled.error };
+  const tokens = glideCtx.tokenize(form);
+  return { out: applyRule(tokens, compiled.rule, glideCtx).tokens.join("") };
+};
+const diphthongAw = compileRule("aw > o", glideCtx);
+truthy(
+  "a two-letter diphthong stays quiet about its literal reading",
+  diphthongAw.ok && !(diphthongAw.warnings?.length > 0)
+);
+const diphthongAj = compileRule("aj > e", glideCtx);
+truthy(
+  "a palatal two-letter diphthong stays quiet too",
+  diphthongAj.ok && !(diphthongAj.warnings?.length > 0)
+);
+equal("the diphthong rule still applies as written", glideApply("aw > o", "paw"), { out: "po" });
+equal("the palatal diphthong rule still applies", glideApply("aj > e", "paj"), { out: "pe" });
 
 /* ---- tokenizer ---------------------------------------------------------- */
 

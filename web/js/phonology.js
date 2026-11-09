@@ -1030,12 +1030,14 @@ function categoryForText(text, context) {
 }
 
 // A bare unspaced run of letters that is not a class or category falls back
-// to literal sounds. That is useful for short sequences (`_nt`, `_ai`), but it
-// makes a mistyped class name look valid when every letter happens to be a
-// charted phoneme. Warn only for word-like runs (both a vowel and a consonant)
-// so ordinary consonant clusters and vowel sequences stay quiet.
+// to literal sounds. That is useful for short sequences (`_nt`, `_ai`, and
+// two-letter diphthongs like `aw`/`aj`), but it makes a mistyped class name
+// look valid when every letter happens to be a charted phoneme. Warn only for
+// word-like runs of three letters or more (both a vowel and a consonant) so
+// short clusters, vowel sequences, and diphthongs stay quiet; a mistyped
+// class or category name is almost always longer.
 function literalWordWarning(chunk, segments, context) {
-  if (segments.length < 2 || !/^\p{L}{2,}$/u.test(chunk)) return "";
+  if (segments.length < 2 || !/^\p{L}{3,}$/u.test(chunk)) return "";
   if (!segments.every((segment) => context.vowels.has(segment) || context.consonants.has(segment))) return "";
   const hasVowel = segments.some((segment) => context.isVowel(segment));
   const hasConsonant = segments.some((segment) => context.isConsonant(segment));
