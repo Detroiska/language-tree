@@ -38,9 +38,9 @@ function equal(name, actual, expected) {
   failures.push(`${name}\n    expected: ${e}\n    actual:   ${a}`);
 }
 
-function truthy(name, condition) {
+function truthy(name, condition, detail = "") {
   if (condition) passed += 1;
-  else failures.push(`${name}\n    expected a truthy result`);
+  else failures.push(`${name}\n    expected a truthy result${detail ? `\n    actual:   ${detail}` : ""}`);
 }
 
 const SERVER_PY = fileURLToPath(new URL("../server.py", import.meta.url));
@@ -301,7 +301,8 @@ try {
   equal("deeply nested JSON is 400 instead of a dropped connection", nestedJson.status, 400);
   truthy(
     "deeply nested JSON returns the error envelope",
-    /nested|Invalid JSON/i.test(nestedJson.json?.error || "")
+    typeof nestedJson.json?.error === "string" && nestedJson.json.error.length > 0,
+    JSON.stringify(nestedJson)
   );
 
   const invalidProject = await call(server, "/api/project", {

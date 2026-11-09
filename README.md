@@ -358,7 +358,7 @@ git add -f data/my_family.json
 git commit -m "Document Old Coastal sound changes"
 ```
 
-The server writes atomically (`.json.tmp` then replace), so an interrupted save does not leave a half-written project. For projects kept outside git, the JSON backup download is a portable snapshot; copy the file aside before risky edits if you want another safety net.
+The server writes atomically (a unique temporary file, then replace), so an interrupted save does not leave a half-written project. For projects kept outside git, the JSON backup download is a portable snapshot; copy the file aside before risky edits if you want another safety net.
 
 
 ## Development
@@ -366,12 +366,13 @@ The server writes atomically (`.json.tmp` then replace), so an interrupted save 
 The app itself has no runtime dependencies. Optional linting uses npm for ESLint and Ruff for Python:
 
 ```sh
-npm install       # ESLint
-npm test          # engine, bulk, and server suites
-npm run lint      # ESLint over web/js and tests, Ruff over server.py
+npm install                  # ESLint
+python -m pip install ruff   # Ruff
+npm test                     # suites listed in package.json
+npm run lint                 # ESLint over web/js and tests, Ruff over server.py
 ```
 
-`npm test` runs the three plain-Node suites; each can also be run directly. The server suite also needs Python 3.10+ because it launches a temporary copy of `server.py`:
+`npm test` runs the plain-Node suites listed in `package.json`; each can also be run directly. Add a new suite to `package.json` and `.github/workflows/tests.yml` so local and CI runs pick it up. The server suite also needs Python 3.10+ because it launches a temporary copy of `server.py`:
 
 ```sh
 node tests/engine.test.mjs
@@ -381,7 +382,7 @@ node tests/server.test.mjs
 
 The engine suite covers rule compilation and application, chart-derived classes, the IPA feature table and per-language overrides, the IPA-table collision audit, feature queries, feature deltas and α-notation, feature bundles in categories and phonotactics, echo outputs (literal exchange, class metathesis, category and chart-class echoes, glued lengthening and labialization, echo-with-deletion, allophony surfaces and phoneme-table inhibition, and their compile-time rejections), the attested sound-change library (every shipped rule compiles warning-free against a reference inventory, draft shapes and ids, and historical spot checks), the X-SAMPA converter (curated-table round trips with the documented foldings, digraph and underscore binding precedence, whole-form survival, and passthrough behavior), the stage migration and family timeline grouping (integer normalization, on-load stage fields, ascending stages with stored order, and the undated bucket), the tokenizer (including tie-bar affricates), inert-rule warnings, phonotactic constraints, stress placement and display across all systems, weight-sensitive heavy syllables (including macron nuclei), stress- and syllable-conditioned rules, morpheme-cut tokenization/display and cut-conditioned sound changes and allophony (including insertion and deletion at a cut), cut-preserving reconstruction, reconstruction of unchanged, one-to-one, merger, insertion, deletion, feature, sequential, and parallel alternatives, parent-lexicon evidence and gloss normalization, per-rule lexical exceptions (gloss normalization, case and whitespace matching, sequential and lineage application, exception step markers, allophony skips including iterative rules, reconstruction skips, and migration defaults), optional sound changes and allophony (migration defaults and rate clamping, primary-path skips, forced variants, optional top-level groups and independent children, rule listings, the primary allophone table, and reconstruction across skipped/applied combinations), subgrouping support/weak/unsupported classification, notation delimiter stripping, allophony parsing/order/surface forms, chained allophony feeding, iterative allophony with pass limits and runaway warnings, word- and syllable-bounded harmony, feature allophones and off-chart surface synthesis, rule groups and dotted numbering, non-charted allophone tokenization, allophony inheritance without historical leakage, project migration (including id normalization for languages, rules, and words), the Markdown/HTML report builders, plus segment-level diff alignment, correspondence alignment and tabulation (recorded vs. derived, irregular singletons, insertions), rule-inertness explanations and top-level conflict detection, the lexicon analytics computations, and the class-autocomplete query/ranking policy. The bulk suite covers the word-list parser: RFC 4180 quoting (delimiters, doubled quotes, and line breaks inside quoted fields), headers in both column orders, delimiter detection, the JSON fast path and its table fallback, and the add/update/skip duplicate modes. The server suite starts an isolated copy of `server.py` on an ephemeral port and covers JSON error envelopes for unsupported methods, empty and oversized request bodies, gzip round trips and truncation, revision conflicts, concurrent reads and writes, the loopback Host check, and the framing/cache/CSP headers.
 
-`npm run lint` runs ESLint over `web/js` and `tests` and Ruff over `server.py` (install Ruff with `pip install ruff` if it is not already on `PATH`). CI runs the linters and all three Node suites on every pull request and on `main`.
+`npm run lint` runs ESLint over `web/js` and `tests` and Ruff over `server.py` (install Ruff with `pip install ruff` if it is not already on `PATH`). CI runs the linters and the suites listed in `.github/workflows/tests.yml` on every pull request and on `main`.
 
 ## Project layout
 
@@ -466,11 +467,12 @@ The ledger of language IDs and tree links is kept as a simple adjacency list (`p
 
 ## API
 
-The local server exposes only three endpoints:
+The local server exposes four paths:
 
-- `GET /api/project` — read the complete project.
-- `PUT /api/project` — validate and atomically replace the complete project.
 - `GET /api/health` — return a small liveness response.
+- `GET /api/projects` — list project files and the active one.
+- `GET`/`PUT /api/project` — read or atomically replace a project. Both accept an optional `?file=<name>`; `PUT` also accepts `X-Base-Revision` and rejects a save based on an outdated `updatedAt`.
+- `PUT /api/projects/active` — remember the active project.
 
 It binds to `127.0.0.1` by default. Set `--host 0.0.0.0` only on a trusted network; there is no authentication layer.
 
