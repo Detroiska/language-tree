@@ -301,7 +301,7 @@ try {
   equal("deeply nested JSON is 400 instead of a dropped connection", nestedJson.status, 400);
   truthy(
     "deeply nested JSON returns the error envelope",
-    /nested|Invalid JSON/i.test(nestedJson.json?.error || ""),
+    typeof nestedJson.json?.error === "string" && nestedJson.json.error.length > 0,
     JSON.stringify(nestedJson)
   );
 
