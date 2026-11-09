@@ -5,6 +5,7 @@ import {
   formatDate,
   getLineage,
   languageStats,
+  languagesInTreeOrder,
   projectStats,
   rootLanguages,
   ruleNumberMap,
@@ -38,21 +39,6 @@ function backtickFence(lines) {
 }
 
 /* ---- shared build helpers ---------------------------------------------- */
-
-function treeOrder(project) {
-  const order = [];
-  const walk = (parentId) => {
-    for (const child of childrenOf(project, parentId)) {
-      order.push(child);
-      walk(child.id);
-    }
-  };
-  for (const root of rootLanguages(project)) {
-    order.push(root);
-    walk(root.id);
-  }
-  return order;
-}
 
 function familyTreeLines(project) {
   const collect = (parentId, prefix) => {
@@ -93,7 +79,7 @@ function chartTableData(chart) {
 // grouped case-insensitively on the normalized gloss (the same convention the
 // vocabulary tables and the cognate explorer use). First form per gloss wins.
 function cognateData(project) {
-  const order = treeOrder(project);
+  const order = languagesInTreeOrder(project);
   const sets = new Map();
   for (const language of order) {
     for (const word of language.vocabulary) {
@@ -308,7 +294,7 @@ export function buildMarkdown(project) {
     `# ${mdCell(project.title)}`,
     generated,
     `## Family tree\n\n${sketch.length ? `${fence}\n${sketch.join("\n")}\n${fence}` : "_No languages yet._"}`,
-    ...treeOrder(project).map((language) => mdLanguageSection(project, language)),
+    ...languagesInTreeOrder(project).map((language) => mdLanguageSection(project, language)),
     cognateMarkdown(project),
   ];
   return `${parts.join("\n\n").trim()}\n`;
@@ -469,7 +455,7 @@ td.form { font-family: "Cascadia Mono", Consolas, "Apple Symbols", monospace; ba
 `.trim();
 
 export function buildHtml(project) {
-  const order = treeOrder(project);
+  const order = languagesInTreeOrder(project);
   const stats = projectStats(project);
   const generated = formatDate(new Date().toISOString());
   const sketch = familyTreeLines(project);

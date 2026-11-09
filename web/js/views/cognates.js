@@ -1,5 +1,5 @@
 import { normalizeGloss } from "../gloss.js";
-import { findLanguage, getLineage, uid } from "../model.js";
+import { findLanguage, getLineage, languagesInTreeOrder, uid } from "../model.js";
 import {
   compileChainFrom,
   deriveStages,
@@ -30,14 +30,6 @@ function wordsWithForms(language) {
   return language.vocabulary.filter((word) => word.gloss.trim() && word.form.trim());
 }
 
-/* Root-first ordering that keeps sibling order at each depth. */
-function languagesByDepth(project) {
-  return project.languages
-    .map((language, order) => ({ language, depth: getLineage(project, language.id).length - 1, order }))
-    .sort((a, b) => a.depth - b.depth || a.order - b.order)
-    .map((item) => item.language);
-}
-
 function recordedFor(targetLanguage, gloss) {
   const key = normalizeGloss(gloss);
   if (!key) return null;
@@ -54,7 +46,7 @@ function recordedFor(targetLanguage, gloss) {
  */
 function buildRows(project, source) {
   const rows = [];
-  for (const language of languagesByDepth(project)) {
+  for (const language of languagesInTreeOrder(project)) {
     const depth = getLineage(project, language.id).length - 1;
     if (language.id === source.id) {
       rows.push({
@@ -534,6 +526,7 @@ function correspondencePanelMarkup(data, source) {
 
 function traceMarkup(project, source, word, rows, optionalRuleIds = []) {
   const usable = rows.filter((row) => row.descended);
+  const sourceDepth = getLineage(project, source.id).length - 1;
   const outside = rows.length - usable.length;
   const showSurface = usable.some((row) => hasSurfaceDisplay(row.language));
 
@@ -555,7 +548,7 @@ function traceMarkup(project, source, word, rows, optionalRuleIds = []) {
       const recordLabel = status.kind === "differs" ? "Use derived" : "Record";
       return `
         <tr${row.isSource ? ' class="is-source-row"' : ""}>
-          <td class="cognate-lang"><span class="cognate-lang-name" style="--cognate-depth:${row.depth}">${esc(row.language.name)}</span></td>
+          <td class="cognate-lang"><span class="cognate-lang-name" style="--cognate-depth:${row.depth - sourceDepth}">${esc(row.language.name)}</span></td>
           <td>${pathMarkup(row)}</td>
           <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(cell.derived)) || "—"}</code></td>
           ${showSurface ? `<td><code class="ipa surface-form">${esc(formatPhonetic(cell.surface)) || "—"}</code></td>` : ""}
@@ -610,7 +603,7 @@ function traceMarkup(project, source, word, rows, optionalRuleIds = []) {
 
 export function renderCognates(container, ctx) {
   const { project, route } = ctx;
-  const ordered = languagesByDepth(project);
+  const ordered = languagesInTreeOrder(project);
 
   let source = route.id && findLanguage(project, route.id) ? findLanguage(project, route.id) : null;
   if (!source) {
