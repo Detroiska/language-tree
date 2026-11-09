@@ -10,8 +10,11 @@ on the next run.
 from __future__ import annotations
 
 import argparse
+import errno
+import http.client
 import json
 import os
+import sys
 import tempfile
 import threading
 import webbrowser
@@ -529,6 +532,32 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         self.method_not_allowed()
 
 
+class LanguageTreeHTTPServer(ThreadingHTTPServer):
+    """HTTP server that refuses to share its port with another instance."""
+
+    # Python enables SO_REUSEADDR by default. On Windows that lets a second
+    # process bind a port that is already listening, and the two servers then
+    # split incoming requests unpredictably. Dropping the reusable bind on
+    # Windows makes the second launch fail instead of serving half-broken pages.
+    allow_reuse_address = os.name != "nt"
+
+
+def running_instance(host: str, port: int) -> bool:
+    """True when an existing Language Tree server already answers on host:port."""
+    connection = http.client.HTTPConnection(host, port, timeout=1.5)
+    try:
+        connection.request("GET", "/api/health")
+        response = connection.getresponse()
+        if response.status != HTTPStatus.OK:
+            return False
+        payload = json.loads(response.read(64 * 1024).decode("utf-8"))
+    except (OSError, ValueError, http.client.HTTPException):
+        return False
+    finally:
+        connection.close()
+    return isinstance(payload, dict) and payload.get("ok") is True
+
+
 def ensure_data_files() -> None:
     """Create a first project and keep the active-project pointer usable."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -556,9 +585,37 @@ def main() -> None:
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically")
     args = parser.parse_args()
 
+    host = args.host.strip()
+    if args.port and host.lower() in LOOPBACK_BINDS:
+        url = f"http://{host}:{args.port}/"
+        if running_instance(host, args.port):
+            # A repeat launch (common when start.bat is double-clicked again)
+            # should reach the app, not create a second server that competes
+            # with the first for requests on the same port.
+            print()
+            print("  Language Tree is already running.")
+            print(f"  {url}")
+            print("  Stop the existing server first to restart it.")
+            print()
+            if not args.no_browser:
+                webbrowser.open(url)
+            return
+
     ensure_data_files()
     active = resolve_active_name()
-    server = ThreadingHTTPServer((args.host, args.port), LanguageTreeHandler)
+    try:
+        server = LanguageTreeHTTPServer((args.host, args.port), LanguageTreeHandler)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        print(file=sys.stderr)
+        print(f"  Cannot start: {host}:{args.port} is already in use.", file=sys.stderr)
+        print("  Another program, or a stale Language Tree server, owns this port.", file=sys.stderr)
+        print("  Close it, or start on another port:", file=sys.stderr)
+        print("    python server.py --port 9000", file=sys.stderr)
+        print(f"  On Windows, find the owner with: netstat -ano | findstr :{args.port}", file=sys.stderr)
+        print(file=sys.stderr)
+        raise SystemExit(1) from exc
     # Loopback binds serve this machine only, so the Host header must say so
     # too; any other name is treated as a rebinding attempt. Non-loopback
     # binds serve a network deliberately and skip the check.
