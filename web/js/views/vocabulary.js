@@ -452,7 +452,6 @@ export function renderVocabulary(container, ctx) {
                   <tbody>${rows}</tbody>
                 </table>
               </div>
-              <p class="table-foot">${hasParent ? "A dash means no word with that gloss exists in the ancestor. The inherited check uses only this language’s direct sound changes; top-level rules match the ancestor’s form together, then sequential rules run in order." : "Add descendant languages to compare their forms against these roots."} The phonotactics column checks this language’s own inventory and syllable template.</p>
               <p class="lexicon-filter-empty" data-filter-empty hidden>No words match the current filter.</p>
             `
             : `
