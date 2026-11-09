@@ -1,6 +1,6 @@
 import { alignSegments } from "./diff.js";
 import { normalizeGloss } from "./gloss.js";
-import { getLineage } from "./model.js";
+import { getLineage, languagesInTreeOrder } from "./model.js";
 import { compileChainFrom, contextForLanguage, deriveStages } from "./phonology.js";
 
 // Comparative-method correspondence tables.
@@ -131,10 +131,10 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
 
   const sourceWords = wordsForCorrespondence(source);
   const sourceContext = contextForLanguage(project, source.id);
-  const projectOrder = new Map(allLanguages.map((language, index) => [language.id, index]));
+  const ordered = languagesInTreeOrder(project);
 
   const daughters = [];
-  for (const language of allLanguages) {
+  for (const language of ordered) {
     if (language.id === source.id) continue;
     const lineage = getLineage(project, language.id);
     if (!lineage.some((item) => item.id === source.id)) continue;
@@ -153,7 +153,6 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
     }
     daughters.push(daughter);
   }
-  daughters.sort((a, b) => a.depth - b.depth || projectOrder.get(a.id) - projectOrder.get(b.id));
 
   const result = emptyResult(source, selectedMode);
   result.languages = daughters.map(({ id, name, depth }) => ({ id, name, depth }));

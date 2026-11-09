@@ -659,6 +659,35 @@ export function rootLanguages(project) {
   return project.languages.filter((language) => !language.parentId || !findLanguage(project, language.parentId));
 }
 
+// Depth-first, root-first order: each language is followed by its own subtree
+// before the next sibling, so a flat list plus indentation reads as a nested
+// tree. Sibling order stays the document order of project.languages.
+export function languagesInTreeOrder(project) {
+  const ids = new Set(project.languages.map((language) => language.id));
+  const children = new Map();
+  for (const language of project.languages) {
+    const parentId = language.parentId && ids.has(language.parentId) ? language.parentId : null;
+    if (!children.has(parentId)) children.set(parentId, []);
+    children.get(parentId).push(language);
+  }
+  const ordered = [];
+  const seen = new Set();
+  const walk = (parentId) => {
+    for (const language of children.get(parentId) || []) {
+      if (seen.has(language.id)) continue;
+      seen.add(language.id);
+      ordered.push(language);
+      walk(language.id);
+    }
+  };
+  walk(null);
+  // A malformed parent cycle has no root, so keep every remaining language.
+  for (const language of project.languages) {
+    if (!seen.has(language.id)) ordered.push(language);
+  }
+  return ordered;
+}
+
 export function getLineage(project, id) {
   const result = [];
   const seen = new Set();

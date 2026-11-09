@@ -17,6 +17,7 @@ import {
   deleteLanguage,
   ensureProject,
   groupAllophonyRules,
+  languagesInTreeOrder,
   normalizeRuleDate,
   normalizeRuleExceptions,
   normalizeRuleRate,
@@ -155,6 +156,29 @@ const apply = (notation, form) => {
 
 equal("valid hash segments decode", decodeHashPart("Proto%20North"), "Proto North");
 equal("malformed hash escapes survive as text", decodeHashPart("%zz"), "%zz");
+
+/* ---- language tree order ------------------------------------------------ */
+
+// The array is deliberately depth-major: A's daughters sit after B, so a
+// depth sort would flatten the two branches into one generation block.
+const treeOrderFixture = {
+  languages: [
+    { id: "root", parentId: null },
+    { id: "a", parentId: "root" },
+    { id: "b", parentId: "root" },
+    { id: "a1", parentId: "a" },
+    { id: "a2", parentId: "a" },
+    { id: "b1", parentId: "b" },
+    { id: "island", parentId: null },
+    { id: "island1", parentId: "island" },
+    { id: "orphan", parentId: "missing" },
+  ],
+};
+equal(
+  "tree order puts each subtree before its next sibling",
+  languagesInTreeOrder(treeOrderFixture).map((language) => language.id),
+  ["root", "a", "a1", "a2", "b", "b1", "island", "island1", "orphan"]
+);
 
 /* ---- rule engine -------------------------------------------------------- */
 
@@ -3779,6 +3803,22 @@ equal(
     "s/medial",
     "a/final",
   ]
+);
+
+const nestedCorrespondenceProject = {
+  title: "Nested correspondence order",
+  languages: [
+    { id: "nr_root", name: "Root", parentId: null, ...corrBase, soundChanges: [], vocabulary: [] },
+    { id: "nr_a", name: "A", parentId: "nr_root", ...corrBase, soundChanges: [], vocabulary: [] },
+    { id: "nr_b", name: "B", parentId: "nr_root", ...corrBase, soundChanges: [], vocabulary: [] },
+    { id: "nr_a1", name: "A1", parentId: "nr_a", ...corrBase, soundChanges: [], vocabulary: [] },
+    { id: "nr_b1", name: "B1", parentId: "nr_b", ...corrBase, soundChanges: [], vocabulary: [] },
+  ],
+};
+equal(
+  "correspondence columns follow the family tree, not depth",
+  buildCorrespondences(nestedCorrespondenceProject, "nr_root").languages.map((language) => language.name),
+  ["A", "A1", "B", "B1"]
 );
 
 const pInitial = recordedTable.rows.find((row) => row.segment === "p" && row.position === "initial");
