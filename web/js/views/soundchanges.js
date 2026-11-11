@@ -34,6 +34,7 @@ import {
   statusMarkup,
 } from "../ruleEditor.js";
 import { debounce, esc, icon, openModal, toast } from "../ui.js";
+import { CHECK_PAGE_SIZE, focusPager, pagerMarkup, paginate } from "../paging.js";
 import { languageHref } from "../routes.js";
 import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
 // Curated attested rule groups offered in the Rule library modal; the data
@@ -553,19 +554,39 @@ function inheritedPanelMarkup(ctx, optionalRules = []) {
           <h2>Inherited vocabulary check</h2>
           <p>Compare each ancestral word with the form these rules produce.</p>
         </div>
-        ${optionalRules.length ? `<label class="rule-option check-optional-toggle" title="Include every optional sound change in this comparison"><input type="checkbox" data-check-optional ${includeOptional ? "checked" : ""}>Include optional changes (${optionalRules.length})</label>` : ""}
-        <span class="check-summary" data-check-summary></span>
+        <div class="panel-actions check-toolbar">
+          <select class="select check-status-filter" data-check-status aria-label="Filter inherited words by status">
+            <option value="all">All words</option>
+            <option value="attention">Needs attention</option>
+            <option value="differs">Differs</option>
+            <option value="missing">Missing</option>
+            <option value="error">Rule errors</option>
+            <option value="match">Matches</option>
+          </select>
+          ${optionalRules.length ? `<label class="rule-option check-optional-toggle" title="Include every optional sound change in this comparison"><input type="checkbox" data-check-optional ${includeOptional ? "checked" : ""}>Include optional changes (${optionalRules.length})</label>` : ""}
+          <span class="check-summary" data-check-summary></span>
+        </div>
       </header>
       <div data-check-body></div>
     </section>`;
 }
 
-function checkRows(ctx, context = null, optionalRuleIds = []) {
+function matchesCheckStatus(row, status) {
+  if (status === "attention") return row.status === "differs" || row.status === "missing" || row.status === "error";
+  return status === "all" || row.status === status;
+}
+
+function checkRows(ctx, context = null, optionalRuleIds = [], { status = "all", page = 1 } = {}) {
   const parent = ancestorsOf(ctx.project, ctx.language.id).at(-1);
   if (!parent) {
     return {
       summary: "",
       html: `<div class="notice notice-quiet">${icon("info")}<p>This root language has no ancestor to inherit vocabulary from.</p></div>`,
+      rows: [],
+      filteredRows: [],
+      paging: paginate([], page, CHECK_PAGE_SIZE),
+      parent: null,
+      byGloss: new Map(),
     };
   }
   const parentWords = parent.vocabulary.filter((word) => word.form.trim() && word.gloss.trim());
@@ -578,6 +599,11 @@ function checkRows(ctx, context = null, optionalRuleIds = []) {
           <p>${esc(parent.name)} has no words yet. Add a few in its Vocabulary tab to test these changes against real forms.</p>
           <button class="button button-quiet button-small" type="button" data-open-parent>${icon("arrowLeft")}Open ${esc(parent.name)}’s vocabulary</button>
         </div>`,
+      rows: [],
+      filteredRows: [],
+      paging: paginate([], page, CHECK_PAGE_SIZE),
+      parent,
+      byGloss: new Map(),
     };
   }
   const byGloss = new Map();
@@ -627,55 +653,64 @@ function checkRows(ctx, context = null, optionalRuleIds = []) {
           optionalCount ? ` · ${optionalCount} with optional changes skipped` : ""
         }`;
 
+  const showSurface = hasSurfaceDisplay(ctx.language);
+  const filteredRows = rows.filter((row) => matchesCheckStatus(row, status));
+  const paging = paginate(filteredRows, page, CHECK_PAGE_SIZE);
+  const columnCount = showSurface ? 7 : 6;
   const html = `
     <div class="check-table-wrap">
       <table class="data-table check-table">
         <thead>
-          <tr><th>Gloss</th><th>${esc(parent.name)}</th><th>Derived /…/</th>${hasSurfaceDisplay(ctx.language) ? "<th>Surface [ … ]</th>" : ""}<th>${esc(ctx.language.name)}</th><th>Status</th><th></th></tr>
+          <tr><th>Gloss</th><th>${esc(parent.name)}</th><th>Derived /…/</th>${showSurface ? "<th>Surface [ … ]</th>" : ""}<th>${esc(ctx.language.name)}</th><th>Status</th><th></th></tr>
         </thead>
         <tbody>
-          ${rows
-            .map((row) => {
-              const diff =
-                row.status === "differs" && context
-                  ? diffPairMarkup(row.derived, row.recorded?.form || "", context)
-                  : null;
-              return `
-                <tr>
-                  <td class="gloss-cell">${esc(row.word.gloss)}</td>
-                  <td><code class="ipa">${esc(formatPhonemic(row.word.form))}</code></td>
-                  <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(row.derived)) || "—"}</code></td>
-                  ${hasSurfaceDisplay(ctx.language) ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
-                  <td>${diff ? `<code class="ipa">${diff.right}</code>` : row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
-                  <td class="status-cell">
-                    <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
-                      ${row.status === "match" ? icon("check") : row.status === "differs" || row.status === "error" ? icon("warning") : icon("info")}
-                      ${row.status === "match" ? "Matches" : row.status === "differs" ? "Differs" : row.status === "error" ? "Rule error" : "Missing"}
-                    </span>
-                    ${
-                      row.exceptions.length
-                        ? `<span class="status-chip status-exception" title="${esc(exceptionChipTitle(row.exceptions))}">${icon("info")}${row.exceptions.length === 1 ? "Exception" : `${row.exceptions.length} exceptions`}</span>`
-                        : ""
-                    }
-                    ${
-                      row.skippedOptional.length
-                        ? `<span class="status-chip status-optional" title="${esc(optionalChipTitle(row.skippedOptional))}">${icon("info")}${row.skippedOptional.length === 1 ? "Optional skipped" : `${row.skippedOptional.length} optional skipped`}</span>`
-                        : ""
-                    }
-                  </td>
-                  <td class="row-actions">
-                    <button class="button button-quiet button-tiny" type="button" data-record-word="${row.index}" ${row.status === "match" || row.status === "error" ? "disabled" : ""}>
-                      ${row.status === "missing" ? "Record" : "Use derived"}
-                    </button>
-                  </td>
-                </tr>`;
-            })
-            .join("")}
+          ${
+            paging.items.length
+              ? paging.items
+                  .map((row) => {
+                    const diff =
+                      row.status === "differs" && context
+                        ? diffPairMarkup(row.derived, row.recorded?.form || "", context)
+                        : null;
+                    return `
+                      <tr>
+                        <td class="gloss-cell">${esc(row.word.gloss)}</td>
+                        <td><code class="ipa">${esc(formatPhonemic(row.word.form))}</code></td>
+                        <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(row.derived)) || "—"}</code></td>
+                        ${showSurface ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
+                        <td>${diff ? `<code class="ipa">${diff.right}</code>` : row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
+                        <td class="status-cell">
+                          <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
+                            ${row.status === "match" ? icon("check") : row.status === "differs" || row.status === "error" ? icon("warning") : icon("info")}
+                            ${row.status === "match" ? "Matches" : row.status === "differs" ? "Differs" : row.status === "error" ? "Rule error" : "Missing"}
+                          </span>
+                          ${
+                            row.exceptions.length
+                              ? `<span class="status-chip status-exception" title="${esc(exceptionChipTitle(row.exceptions))}">${icon("info")}${row.exceptions.length === 1 ? "Exception" : `${row.exceptions.length} exceptions`}</span>`
+                              : ""
+                          }
+                          ${
+                            row.skippedOptional.length
+                              ? `<span class="status-chip status-optional" title="${esc(optionalChipTitle(row.skippedOptional))}">${icon("info")}${row.skippedOptional.length === 1 ? "Optional skipped" : `${row.skippedOptional.length} optional skipped`}</span>`
+                              : ""
+                          }
+                        </td>
+                        <td class="row-actions">
+                          <button class="button button-quiet button-tiny" type="button" data-record-word="${row.index}" ${row.status === "match" || row.status === "error" ? "disabled" : ""}>
+                            ${row.status === "missing" ? "Record" : "Use derived"}
+                          </button>
+                        </td>
+                      </tr>`;
+                  })
+                  .join("")
+              : `<tr><td class="table-empty-cell" colspan="${columnCount}">No words match this filter.</td></tr>`
+          }
         </tbody>
       </table>
     </div>
+    ${pagerMarkup(paging, { noun: "words", label: "Inherited vocabulary pages" })}
     <p class="check-foot">Comparison is by gloss, using only this language’s direct changes. Not every word needs to be inherited; use “Use derived” when a reflex is correct. Top-level rules that change the same part of a word stop the derivation and appear as a rule error.</p>`;
-  return { summary, html, rows, parent, byGloss };
+  return { summary, html, rows, filteredRows, paging, parent, byGloss };
 }
 
 function exceptionChipTitle(exceptions) {
@@ -829,6 +864,8 @@ export function renderChanges(container, ctx, activeTool = "rules") {
         ? ""
         : defaultTestWord?.gloss || "";
   let includeOptional = checkOptionalMemory.get(language.id) === true;
+  let checkStatus = "all";
+  let checkPage = 1;
   const optionalIdsForCheck = () => (includeOptional ? directOptionalRules.map((rule) => rule.id) : []);
   let testOptional = new Set(
     [...(testerOptionalMemory.get(language.id) || [])].filter((id) =>
@@ -887,7 +924,10 @@ export function renderChanges(container, ctx, activeTool = "rules") {
 
   const refreshCheck = () => {
     if (!checkPanel || !checkBody) return;
-    const data = checkRows(ctx, context, optionalIdsForCheck());
+    const data = checkRows(ctx, context, optionalIdsForCheck(), { status: checkStatus, page: checkPage });
+    // A rule edit can shrink the filtered list under the current page; keep
+    // the view on the nearest valid page instead of showing an empty table.
+    checkPage = data.paging.page;
     checkBody.innerHTML = data.html;
     if (checkSummary) checkSummary.textContent = data.summary;
   };
@@ -987,6 +1027,13 @@ export function renderChanges(container, ctx, activeTool = "rules") {
   checkPanel?.querySelector("[data-check-optional]")?.addEventListener("change", (event) => {
     includeOptional = event.target.checked;
     checkOptionalMemory.set(language.id, includeOptional);
+    checkPage = 1;
+    refreshCheck();
+  });
+
+  checkPanel?.querySelector("[data-check-status]")?.addEventListener("change", (event) => {
+    checkStatus = event.target.value;
+    checkPage = 1;
     refreshCheck();
   });
 
@@ -1199,6 +1246,14 @@ export function renderChanges(container, ctx, activeTool = "rules") {
 
   if (checkPanel) {
     checkPanel.addEventListener("click", (event) => {
+      const pageButton = event.target.closest("[data-pager-page]");
+      if (pageButton) {
+        const action = pageButton.dataset.pagerAction;
+        checkPage = Number(pageButton.dataset.pagerPage);
+        refreshCheck();
+        focusPager(checkBody, action);
+        return;
+      }
       const openParent = event.target.closest("[data-open-parent]");
       const parentLanguage = ancestorsOf(ctx.project, language.id).at(-1);
       if (openParent && parentLanguage) {

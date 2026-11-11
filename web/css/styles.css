@@ -4354,6 +4354,81 @@ th:hover > .axis-menu,
   font-size: 9.5px;
 }
 
+.check-toolbar {
+  justify-content: flex-end;
+}
+
+.check-status-filter {
+  width: auto;
+  max-width: 190px;
+  height: 28px;
+  font-size: 11px;
+}
+
+.table-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 18px;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.table-controls-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.table-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 9px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.table-pager-range {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-pager-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.table-pager-status {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.table-pager .button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.table-empty-cell {
+  padding: 20px 18px !important;
+  color: var(--muted);
+  text-align: center;
+}
+
+.table-pager + .check-foot,
+.table-pager + .table-foot {
+  border-top: 0;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -5660,6 +5735,20 @@ th:hover > .axis-menu,
   min-width: 560px;
 }
 
+.cognate-matrix-scroll {
+  max-height: clamp(320px, 58vh, 560px);
+}
+
+.cognate-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.cognate-matrix thead th.cognate-sticky {
+  z-index: 4;
+}
+
 .cognate-matrix th.matrix-lang-col {
   max-width: 150px;
   min-width: 76px;
@@ -5754,6 +5843,8 @@ th:hover > .axis-menu,
 }
 
 .correspondence-summary .inventory-summary {
+  min-width: 0;
+  flex: 1 1 280px;
   justify-content: flex-start;
 }
 
