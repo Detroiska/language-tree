@@ -44,13 +44,13 @@ The repository ships with a demo family, `data/example_project.json`: a document
 - **Sound-change timeline** — every rule in the family, grouped by the relative stage recorded on its card, so the relative chronology of a branch's changes can be written down for the reader without touching derivations.
 - **X-SAMPA copy actions** — any vocabulary row can be copied as pure-ASCII X-SAMPA for notes, diffs, and external tools, with round-trip conversion handled by a dependency-free module.
 - **Lexicon analytics** — a per-language tab over the vocabulary and charts: phoneme frequency with bars, never-used and off-chart callouts, onset and coda tallies from the syllabifier, a consonant/vowel token ratio, voicing-pair and chart-gap symmetry checks, and an allophone-leakage detector for surface-only symbols recorded in phonemic forms.
-- **Undo / redo** — `Ctrl+Z` / `Ctrl+Shift+Z` (or the buttons in the sidebar footer) undo and redo any edit — words, rules, charts, tree changes — with rapid typing merged into single steps and each step written back to the project file.
+- **Undo / redo** — `Ctrl+Z` / `Ctrl+Shift+Z` (or the buttons in the top bar) undo and redo any edit — words, rules, charts, tree changes — with rapid typing merged into single steps and each step written back to the project file.
 - **Quick search** — `Ctrl+K` jumps anywhere in the project: languages (including by lineage path), words by gloss, form, or note, sound changes by notation, allophony rules, plus the global views. Results highlight the hit.
 - **Phoneme keyboard** — `Ctrl+Alt+K` (`Cmd+Option+K` on macOS), or the small keyboard button that appears beside a focused IPA field, opens a palette of insertable sounds. Word forms, Phonotactics category sounds, and testers show the current language's chart phonemes, the rule tester shows the parent's, rule fields add the lineage union plus syntax keys, and chart cells get a curated IPA reference.
 - **Chart-class autocomplete** — typing in a sound-change or allophony rule field suggests the class references the lineage's charts actually support (`plosive.plain`, `V.back`), with member counts; ↑/↓/Enter or a click inserts the exact spelling at the caret, so a mistyped class cannot sneak in.
 - **Bulk vocabulary import / export** — paste a TSV, CSV, space-aligned, or JSON word list into any language with a live preview and dedupe control; export the same list back to TSV (spreadsheets) or JSON (tools).
 - **Family report & JSON backup** — download the whole family as a plain-text Markdown report or a self-contained HTML page (tree, inventories, phonotactics, sound changes, allophony, vocabulary, cognate sets), or snapshot the exact project document as JSON.
-- **Selectable JSON projects** — any `.json` file under `data/`, pretty-printed for readable diffs. The sidebar switcher lists them and remembers the active file; the tracked `example_project.json` is the demo family, while personal projects stay gitignored.
+- **Selectable JSON projects** — any `.json` file under `data/`, pretty-printed for readable diffs. The top-bar project switcher lists them and remembers the active file; the tracked `example_project.json` is the demo family, while personal projects stay gitignored.
 
 ## Using the app
 
@@ -320,7 +320,7 @@ The **Sound-change timeline** view (sidebar, below Subgrouping evidence) reads t
 
 ### Quick search
 
-Press `Ctrl+K` (`Cmd+K` on macOS), or use **Quick search** in the sidebar, to jump anywhere in the project:
+Press `Ctrl+K` (`Cmd+K` on macOS), or use **Quick search** in the top bar, to jump anywhere in the project:
 
 - Search covers **languages** (name and lineage path — typing an ancestor finds its daughters), **words** (gloss, IPA form, note), **sound changes** (notation and note), **allophony rules** (notation and note), plus the family tree, cognate explorer, and subgrouping evidence as direct actions. Pasting `/…/` or `[…]` into the search box is accepted; the delimiters are stripped before matching.
 - `↑`/`↓` move through results, `Enter` opens the first match, `Esc` closes. Each result jumps to the right tab and briefly highlights the word, rule, or title it leads to.
@@ -414,7 +414,7 @@ language-tree/
    ├─ index.html
    ├─ css/styles.css
    └─ js/
-      ├─ app.js            # boot, routing, sidebar
+      ├─ app.js            # boot, routing, top bar and sidebar
       ├─ store.js          # load, autosave, save status
       ├─ api.js
       ├─ model.js          # data model, defaults, tree/chart helpers
