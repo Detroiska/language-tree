@@ -86,40 +86,65 @@ async function startServer(python, files = { "project.json": project }, sharedRo
     windowsHide: true,
   });
 
-  const url = await new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => finish(new Error(`Server did not start in time.\n${stdout}\n${stderr}`)), 15000);
-    const finish = (error) => {
-      clearTimeout(timer);
-      child.stdout.off("data", onStdout);
-      child.stderr.off("data", onStderr);
-      child.off("error", onError);
-      child.off("exit", onExit);
-      if (error) reject(error);
-    };
-    const onStdout = (chunk) => {
-      stdout += chunk;
-      const match = stdout.match(/http:\/\/[^\s]+/);
-      if (match) {
-        finish();
-        resolve(match[0].replace(/\/$/, ""));
-      }
-    };
-    const onStderr = (chunk) => {
-      stderr += chunk;
-    };
-    const onError = (error) => finish(error);
-    const onExit = (code) => finish(new Error(`Server exited with ${code} before listening.\n${stdout}\n${stderr}`));
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", onStdout);
-    child.stderr.on("data", onStderr);
-    child.on("error", onError);
-    child.on("exit", onExit);
+  const logs = { stdout: "", stderr: "" };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    logs.stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    logs.stderr += chunk;
+  });
+  child.on("error", (error) => {
+    logs.stderr += `\nspawn error: ${error.message}\n`;
   });
 
-  return { root, child, url };
+  let url;
+  try {
+    url = await new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`Server did not start in time.\n${logs.stdout}\n${logs.stderr}`)),
+        15000
+      );
+      const onStdout = () => {
+        const match = logs.stdout.match(/http:\/\/[^\s]+/);
+        if (match) {
+          clearTimeout(timer);
+          child.stdout.off("data", onStdout);
+          resolve(match[0].replace(/\/$/, ""));
+        }
+      };
+      child.stdout.on("data", onStdout);
+      child.once("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Server exited with ${code} before listening.\n${logs.stdout}\n${logs.stderr}`));
+      });
+    });
+  } catch (error) {
+    await stopServer({ root, child }, { removeRoot: !sharedRoot });
+    throw error;
+  }
+
+  // The banner is printed after the socket binds, but Windows can still race
+  // the first request. Wait for health so a failed start reports the child's
+  // output instead of a bare ECONNREFUSED.
+  const deadline = Date.now() + 5000;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) break;
+    try {
+      const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1000) });
+      if (response.ok) return { root, child, url, output: () => ({ ...logs }) };
+      lastError = new Error(`/api/health returned ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await stopServer({ root, child }, { removeRoot: !sharedRoot });
+  throw new Error(
+    `Server did not answer /api/health (exit ${child.exitCode}).\n${lastError}\n${logs.stdout}\n${logs.stderr}`
+  );
 }
 
 async function stopServer(server, { removeRoot = true } = {}) {
@@ -183,7 +208,16 @@ function waitForExit(started, timeout = 8000) {
 }
 
 async function call(server, path, options = {}) {
-  const response = await fetch(`${server.url}${path}`, { redirect: "manual", ...options });
+  let response;
+  try {
+    response = await fetch(`${server.url}${path}`, { redirect: "manual", ...options });
+  } catch (error) {
+    const output = server.output ? server.output() : { stdout: "", stderr: "" };
+    const cause = error?.cause ? ` (${error.cause.code || error.cause.message || error.cause})` : "";
+    throw new Error(
+      `Request to ${server.url}${path} failed: ${error}${cause}\n${output.stdout}\n${output.stderr}`
+    );
+  }
   const text = await response.text();
   let json = null;
   try {
@@ -222,7 +256,10 @@ function rawCall(server, { method = "GET", path = "/", headers = {} } = {}) {
         });
       }
     );
-    request.on("error", reject);
+    request.on("error", (error) => {
+      const output = server.output ? server.output() : { stdout: "", stderr: "" };
+      reject(new Error(`Request to ${server.url}${path} failed: ${error}\n${output.stdout}\n${output.stderr}`));
+    });
     request.end();
   });
 }
@@ -695,6 +732,42 @@ try {
     await new Promise((resolve) => blocker.close(resolve));
   }
 
+  /* ---- Windows sharing violations --------------------------------------- */
+
+  if (process.platform === "win32") {
+    // Force two transient os.replace() failures so the retry path is exercised
+    // deterministically, not only when two real saves happen to collide.
+    const retry = spawnSync(
+      python,
+      [
+        "-c",
+        [
+          "import os, sys",
+          `sys.path.insert(0, ${JSON.stringify(server.root)})`,
+          "import server",
+          "calls = 0",
+          "real_replace = os.replace",
+          "def flaky(source, destination):",
+          "    global calls",
+          "    calls += 1",
+          "    if calls < 3:",
+          "        raise PermissionError(13, 'Access is denied')",
+          "    return real_replace(source, destination)",
+          "os.replace = flaky",
+          "path = server.DATA_DIR / 'retry.json'",
+          "server.atomic_write_text(path, '{\"ok\": true}\\n')",
+          "print(calls)",
+          "print(path.read_text(encoding='utf-8').strip())",
+        ].join("\n"),
+      ],
+      { cwd: server.root, encoding: "utf8", windowsHide: true }
+    );
+    truthy("the sharing-violation probe exits cleanly", retry.status === 0, retry.stderr);
+    const [calls, contents] = retry.stdout.trim().split(/\r?\n/);
+    equal("a Windows sharing violation is retried", calls, "3");
+    equal("the retried write lands", contents, '{"ok": true}');
+  }
+
   /* ---- two instances sharing one data directory (#57) -------------------- */
 
   const shared = await startServer(python, { "shared.json": project });
@@ -715,8 +788,12 @@ try {
         },
       ],
     });
+    // The two processes have separate SAVE_LOCKs, so Windows can reject one
+    // os.replace() while the other renames onto the same file. The server
+    // retries those transient sharing violations; sixteen saves make the race
+    // likely enough to catch a regression.
     const saves = await Promise.all(
-      Array.from({ length: 8 }, (_, index) =>
+      Array.from({ length: 16 }, (_, index) =>
         call(index % 2 ? peer : shared, "/api/project?file=shared.json", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
