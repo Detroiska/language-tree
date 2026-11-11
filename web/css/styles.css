@@ -1550,20 +1550,6 @@ code {
   background: var(--line);
 }
 
-.tree-hint {
-  position: absolute;
-  bottom: 14px;
-  left: 16px;
-  padding: 5px 9px;
-  color: var(--muted);
-  background: rgba(250, 248, 242, 0.82);
-  border: 1px solid rgba(221, 216, 202, 0.82);
-  border-radius: 6px;
-  font-size: 9.5px;
-  pointer-events: none;
-  backdrop-filter: blur(4px);
-}
-
 @media (hover: none) {
   .node-actions {
     opacity: 1;
@@ -5223,10 +5209,6 @@ th:hover > .axis-menu,
 
   .tree-viewport {
     min-height: 500px;
-  }
-
-  .tree-hint {
-    display: none;
   }
 
   .node-actions {
