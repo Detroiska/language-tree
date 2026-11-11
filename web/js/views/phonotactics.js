@@ -462,7 +462,7 @@ export function renderPhonotactics(container, ctx) {
             </div>
           </section>
 
-          <details class="panel help-panel" open>
+          <details class="panel help-panel">
             <summary class="panel-head help-summary">
               <div class="panel-title">
                 <h2>Template syntax</h2>

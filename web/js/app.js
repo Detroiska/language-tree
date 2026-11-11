@@ -26,6 +26,7 @@ import { renderTimeline } from "./views/timeline.js";
 import { renderTree } from "./views/tree.js";
 
 const appShell = document.getElementById("app-shell");
+const mainRoot = document.getElementById("main");
 const viewRoot = document.getElementById("view");
 const sidebarTree = document.getElementById("sidebar-tree");
 const sidebarCount = document.getElementById("sidebar-count");
@@ -395,7 +396,7 @@ function render(options = {}) {
     console.error(error);
     renderViewError(error);
   }
-  if (!options.preserveScroll) window.scrollTo({ top: 0, behavior: "auto" });
+  if (!options.preserveScroll) mainRoot.scrollTo({ top: 0, behavior: "auto" });
   applySearchFocus();
 }
 
@@ -423,7 +424,7 @@ function bootError(error) {
         <button class="button button-primary" type="button" id="retry-load">${icon("refresh")}Try again</button>
         <button class="button button-quiet" type="button" id="reload-page">${icon("external")}Reload page</button>
       </div>
-      <p class="boot-hint">The local server is normally started with <code>start.bat</code> or <code>python server.py</code>. Project files live in <code>data/</code>; use the project switcher in the sidebar to open another one.</p>
+      <p class="boot-hint">The local server is normally started with <code>start.bat</code> or <code>python server.py</code>. Project files live in <code>data/</code>; use the project switcher in the top bar to open another one.</p>
     </div>`;
   // "Try again" re-runs the load in place — a server that was just started
   // does not need a full page reload — while "Reload page" resets everything.
@@ -546,13 +547,8 @@ async function init() {
   });
   document.getElementById("sidebar-search")?.addEventListener("click", () => quickSearch.open());
 
-  const sidebarToggle = document.createElement("button");
-  sidebarToggle.className = "sidebar-toggle";
-  sidebarToggle.type = "button";
-  sidebarToggle.setAttribute("aria-label", "Open language navigation");
-  sidebarToggle.innerHTML = icon("menu");
-  document.body.appendChild(sidebarToggle);
-  sidebarToggle.addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
+  const sidebarToggle = document.getElementById("sidebar-toggle");
+  sidebarToggle?.addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
   scrim.addEventListener("click", () => document.body.classList.remove("sidebar-open"));
 
   try {

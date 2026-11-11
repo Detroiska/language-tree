@@ -299,7 +299,7 @@ function testPanelMarkup(language, optionalRules = []) {
 
 function notationHelpMarkup() {
   return `
-    <details class="panel help-panel" open>
+    <details class="panel help-panel">
       <summary class="panel-head help-summary">
         <div class="panel-title">
           <h2>Notation</h2>
