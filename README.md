@@ -51,6 +51,7 @@ The repository ships with a demo family, `data/example_project.json`: a document
 - **Bulk vocabulary import / export** — paste a TSV, CSV, space-aligned, or JSON word list into any language with a live preview and dedupe control; export the same list back to TSV (spreadsheets) or JSON (tools).
 - **Family report & JSON backup** — download the whole family as a plain-text Markdown report or a self-contained HTML page (tree, inventories, phonotactics, sound changes, allophony, vocabulary, cognate sets), or snapshot the exact project document as JSON.
 - **Selectable JSON projects** — any `.json` file under `data/`, pretty-printed for readable diffs. The top-bar project switcher lists them and remembers the active file; the tracked `example_project.json` is the demo family, while personal projects stay gitignored.
+- **Collapsible sidebar** — the menu button in the top bar hides the language tree and family links for a wider workspace on desktop, and the choice is remembered; on narrow screens the same button opens the sidebar as an overlay.
 
 ## Using the app
 
