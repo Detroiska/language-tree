@@ -145,6 +145,12 @@ function updateSidebarToggle() {
   sidebarToggle.title = label;
 }
 
+function closeSidebarOverlay() {
+  if (!document.body.classList.contains("sidebar-open")) return;
+  document.body.classList.remove("sidebar-open");
+  updateSidebarToggle();
+}
+
 function setDesktopSidebarHidden(hidden) {
   appShell.classList.toggle("sidebar-hidden", hidden);
   try {
@@ -393,7 +399,7 @@ function openSearchResult(result) {
 function render(options = {}) {
   if (!store.project) return;
   closeMenu();
-  document.body.classList.remove("sidebar-open");
+  closeSidebarOverlay();
   const route = parseRoute();
   currentRoute = route;
 
@@ -601,12 +607,9 @@ async function init() {
     }
     setDesktopSidebarHidden(!appShell.classList.contains("sidebar-hidden"));
   });
-  scrim.addEventListener("click", () => {
-    document.body.classList.remove("sidebar-open");
-    updateSidebarToggle();
-  });
+  scrim.addEventListener("click", closeSidebarOverlay);
   window.matchMedia(NARROW_SIDEBAR).addEventListener("change", () => {
-    document.body.classList.remove("sidebar-open");
+    closeSidebarOverlay();
     updateSidebarToggle();
   });
 
@@ -621,8 +624,7 @@ async function init() {
   });
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !document.body.classList.contains("sidebar-open")) return;
-    document.body.classList.remove("sidebar-open");
-    updateSidebarToggle();
+    closeSidebarOverlay();
   });
   window.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
