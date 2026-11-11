@@ -38,7 +38,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 ### Git
 - One task = one branch with a short descriptive name; never commit to main.
 - Push the branch to origin and open a pull request without asking, once `npm test` and `npm run lint` pass locally. Put the summary, test/lint results, manual UI verification (when relevant), and any issue link in the PR body.
-- Open the pull request and stop. Code changes wait for `Review: approved` from a fresh-context reviewer and green CI on both jobs; docs-only changes may merge after green CI. Never merge your own code changes without that review.
+- Open the pull request and stop. Code changes wait for `Review: approved` from a fresh-context reviewer (or the owner) and green CI on both jobs; docs-only changes may merge after green CI. Never merge your own code changes without that review.
 - File a GitHub issue (`gh issue create`) for any bug you find outside the current task. If you also fix it, give that fix its own branch and pull request and reference the issue.
 - Merge with `gh pr merge --squash --delete-branch`, only after the review gate and the pull request's CI run finishes green. Never merge pending or red CI, never push to main directly, never force-push.
 - Fix a red branch with a new commit on the same branch.
@@ -49,10 +49,10 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - Changes to tracked project data (`data/example_project.json`) go in their own "Update project data" commit, never mixed with code changes. Never commit ignored personal project files or `data/.active-project`.
 
 ### Review
-- Code changes need an independent review before merge. The author opens the PR and stops; a fresh-context reviewer agent or the owner reads the diff and the surrounding code. The author never reviews and merges their own code changes.
+- Code changes need an independent review before merge. The author opens the PR and stops before review; a fresh-context reviewer agent or the owner reads the diff and the surrounding code. The author never self-reviews and self-merges code changes; it may merge only after an independent sign-off.
 - Docs-only changes (Markdown, comments, BACKLOG) may self-merge after CI. CI configuration, scripts, tests, and source count as code.
 - The reviewer starts from the PR diff and the checklist below, not from the author's summary. When no human reviewer is available, spawn a reviewer subagent with no prior task context; the author may post the reviewer's verdict as a PR comment.
-- Sign-off is a PR comment that starts with `Review: approved`. If the reviewer finds a problem, they comment `Review: changes requested` with the reason; the author fixes it on the same branch and requests another review. GitHub blocks self-approval with one account, so the comment is the gate.
+- Sign-off is a PR comment that starts with `Review: approved` and names the reviewer or review context. If the reviewer finds a problem, they comment `Review: changes requested` with the reason; the author fixes it on the same branch and requests another review. GitHub blocks self-approval with one account, so the comment is the gate.
 - Reviewer checklist:
   - Does the diff do what the PR says, and nothing unrelated?
   - Bug fix: is there a regression test that fails on the parent commit? Verify it; do not assume.
@@ -73,7 +73,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 
 ## Done means
 - `npm test` and `npm run lint` pass.
-- Code changes have `Review: approved` from a fresh-context reviewer; docs-only changes may self-merge after CI.
+- Code changes have `Review: approved` from a fresh-context reviewer (or the owner); docs-only changes may self-merge after CI.
 - CI is green on Ubuntu and Windows and the PR is merged, or the work is explicitly handed off.
 - Anything deleted or renamed is called out explicitly in the PR and final summary.
 
