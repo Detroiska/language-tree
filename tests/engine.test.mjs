@@ -78,7 +78,13 @@ import { compilePhonotactics } from "../web/js/phonotactics.js";
 import { createPhonotacticsChecker, stressMarkedForm } from "../web/js/phonotacticsCheck.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
 import { isHeavySyllable, normalizeStressSystem, stressIndexOf, stressLabel } from "../web/js/prosody.js";
-import { decodeHashPart } from "../web/js/routes.js";
+import { decodeHashPart, languageHref } from "../web/js/routes.js";
+import {
+  LANGUAGE_TOOLS,
+  defaultToolForTab,
+  normalizeTool,
+  toolsForTab,
+} from "../web/js/languageTools.js";
 import { alignSegments, diffPairMarkup, formDiffMarkup } from "../web/js/diff.js";
 import { analyzeLexicon } from "../web/js/analytics.js";
 import { alignCognate, buildCorrespondences } from "../web/js/correspondences.js";
@@ -156,6 +162,47 @@ const apply = (notation, form) => {
 
 equal("valid hash segments decode", decodeHashPart("Proto%20North"), "Proto North");
 equal("malformed hash escapes survive as text", decodeHashPart("%zz"), "%zz");
+
+/* ---- language tool segments --------------------------------------------- */
+
+equal(
+  "tool ids stay in documented order",
+  toolsForTab("changes").map((tool) => tool.id),
+  ["rules", "test", "reconstruct", "check"]
+);
+equal("unknown tools fall back to the tab default", normalizeTool("changes", "bogus"), "rules");
+equal("missing tools fall back to the tab default", normalizeTool("phonotactics"), "template");
+equal("tabs without tools normalize to an empty string", normalizeTool("vocabulary", "rules"), "");
+equal("every tool group has a default that exists", Object.entries(LANGUAGE_TOOLS).every(([tab, group]) =>
+  group.tools.some((tool) => tool.id === group.defaultTool) && defaultToolForTab(tab) === group.defaultTool
+), true);
+
+const toolLinkLanguage = { id: "Proto North" };
+equal(
+  "language links encode the id and omit the default tool",
+  languageHref(toolLinkLanguage, "changes"),
+  "#/language/Proto%20North/changes"
+);
+equal(
+  "language links omit an explicitly named default tool",
+  languageHref(toolLinkLanguage, "changes", "rules"),
+  "#/language/Proto%20North/changes"
+);
+equal(
+  "language links keep an explicit non-default tool",
+  languageHref(toolLinkLanguage, "changes", "test"),
+  "#/language/Proto%20North/changes/test"
+);
+equal(
+  "language links ignore tools on tabs without tool groups",
+  languageHref(toolLinkLanguage, "overview", "test"),
+  "#/language/Proto%20North/overview"
+);
+equal(
+  "language links drop unknown tools",
+  languageHref(toolLinkLanguage, "allophony", "bogus"),
+  "#/language/Proto%20North/allophony"
+);
 
 /* ---- language tree order ------------------------------------------------ */
 

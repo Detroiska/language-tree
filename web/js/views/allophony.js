@@ -25,6 +25,8 @@ import {
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
 import { optionalRulesPickerMarkup } from "../derivation.js";
+import { languageHref } from "../routes.js";
+import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
 import {
   exceptionSummary,
   exceptionSuggestionsMarkup as sharedExceptionSuggestionsMarkup,
@@ -394,7 +396,7 @@ function allophonyStepsMarkup(steps) {
     .join("");
 }
 
-export function renderAllophony(container, ctx) {
+export function renderAllophony(container, ctx, activeTool = "rules") {
   const language = ctx.language;
   const context = contextForAllophony(ctx.project, language.id);
   const table = allophoneTable(ctx.project, language.id);
@@ -423,43 +425,50 @@ export function renderAllophony(container, ctx) {
         </div>
       </section>
 
-      <div class="changes-layout">
-        <div class="changes-main">
-          <section class="panel rules-panel" data-allo-rules-panel>
-            <header class="panel-head">
-              <div class="panel-title">
-                <h2>Rules</h2>
-                <p>Applied in list order; each runs once unless it repeats. Groups are organizational only.</p>
-              </div>
-              <div class="panel-actions">
-                <button class="button button-quiet button-small" type="button" data-allo-select-mode>${icon("check")}Group rules</button>
-                <button class="button button-quiet button-small" type="button" data-add-allo-group>${icon("plus")}New group</button>
-                <button class="button button-primary button-small" type="button" data-add-allo-rule>${icon("plus")}Add rule</button>
-              </div>
-            </header>
-            <div class="allo-select-bar" data-allo-select-bar>
-              <span><strong data-allo-select-count>0</strong> selected</span>
-              <button class="button button-primary button-small" type="button" data-allo-group-selected disabled>Group selected</button>
-              <button class="button button-quiet button-small" type="button" data-allo-select-cancel>Cancel</button>
-            </div>
-            ${rulesMarkup(language, context, exceptionSuggestions)}
-          </section>
+      ${toolTabsMarkup("allophony", activeTool, "Allophony tools")}
 
-          <section class="panel" data-allo-table-panel>
-            <header class="panel-head">
-              <div class="panel-title">
-                <h2>Allophones</h2>
-                <p>The phoneme → surface mapping currently in force.</p>
+      <section class="tool-panel" ${toolPanelAttrs("allophony", "rules", activeTool)}>
+        <div class="changes-layout">
+          <div class="changes-main">
+            <section class="panel rules-panel" data-allo-rules-panel>
+              <header class="panel-head">
+                <div class="panel-title">
+                  <h2>Rules</h2>
+                  <p>Applied in list order; each runs once unless it repeats. Groups are organizational only.</p>
+                </div>
+                <div class="panel-actions">
+                  <button class="button button-quiet button-small" type="button" data-allo-select-mode>${icon("check")}Group rules</button>
+                  <button class="button button-quiet button-small" type="button" data-add-allo-group>${icon("plus")}New group</button>
+                  <button class="button button-primary button-small" type="button" data-add-allo-rule>${icon("plus")}Add rule</button>
+                </div>
+              </header>
+              <div class="allo-select-bar" data-allo-select-bar>
+                <span><strong data-allo-select-count>0</strong> selected</span>
+                <button class="button button-primary button-small" type="button" data-allo-group-selected disabled>Group selected</button>
+                <button class="button button-quiet button-small" type="button" data-allo-select-cancel>Cancel</button>
               </div>
-            </header>
-            ${allophoneTableMarkup(table)}
-          </section>
+              ${rulesMarkup(language, context, exceptionSuggestions)}
+            </section>
+
+            <section class="panel" data-allo-table-panel>
+              <header class="panel-head">
+                <div class="panel-title">
+                  <h2>Allophones</h2>
+                  <p>The phoneme → surface mapping currently in force.</p>
+                </div>
+              </header>
+              ${allophoneTableMarkup(table)}
+            </section>
+          </div>
+          <aside class="changes-aside">
+            ${notationHelpMarkup()}
+          </aside>
         </div>
-        <aside class="changes-aside">
-          ${testPanelMarkup(language, optionalRules)}
-          ${notationHelpMarkup()}
-        </aside>
-      </div>
+      </section>
+
+      <section class="tool-panel tool-panel-single" ${toolPanelAttrs("allophony", "test", activeTool)}>
+        ${testPanelMarkup(language, optionalRules)}
+      </section>
     </div>
   `;
 
@@ -890,4 +899,10 @@ export function renderAllophony(container, ctx) {
     });
     runTest();
   }
+
+  setupToolTabs(container, {
+    tab: "allophony",
+    activeTool,
+    hrefForTool: (tool) => languageHref(language, "allophony", tool),
+  });
 }

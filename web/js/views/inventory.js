@@ -27,6 +27,8 @@ import {
   soundKey,
 } from "../features.js";
 import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
+import { languageHref } from "../routes.js";
+import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
 import { confirmDialog, esc, icon, openMenu, openModal, promptDialog, toast } from "../ui.js";
 
 function plural(value, singular, pluralForm = `${singular}s`) {
@@ -833,7 +835,7 @@ function bindFeaturePanel(container, ctx) {
   }
 }
 
-export function renderInventory(container, ctx) {
+export function renderInventory(container, ctx, activeTool = "inventory") {
   const { language } = ctx;
   const consonants = language.inventory.consonants;
   const vowels = language.inventory.vowels;
@@ -851,10 +853,20 @@ export function renderInventory(container, ctx) {
           <span><strong data-inventory-count="vowels">${new Set(chartPhonemeList(vowels)).size}</strong> vowels</span>
         </div>
       </section>
-      ${chartPanel(ctx, consonants, "consonants", "Consonants", "Manner of articulation × place of articulation")}
-      ${chartPanel(ctx, vowels, "vowels", "Vowels", "Height × backness, with rounding as subcolumns")}
-      ${featurePanelMarkup(ctx)}
-      ${allophonePanelMarkup(ctx)}
+      ${toolTabsMarkup("phonology", activeTool, "Phonology tools")}
+
+      <section class="tool-panel" ${toolPanelAttrs("phonology", "inventory", activeTool)}>
+        ${chartPanel(ctx, consonants, "consonants", "Consonants", "Manner of articulation × place of articulation")}
+        ${chartPanel(ctx, vowels, "vowels", "Vowels", "Height × backness, with rounding as subcolumns")}
+      </section>
+
+      <section class="tool-panel" ${toolPanelAttrs("phonology", "features", activeTool)}>
+        ${featurePanelMarkup(ctx)}
+      </section>
+
+      <section class="tool-panel" ${toolPanelAttrs("phonology", "allophones", activeTool)}>
+        ${allophonePanelMarkup(ctx)}
+      </section>
     </div>
   `;
 
@@ -876,4 +888,17 @@ export function renderInventory(container, ctx) {
     bindNotes(panel, ctx, chart, kind);
   });
   bindFeaturePanel(container, ctx);
+
+  setupToolTabs(container, {
+    tab: "phonology",
+    activeTool,
+    hrefForTool: (tool) => languageHref(language, "phonology", tool),
+    // Sticky header offsets are measured from laid-out cells; a hidden chart
+    // panel measures as zero, so realign the charts when Inventory is shown.
+    onSelect: (tool) => {
+      if (tool === "inventory") {
+        container.querySelectorAll("[data-chart]").forEach((panel) => alignStickyRowHeaders(panel));
+      }
+    },
+  });
 }

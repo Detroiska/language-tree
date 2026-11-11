@@ -18,7 +18,8 @@ import { createQuickSearch } from "./search.js";
 import { initPhonemeKeyboard } from "./keyboard.js";
 import { initClassAutocomplete } from "./autocomplete.js";
 import { addRootLanguage } from "./languageActions.js";
-import { decodeHashPart } from "./routes.js";
+import { normalizeTool } from "./languageTools.js";
+import { decodeHashPart, languageHref } from "./routes.js";
 import { renderCognates } from "./views/cognates.js";
 import { renderLanguage, TABS } from "./views/language.js";
 import { renderSubgrouping } from "./views/subgrouping.js";
@@ -58,10 +59,12 @@ function parseRoute() {
   if (!raw || raw === "tree") return { view: "tree" };
   const parts = raw.split("/").filter(Boolean);
   if (parts[0] === "language" && parts[1]) {
+    const tab = TAB_IDS.has(parts[2]) ? parts[2] : "overview";
     return {
       view: "language",
       id: decodeHashPart(parts[1]),
-      tab: TAB_IDS.has(parts[2]) ? parts[2] : "overview",
+      tab,
+      tool: normalizeTool(tab, parts[3] ? decodeHashPart(parts[3]) : ""),
     };
   }
   if (parts[0] === "cognates") {
@@ -77,7 +80,9 @@ function parseRoute() {
 }
 
 function routeHash(route) {
-  if (route.view === "language") return `#/language/${encodeURIComponent(route.id)}/${route.tab || "overview"}`;
+  if (route.view === "language") {
+    return languageHref({ id: route.id }, route.tab || "overview", route.tool || "");
+  }
   if (route.view === "cognates") {
     if (route.id) {
       return `#/cognates/${encodeURIComponent(route.id)}${route.wordId ? `/${encodeURIComponent(route.wordId)}` : ""}`;
@@ -439,7 +444,7 @@ function render(options = {}) {
     } else if (route.view === "timeline") {
       renderTimeline(viewRoot, ctx);
     } else {
-      renderLanguage(viewRoot, ctx, route.tab);
+      renderLanguage(viewRoot, ctx, route.tab, route.tool);
     }
   } catch (error) {
     // A view bug should not leave a blank workspace: the project itself is
