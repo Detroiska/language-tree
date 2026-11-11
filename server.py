@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 import zlib
 from datetime import datetime, timezone
@@ -119,6 +120,26 @@ def fsync_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
+def replace_with_retry(source: Path, destination: Path) -> None:
+    """Replace a file, retrying transient Windows sharing violations.
+
+    Two server processes can save the same project at once. Windows refuses
+    os.replace() while the other process is renaming onto the destination, so
+    retry briefly instead of turning a valid save into a 500.
+    """
+    attempts = 20 if os.name == "nt" else 1
+    delay = 0.005
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
+
+
 def atomic_write_text(path: Path, text: str) -> None:
     """Write through a unique temporary file, then rename it into place."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,7 +152,7 @@ def atomic_write_text(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        replace_with_retry(temporary, path)
     except BaseException:
         try:
             temporary.unlink()
@@ -540,6 +561,10 @@ class LanguageTreeHTTPServer(ThreadingHTTPServer):
     # split incoming requests unpredictably. Dropping the reusable bind on
     # Windows makes the second launch fail instead of serving half-broken pages.
     allow_reuse_address = os.name != "nt"
+
+    # A browser opens several connections at once. The stdlib default of 5 is
+    # short enough that Windows can refuse the overflow before accept() runs.
+    request_queue_size = 32
 
 
 def running_instance(host: str, port: int) -> bool:
