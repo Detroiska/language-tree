@@ -237,7 +237,6 @@ export function renderTree(container, ctx) {
                 <span class="tool-separator"></span>
                 <button class="icon-button" type="button" id="fit-tree-floating" title="Fit tree" aria-label="Fit tree">${icon("fit")}</button>
               </div>
-              <div class="tree-hint">Drag to pan · Scroll to zoom · Click a language to edit</div>
             </div>`
       }
       <footer class="page-foot-note">

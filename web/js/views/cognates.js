@@ -612,7 +612,7 @@ export function renderCognates(container, ctx) {
 
   if (!source) {
     container.innerHTML = `
-      <div class="workspace-stack">
+      <div class="page workspace-stack">
         <section class="panel"><div class="panel-body"><div class="notice">${icon("info")}<p>There is nothing to explore yet.</p></div></div></section>
       </div>`;
     return;
@@ -666,7 +666,7 @@ export function renderCognates(container, ctx) {
       : null;
 
   container.innerHTML = `
-    <div class="workspace-stack">
+    <div class="page workspace-stack">
       <section class="section-intro">
         <div>
           <p class="eyebrow">Cognates</p>
