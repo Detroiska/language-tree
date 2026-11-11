@@ -84,7 +84,7 @@ export function renderTimeline(container, ctx) {
   const total = datedCount + report.undated.length;
 
   container.innerHTML = `
-    <div class="workspace-stack subgrouping-page">
+    <div class="page workspace-stack subgrouping-page">
       <section class="section-intro">
         <div>
           <p class="eyebrow">Timeline</p>

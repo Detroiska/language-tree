@@ -134,7 +134,7 @@ export function renderSubgrouping(container, ctx) {
   const nodes = report.nodes;
 
   container.innerHTML = `
-    <div class="workspace-stack subgrouping-page">
+    <div class="page workspace-stack subgrouping-page">
       <section class="section-intro">
         <div>
           <p class="eyebrow">Subgrouping</p>
