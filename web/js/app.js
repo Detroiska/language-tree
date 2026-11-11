@@ -40,9 +40,13 @@ const projectSwitch = document.getElementById("project-switch");
 const projectFileLabel = document.getElementById("project-file");
 const saveState = document.getElementById("save-state");
 const scrim = document.getElementById("sidebar-scrim");
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebar-toggle");
 const undoButton = document.getElementById("undo-button");
 const redoButton = document.getElementById("redo-button");
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
+const SIDEBAR_HIDDEN_KEY = "language-tree.sidebar-hidden";
+const NARROW_SIDEBAR = "(max-width: 780px)";
 
 let currentRoute = null;
 let booted = false;
@@ -112,6 +116,47 @@ function updateProjectSwitcher() {
   projectFileLabel.textContent = file || "No project";
   projectSwitch.title = file ? `Project file: data/${file} — click to switch` : "Click to choose a project file";
 }
+
+function storedSidebarHidden() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1";
+  } catch {
+    // Storage can be unavailable in hardened browser modes; default to open.
+    return false;
+  }
+}
+
+function isNarrowSidebar() {
+  return window.matchMedia(NARROW_SIDEBAR).matches;
+}
+
+function sidebarIsVisible() {
+  return isNarrowSidebar()
+    ? document.body.classList.contains("sidebar-open")
+    : !appShell.classList.contains("sidebar-hidden");
+}
+
+function updateSidebarToggle() {
+  if (!sidebarToggle) return;
+  const visible = sidebarIsVisible();
+  const label = visible ? "Hide language navigation" : "Show language navigation";
+  sidebarToggle.setAttribute("aria-expanded", String(visible));
+  sidebarToggle.setAttribute("aria-label", label);
+  sidebarToggle.title = label;
+}
+
+function setDesktopSidebarHidden(hidden) {
+  appShell.classList.toggle("sidebar-hidden", hidden);
+  try {
+    window.localStorage.setItem(SIDEBAR_HIDDEN_KEY, hidden ? "1" : "0");
+  } catch {
+    // The toggle still works for this session when storage is unavailable.
+  }
+  if (hidden && sidebar?.contains(document.activeElement)) sidebarToggle?.focus();
+  updateSidebarToggle();
+}
+
+if (storedSidebarHidden()) appShell.classList.add("sidebar-hidden");
 
 async function switchToProject(file) {
   if (!file) return;
@@ -547,9 +592,23 @@ async function init() {
   });
   document.getElementById("sidebar-search")?.addEventListener("click", () => quickSearch.open());
 
-  const sidebarToggle = document.getElementById("sidebar-toggle");
-  sidebarToggle?.addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
-  scrim.addEventListener("click", () => document.body.classList.remove("sidebar-open"));
+  updateSidebarToggle();
+  sidebarToggle?.addEventListener("click", () => {
+    if (isNarrowSidebar()) {
+      document.body.classList.toggle("sidebar-open");
+      updateSidebarToggle();
+      return;
+    }
+    setDesktopSidebarHidden(!appShell.classList.contains("sidebar-hidden"));
+  });
+  scrim.addEventListener("click", () => {
+    document.body.classList.remove("sidebar-open");
+    updateSidebarToggle();
+  });
+  window.matchMedia(NARROW_SIDEBAR).addEventListener("change", () => {
+    document.body.classList.remove("sidebar-open");
+    updateSidebarToggle();
+  });
 
   try {
     await boot();
@@ -561,7 +620,9 @@ async function init() {
     if (booted) render();
   });
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") document.body.classList.remove("sidebar-open");
+    if (event.key !== "Escape" || !document.body.classList.contains("sidebar-open")) return;
+    document.body.classList.remove("sidebar-open");
+    updateSidebarToggle();
   });
   window.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
