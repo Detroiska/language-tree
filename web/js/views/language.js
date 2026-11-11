@@ -287,19 +287,6 @@ function renderOverview(content, ctx) {
           </div>
         </section>
 
-        <section class="panel quick-panel">
-          <header class="panel-head">
-            <div class="panel-title">
-              <h2>Continue documenting</h2>
-            </div>
-          </header>
-          <div class="quick-links">
-            <button type="button" data-goto-tab="phonology"><span class="quick-icon">${icon("grid")}</span><span><strong>Open the charts</strong><small>Add consonants and vowels</small></span>${icon("chevronRight")}</button>
-            <button type="button" data-goto-tab="phonotactics"><span class="quick-icon">${icon("sliders")}</span><span><strong>Set phonotactics</strong><small>Syllable template and word checks</small></span>${icon("chevronRight")}</button>
-            <button type="button" data-goto-tab="changes"><span class="quick-icon">${icon("sound")}</span><span><strong>Write sound changes</strong><small>Staged rules from the ancestor</small></span>${icon("chevronRight")}</button>
-            <button type="button" data-goto-tab="vocabulary"><span class="quick-icon">${icon("book")}</span><span><strong>Add vocabulary</strong><small>Test the rules on real forms</small></span>${icon("chevronRight")}</button>
-          </div>
-        </section>
       </aside>
     </div>
   `;

@@ -4,7 +4,6 @@ import {
   deleteLanguage,
   descendantIds,
   descendantsCount,
-  formatDate,
   languageStats,
   restoreDeletedLanguages,
   rootLanguages,
@@ -239,10 +238,6 @@ export function renderTree(container, ctx) {
               </div>
             </div>`
       }
-      <footer class="page-foot-note">
-        <span>${icon("info")} Each card is a language. Use <strong>+</strong> on a card to add a daughter; open a language to edit its charts, rules, and words.</span>
-        <span class="muted">Project updated ${formatDate(ctx.project.updatedAt)}</span>
-      </footer>
     </section>
   `;
 
@@ -269,14 +264,14 @@ export function renderTree(container, ctx) {
     readout.textContent = `${Math.round(zoom * 100)}%`;
   };
 
-  const fit = () => {
+  const fit = (minimum = 0.32, align = "center") => {
     const viewportWidth = viewport.clientWidth;
     const viewportHeight = viewport.clientHeight;
     if (!viewportWidth || !viewportHeight) return;
     const scale = Math.min(1.05, (viewportWidth - 64) / family.width, (viewportHeight - 64) / family.height);
-    zoom = Math.max(0.32, scale);
+    zoom = Math.max(minimum, scale);
     panX = (viewportWidth - family.width * zoom) / 2;
-    panY = (viewportHeight - family.height * zoom) / 2;
+    panY = align === "top" ? 24 : (viewportHeight - family.height * zoom) / 2;
     applyTransform();
   };
 
@@ -292,7 +287,7 @@ export function renderTree(container, ctx) {
     applyTransform();
   };
 
-  container.querySelector("#fit-tree-floating")?.addEventListener("click", fit);
+  container.querySelector("#fit-tree-floating")?.addEventListener("click", () => fit());
   container.querySelector("#zoom-in")?.addEventListener("click", () => zoomAt(1.18));
   container.querySelector("#zoom-out")?.addEventListener("click", () => zoomAt(1 / 1.18));
 
@@ -352,5 +347,7 @@ export function renderTree(container, ctx) {
     }
   });
 
-  requestAnimationFrame(fit);
+  // Start readable for large families; the Fit button still zooms out to the
+  // whole canvas for an overview.
+  requestAnimationFrame(() => fit(0.8, "top"));
 }
