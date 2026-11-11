@@ -34,6 +34,8 @@ import {
   statusMarkup,
 } from "../ruleEditor.js";
 import { debounce, esc, icon, openModal, toast } from "../ui.js";
+import { languageHref } from "../routes.js";
+import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
 // Curated attested rule groups offered in the Rule library modal; the data
 // module also builds the disabled draft records the insert button pushes.
 import { soundChangeLibrary, newLibraryRules, normalizeLibraryNotation } from "../soundlaws.js";
@@ -748,7 +750,7 @@ function lineageMarkup(ctx) {
     </div>`;
 }
 
-export function renderChanges(container, ctx) {
+export function renderChanges(container, ctx, activeTool = "rules") {
   const language = ctx.language;
   const context = contextForLanguage(ctx.project, language.id);
   const parent = ancestorsOf(ctx.project, language.id).at(-1);
@@ -780,27 +782,36 @@ export function renderChanges(container, ctx) {
         </div>
       </section>
 
-      <div class="changes-layout">
-        <div class="changes-main">
-          <section class="panel rules-panel">
-            <header class="panel-head">
-              <div class="panel-title">
-                <h2>Rules</h2>
-                <p>Top-level rules match the inherited form together; sequential rules then run in order.</p>
-              </div>
-              <button class="button button-primary button-small" type="button" data-add-rule>${icon("plus")}Add rule</button>
-            </header>
-            ${rulesMarkup(language, context, exceptionSuggestions)}
-          </section>
-          ${inheritedPanelMarkup(ctx, directOptionalRules)}
-        </div>
-        <aside class="changes-aside">
-          ${testPanelMarkup(ctx, directOptionalRules)}
-          ${reconstructPanelMarkup(ctx)}
+      ${toolTabsMarkup("changes", activeTool, "Sound change tools")}
+
+      <section class="tool-panel" ${toolPanelAttrs("changes", "rules", activeTool)}>
+        <section class="panel rules-panel">
+          <header class="panel-head">
+            <div class="panel-title">
+              <h2>Rules</h2>
+              <p>Top-level rules match the inherited form together; sequential rules then run in order.</p>
+            </div>
+            <button class="button button-primary button-small" type="button" data-add-rule>${icon("plus")}Add rule</button>
+          </header>
+          ${rulesMarkup(language, context, exceptionSuggestions)}
+        </section>
+        <div class="tool-help-row">
           ${notationHelpMarkup()}
           ${libraryTriggerMarkup()}
-        </aside>
-      </div>
+        </div>
+      </section>
+
+      <section class="tool-panel tool-panel-single" ${toolPanelAttrs("changes", "test", activeTool)}>
+        ${testPanelMarkup(ctx, directOptionalRules)}
+      </section>
+
+      <section class="tool-panel tool-panel-single" ${toolPanelAttrs("changes", "reconstruct", activeTool)}>
+        ${reconstructPanelMarkup(ctx)}
+      </section>
+
+      <section class="tool-panel" ${toolPanelAttrs("changes", "check", activeTool)}>
+        ${inheritedPanelMarkup(ctx, directOptionalRules)}
+      </section>
     </div>
   `;
 
@@ -1227,4 +1238,10 @@ export function renderChanges(container, ctx) {
       toast(`Recorded “${word.gloss}” as ${derived || "∅"}.`, { type: "success" });
     });
   }
+
+  setupToolTabs(container, {
+    tab: "changes",
+    activeTool,
+    hrefForTool: (tool) => languageHref(language, "changes", tool),
+  });
 }

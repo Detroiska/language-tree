@@ -1454,6 +1454,15 @@ code {
 }
 
 .section-copy {
+  max-width: 760px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Stage 2 density pass: language tabs carry the compact tool hint instead of
+   the long intro copy; family-level views keep their explanations. */
+.language-page .section-copy {
   display: none;
 }
 
@@ -1492,6 +1501,89 @@ code {
 
 .workspace-stack > .section-intro {
   margin-bottom: 0;
+}
+
+/* ---- Segmented language tools ------------------------------------ */
+
+.tool-tabs-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 6px 8px 6px 6px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.tool-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tool-tab {
+  height: 27px;
+  padding: 0 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.tool-tab:hover {
+  color: var(--ink);
+  background: rgba(23, 22, 19, 0.06);
+}
+
+.tool-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tool-tab.is-active {
+  color: var(--paper);
+  background: var(--ink);
+}
+
+.tool-hint {
+  flex: 1 1 260px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tool-panel[hidden] {
+  display: none;
+}
+
+.tool-help-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.tool-help-row > * {
+  flex: 1 1 320px;
 }
 
 /* ------------------------------------------------------------------ */

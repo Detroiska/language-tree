@@ -12,6 +12,7 @@ import {
   setParent,
 } from "../model.js";
 import { addAncestor, addSibling, renameLanguage } from "../languageActions.js";
+import { normalizeTool } from "../languageTools.js";
 import { languageHref } from "../routes.js";
 import {
   confirmDialog,
@@ -331,8 +332,9 @@ function renderOverview(content, ctx) {
   });
 }
 
-export function renderLanguage(container, ctx, tabValue) {
+export function renderLanguage(container, ctx, tabValue, toolValue) {
   const activeTab = tabId(tabValue);
+  const activeTool = normalizeTool(activeTab, toolValue);
   container.innerHTML = `
     <section class="page language-page">
       ${languageHeader(ctx, activeTab)}
@@ -353,10 +355,10 @@ export function renderLanguage(container, ctx, tabValue) {
     headerActions(headerCtx);
   });
 
-  if (activeTab === "phonology") renderInventory(content, ctx);
-  else if (activeTab === "phonotactics") renderPhonotactics(content, ctx);
-  else if (activeTab === "changes") renderChanges(content, ctx);
-  else if (activeTab === "allophony") renderAllophony(content, ctx);
+  if (activeTab === "phonology") renderInventory(content, ctx, activeTool);
+  else if (activeTab === "phonotactics") renderPhonotactics(content, ctx, activeTool);
+  else if (activeTab === "changes") renderChanges(content, ctx, activeTool);
+  else if (activeTab === "allophony") renderAllophony(content, ctx, activeTool);
   else if (activeTab === "vocabulary") renderVocabulary(content, ctx);
   else if (activeTab === "analytics") renderAnalytics(content, ctx);
   else renderOverview(content, ctx);

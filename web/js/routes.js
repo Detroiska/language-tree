@@ -1,3 +1,5 @@
+import { defaultToolForTab, normalizeTool } from "./languageTools.js";
+
 // URL hash segments are percent-encoded, but a hand-edited hash can contain
 // an invalid escape such as `%zz`. decodeURIComponent throws on those; keeping
 // the raw segment lets the router reject the id and redirect instead of
@@ -12,7 +14,11 @@ export function decodeHashPart(value) {
 }
 
 // Ids are percent-encoded so a hand-edited id can never break out of the href
-// attribute; decodeHashPart() decodes each segment again when routing.
-export function languageHref(language, tab = "overview") {
-  return `#/language/${encodeURIComponent(language.id)}/${tab}`;
+// attribute; decodeHashPart() decodes each segment again when routing. The
+// default tool is omitted so old tab links stay short and keep working.
+export function languageHref(language, tab = "overview", tool = "") {
+  const validTool = normalizeTool(tab, tool);
+  const suffix =
+    validTool && validTool !== defaultToolForTab(tab) ? `/${encodeURIComponent(validTool)}` : "";
+  return `#/language/${encodeURIComponent(language.id)}/${tab}${suffix}`;
 }
