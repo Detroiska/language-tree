@@ -48,6 +48,8 @@ jobs:
         run: node tests/bulk.test.mjs
       - name: Demo suite
         run: node tests/demo.test.mjs
+      - name: Fuzz suite
+        run: node tests/fuzz.test.mjs
       - name: Server suite
         env:
           PYTHON: python
