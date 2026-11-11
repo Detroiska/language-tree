@@ -9,7 +9,7 @@ export const LANGUAGE_TOOLS = {
       {
         id: "rules",
         label: "Rules",
-        hint: "Write top-level and sequential changes; test and check them below.",
+        hint: "Write top-level and sequential changes, then apply them in Test or Check.",
       },
       {
         id: "test",

@@ -567,7 +567,7 @@ function allophonePanelMarkup(ctx) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="table-foot">The table is derived from the Allophony rules. The charts above list phonemes; these are the surface variants they produce.</p>
+      <p class="table-foot">The table is derived from the Allophony rules. The Inventory tool lists the contrastive phonemes; these are the surface variants they produce.</p>
     </section>`;
 }
 
