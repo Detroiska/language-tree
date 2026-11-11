@@ -10,7 +10,8 @@
 // every major engine path over it. Counts are pinned deliberately: updating the
 // demo should update this file in the same change.
 //
-// Every assertion prints a line; the process exits non-zero on any failure.
+// The summary prints at the end and failures print details; the process exits
+// non-zero on any failure.
 
 import { readFileSync } from "node:fs";
 import {
@@ -42,6 +43,23 @@ function equal(name, actual, expected) {
 function truthy(name, condition) {
   if (condition) passed += 1;
   else failures.push(`${name}\n    expected a truthy result`);
+}
+
+// Comparing the whole document with `equal` would dump two ~810 KB strings
+// into a failing CI log. Report the first divergence and a short window
+// instead.
+function sameDocument(name, actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a === e) {
+    passed += 1;
+    return;
+  }
+  let index = 0;
+  while (index < a.length && index < e.length && a[index] === e[index]) index += 1;
+  failures.push(
+    `${name}\n    documents differ at character ${index} (${a.length} vs ${e.length} characters)\n    expected: ${e.slice(index, index + 120)}\n    actual:   ${a.slice(index, index + 120)}`
+  );
 }
 
 /* ---- load and migrate --------------------------------------------------- */
@@ -109,10 +127,10 @@ truthy(
 
 // Opening a fresh clone must not rewrite the tracked file. If a new persisted
 // field needs a default, update data/example_project.json in the same change.
-equal("ensureProject leaves the tracked demo unchanged", project, raw);
+sameDocument("ensureProject leaves the tracked demo unchanged", project, raw);
 const migratedAgain = structuredClone(project);
 ensureProject(migratedAgain);
-equal("ensureProject is idempotent on the demo", migratedAgain, project);
+sameDocument("ensureProject is idempotent on the demo", migratedAgain, project);
 
 const languageIds = new Set(project.languages.map((language) => language.id));
 truthy(
@@ -286,8 +304,15 @@ equal(
   [6, 2, 0]
 );
 truthy(
-  "every subgrouping panel has at least two daughters",
-  evidence.nodes.every((node) => node.children.length >= 2)
+  "every subgrouping panel agrees with its support count",
+  evidence.nodes.every((node) => {
+    const descendantIds = new Set(node.descendants.map((descendant) => descendant.id));
+    return (
+      node.children.every((child) => descendantIds.has(child.id)) &&
+      (node.status === "supported") === (node.support > 0) &&
+      (node.status === "supported") === (node.warning === "")
+    );
+  })
 );
 
 const analyticsIssues = [];
