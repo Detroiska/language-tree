@@ -10,6 +10,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
              node tests/engine.test.mjs    # engine: rules, features, phonotactics, stress, reconstruction, subgrouping, reports, analytics, sound laws, X-SAMPA, timeline
              node tests/bulk.test.mjs      # word-list import/export parser (RFC 4180 CSV/TSV, JSON)
              node tests/demo.test.mjs      # real-demo smoke test: tracked example_project.json through migration, derivation, reconstruction, reports, subgrouping, analytics, timeline, correspondences
+             node tests/fuzz.test.mjs      # seeded parser fuzzing: generated/mutated rules, CSV/TSV tables, JSON word lists, X-SAMPA; --seed=, --cases=
              node tests/server.test.mjs    # server API: JSON errors, gzip, revisions, Host check, headers, project listing/selection; needs Python 3.10+; each exits non-zero on failure
 - Lint:      npm run lint                   # ESLint over web/js and tests, Ruff over server.py
 - Typecheck: none
@@ -20,7 +21,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - web/index.html, web/css/styles.css   # app shell and the single stylesheet
 - web/js/              # DOM-free engine modules importable from Node plus UI modules; keep new engine logic DOM-free. README "Project layout" lists every module
 - web/js/views/        # render modules for language tabs and family-level views; views/language.js owns the tab bar
-- tests/               # plain-assertion Node suites that print "N passed, M failed"; engine.test.mjs covers the engine modules — not one test file per source module; demo.test.mjs runs the tracked example project through the engine; server.test.mjs spawns server.py against a temp data directory
+- tests/               # plain-assertion Node suites that print "N passed, M failed"; engine.test.mjs covers the engine modules — not one test file per source module; demo.test.mjs runs the tracked example project through the engine; fuzz.test.mjs adds seeded parser properties; server.test.mjs spawns server.py against a temp data directory
 - package.json, eslint.config.mjs, pyproject.toml   # dev-only tooling: npm scripts, ESLint, Ruff
 - .github/workflows/tests.yml   # CI: linters and every suite on Ubuntu and Windows (Node 24, Python 3.12) for every pull request and on main after merge
 - data/example_project.json   # tracked demo family; every other data/*.json is a local, gitignored project. `data/.active-project` remembers the last opened file; the app rewrites project JSON on every save
