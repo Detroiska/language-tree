@@ -248,6 +248,16 @@ equal(
   "gloss\tform\tnote\nbig house\tkasa\ta b"
 );
 equal(
+  "toTsv escapes double quotes as a quoted field",
+  toTsv([{ gloss: "sun", form: "ãka", note: 'quote "x"' }]),
+  'gloss\tform\tnote\nsun\tãka\t"quote ""x"""'
+);
+equal(
+  "a quoted TSV export re-imports with the quote intact",
+  rowOf(parseWordList(toTsv([{ gloss: "sun", form: "ãka", note: 'quote "x"' }]))),
+  { gloss: "sun", form: "ãka", note: 'quote "x"', index: 2 }
+);
+equal(
   "toJson keeps the exact field strings",
   JSON.parse(toJson([{ gloss: "a b", form: "x\ny", note: "" }])),
   [{ gloss: "a b", form: "x\ny", note: "" }]
