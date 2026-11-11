@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Local-first web tool for documenting a constructed language family",
   "scripts": {
-    "test": "node tests/engine.test.mjs && node tests/bulk.test.mjs && node tests/server.test.mjs",
+    "test": "node tests/engine.test.mjs && node tests/bulk.test.mjs && node tests/demo.test.mjs && node tests/server.test.mjs",
     "lint": "npm run lint:js && npm run lint:py",
     "lint:js": "eslint web/js tests",
     "lint:py": "ruff check server.py"

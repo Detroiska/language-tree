@@ -46,6 +46,8 @@ jobs:
         run: node tests/engine.test.mjs
       - name: Bulk suite
         run: node tests/bulk.test.mjs
+      - name: Demo suite
+        run: node tests/demo.test.mjs
       - name: Server suite
         env:
           PYTHON: python
