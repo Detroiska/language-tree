@@ -391,26 +391,11 @@ const NOTES = [
   "semi;colon", "comma,separated", "tab\there", "日本語",
 ];
 
-// toTsv does not escape double quotes yet, so a field containing one loses
-// the quote on re-import (issue #83). Keep this writer property to fields the
-// writer can currently represent; the table and JSON properties still cover
-// quotes, and the issue tracks the export fix.
-const TSV_GLOSSES = GLOSSES.filter((gloss) => !gloss.includes('"'));
-const TSV_NOTES = NOTES.filter((note) => !note.includes('"'));
-
 function randomWord(random) {
   return {
     gloss: pick(random, GLOSSES),
     form: pick(random, FORMS),
     note: pick(random, NOTES),
-  };
-}
-
-function randomTsvWord(random) {
-  return {
-    gloss: pick(random, TSV_GLOSSES),
-    form: pick(random, FORMS),
-    note: pick(random, TSV_NOTES),
   };
 }
 
@@ -515,7 +500,7 @@ runFuzz(
   SEED,
   CASES,
   (random) => {
-    const words = Array.from({ length: randomInt(random, 1, 7) }, () => randomTsvWord(random));
+    const words = Array.from({ length: randomInt(random, 1, 7) }, () => randomWord(random));
     return { words, text: toTsv(words) };
   },
   ({ words, text }) => {

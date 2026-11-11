@@ -308,12 +308,20 @@ function sanitizeField(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+// TSV fields follow the parser's RFC 4180 quoting for the one character that
+// still matters after whitespace is collapsed: a double quote is doubled and
+// the whole field is wrapped, so toTsv output re-imports verbatim.
+function tsvField(value) {
+  const text = sanitizeField(value);
+  return text.includes('"') ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
 // TSV with a header row. Tabs and line breaks inside fields are collapsed to
 // spaces so the sheet stays readable; JSON keeps the exact strings.
 export function toTsv(words) {
   const lines = ["gloss\tform\tnote"];
   for (const word of words) {
-    lines.push([sanitizeField(word.gloss), sanitizeField(word.form), sanitizeField(word.note)].join("\t"));
+    lines.push([tsvField(word.gloss), tsvField(word.form), tsvField(word.note)].join("\t"));
   }
   return lines.join("\n");
 }
