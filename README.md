@@ -457,6 +457,7 @@ language-tree/
       ├─ ruleEditor.js     # shared sound-change and allophony editor pieces
       ├─ soundlaws.js      # attested sound-change library
       ├─ escape.js         # HTML escaping for DOM-free builders
+      ├─ paging.js         # shared page math, pager markup, and focus restoration
       ├─ gloss.js          # gloss normalization shared by lexicon and reports
       ├─ bulk.js           # vocabulary import/export parsing and writers
       ├─ xsampa.js         # X-SAMPA <-> IPA conversion for stored forms
