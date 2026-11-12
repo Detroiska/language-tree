@@ -1549,6 +1549,87 @@ const emptyProject = ensureProject({ title: "Empty", languages: [] });
 equal("an empty project stays empty", emptyProject.languages, []);
 equal("an empty project keeps its title", emptyProject.title, "Empty");
 
+// Unknown fields are the forward-compatibility boundary: a newer build may
+// write data this build does not understand, and loading must not erase it.
+const futureProject = ensureProject({
+  version: 2,
+  title: "Forward compatible",
+  futureProject: { keep: true },
+  languages: [
+    {
+      id: "future",
+      name: "Future",
+      futureLanguage: ["keep"],
+      phonotactics: {
+        template: "(C)V",
+        classes: [{ name: "N", sounds: "n", futureCategory: { keep: true } }],
+        futurePhonotactics: "keep",
+      },
+      featureOverrides: {
+        "t͡s": { place: "alveolar", futureFeature: "keep" },
+      },
+      soundChanges: [{ id: "rule", notation: "p > f", futureRule: { keep: true } }],
+      allophony: [
+        { id: "allo", notation: "p > pʰ", futureAllophone: "keep" },
+        {
+          id: "group",
+          type: "group",
+          name: "Group",
+          futureGroup: "keep",
+          rules: [{ id: "child", notation: "t > tʰ", futureChild: "keep" }],
+        },
+      ],
+      vocabulary: [
+        { id: "word", gloss: "x", form: "p", pos: "n", futureWord: { keep: true } },
+      ],
+    },
+  ],
+});
+equal("a future numeric project version is not downgraded", futureProject.version, 2);
+equal("unknown project fields survive normalization", futureProject.futureProject, { keep: true });
+equal(
+  "unknown language fields survive normalization",
+  futureProject.languages[0].futureLanguage,
+  ["keep"]
+);
+const futureLanguage = futureProject.languages[0];
+equal(
+  "unknown word fields survive normalization",
+  [futureLanguage.vocabulary[0].pos, futureLanguage.vocabulary[0].futureWord],
+  ["n", { keep: true }]
+);
+equal(
+  "unknown sound-change fields survive normalization",
+  futureLanguage.soundChanges[0].futureRule,
+  { keep: true }
+);
+equal(
+  "unknown allophony rule fields survive normalization",
+  futureLanguage.allophony[0].futureAllophone,
+  "keep"
+);
+equal(
+  "unknown allophony group and child fields survive normalization",
+  [futureLanguage.allophony[1].futureGroup, futureLanguage.allophony[1].rules[0].futureChild],
+  ["keep", "keep"]
+);
+equal(
+  "unknown phonotactics and category fields survive normalization",
+  [futureLanguage.phonotactics.futurePhonotactics, futureLanguage.phonotactics.classes[0].futureCategory],
+  ["keep", { keep: true }]
+);
+equal(
+  "unknown feature-override fields survive normalization",
+  Object.values(futureLanguage.featureOverrides)[0].futureFeature,
+  "keep"
+);
+const secondPass = ensureProject(JSON.parse(JSON.stringify(futureProject)));
+equal(
+  "unknown fields survive a second normalization pass",
+  secondPass.languages[0].vocabulary[0].futureWord,
+  { keep: true }
+);
+
 /* ---- id normalization ---------------------------------------------------- */
 
 const hostileId = 'x" onmouseover="alert(1) t="';
