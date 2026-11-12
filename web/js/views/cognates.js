@@ -1,19 +1,16 @@
 import { normalizeGloss } from "../gloss.js";
 import { findLanguage, getLineage, languagesInTreeOrder, uid } from "../model.js";
-import {
-  compileChainFrom,
-  deriveStages,
-  exceptionRulesFromSteps,
-  hasSurfaceDisplay,
-  optionalRulesInStages,
-  optionalSkippedRulesFromSteps,
-  ruleCompileErrors,
-  surfaceForForm,
-} from "../phonology.js";
-import { formatPhonemic, formatPhonetic, joinSegments, sameForm } from "../notation.js";
+import { formatPhonemic, formatPhonetic } from "../notation.js";
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { buildCorrespondences } from "../correspondences.js";
+import {
+  buildCognateMatrix,
+  buildCognateRows,
+  buildCognateTrace,
+  statusForCognate,
+  wordsWithForms,
+} from "../cognateData.js";
 import { MATRIX_PAGE_SIZE, focusPager, pagerMarkup, paginate } from "../paging.js";
 import { esc, icon, toast } from "../ui.js";
 
@@ -29,150 +26,6 @@ const optionalVariantMemory = new Map();
 // The matrix filter and page survive a full re-render (recording a word,
 // changing an optional rule) but stay scoped to the selected source language.
 const matrixViewMemory = new Map();
-
-function wordsWithForms(language) {
-  return language.vocabulary.filter((word) => word.gloss.trim() && word.form.trim());
-}
-
-function recordedFor(targetLanguage, gloss) {
-  const key = normalizeGloss(gloss);
-  if (!key) return null;
-  return (
-    targetLanguage.vocabulary.find((entry) => entry.gloss.trim().toLowerCase() === key && entry.form.trim()) || null
-  );
-}
-
-/*
- * One descriptor per language: whether it descends from the source, the
- * languages between them ("via Old Coastal"), and the compiled rule chain.
- * The source itself stays a row of its own with no chain — its recorded form
- * already contains its own rules.
- */
-function buildRows(project, source) {
-  const rows = [];
-  for (const language of languagesInTreeOrder(project)) {
-    const depth = getLineage(project, language.id).length - 1;
-    if (language.id === source.id) {
-      rows.push({
-        language,
-        depth,
-        isSource: true,
-        descended: true,
-        path: [],
-        chain: null,
-        errors: [],
-        optionalRules: [],
-      });
-      continue;
-    }
-    const lineage = getLineage(project, language.id);
-    const sourceIndex = lineage.findIndex((item) => item.id === source.id);
-    if (sourceIndex === -1) {
-      rows.push({
-        language,
-        depth,
-        isSource: false,
-        descended: false,
-        path: [],
-        chain: null,
-        errors: [],
-        optionalRules: [],
-      });
-      continue;
-    }
-    const chain = compileChainFrom(project, source.id, language.id);
-    const errors = chain.ok ? ruleCompileErrors(chain.stages) : [];
-    rows.push({
-      language,
-      depth,
-      isSource: false,
-      descended: true,
-      path: lineage.slice(sourceIndex + 1, lineage.length - 1),
-      chain,
-      errors,
-      optionalRules: chain.ok ? optionalRulesInStages(chain.stages) : [],
-    });
-  }
-  return rows;
-}
-
-function deriveFor(row, sourceWord, project, optionalRuleIds = []) {
-  if (!row.descended || row.isSource || !row.chain.ok) {
-    const recorded = recordedFor(row.language, sourceWord.gloss);
-    const sourceForm = row.isSource ? sourceWord.form : recorded?.form || "";
-    const surface = sourceForm
-      ? surfaceForForm(sourceForm, project, row.language.id, { gloss: sourceWord.gloss })
-      : null;
-    return {
-      derived: row.isSource ? sourceWord.form : "",
-      surface: surface?.errors.length ? "" : surface?.display || "",
-      steps: [],
-      exceptions: [],
-      skippedOptional: [],
-      error: "",
-      recorded,
-    };
-  }
-  const parsed = row.chain.context.tokenizeWithStress(sourceWord.form);
-  const result = deriveStages(parsed.tokens, row.chain.stages, row.chain.context, {
-    gloss: sourceWord.gloss,
-    junctures: parsed.junctures,
-    optionalRuleIds,
-  });
-  const derived = joinSegments(result.tokens, result.junctures);
-  const surface = result.errors.length
-    ? null
-    : surfaceForForm(derived, project, row.language.id, { gloss: sourceWord.gloss });
-  return {
-    derived,
-    surface: surface?.errors.length ? "" : surface?.display || "",
-    steps: result.steps,
-    exceptions: exceptionRulesFromSteps(result.steps),
-    skippedOptional: optionalSkippedRulesFromSteps(result.steps),
-    error: row.errors[0] || result.errors[0] || "",
-    recorded: recordedFor(row.language, sourceWord.gloss),
-  };
-}
-
-function statusFor(sourceWord, row, cell) {
-  if (!row.descended) return { kind: "outside", label: "—", icon: "info" };
-  if (row.isSource) return { kind: "source", label: "Source", icon: "check" };
-  if (cell.error) return { kind: "error", label: "Rule error", icon: "warning", detail: cell.error };
-  const exceptionSuffix = cell.exceptions?.length
-    ? ` · ${cell.exceptions.length} ${cell.exceptions.length === 1 ? "rule" : "rules"} skipped as lexical ${
-        cell.exceptions.length === 1 ? "exception" : "exceptions"
-      }`
-    : "";
-  const optionalSuffix = cell.skippedOptional?.length
-    ? ` · optional ${cell.skippedOptional.length === 1 ? "change" : "changes"} skipped (${cell.skippedOptional
-        .map((rule) => rule.label || rule.notation)
-        .filter(Boolean)
-        .join(", ")})`
-    : "";
-  const suffix = `${exceptionSuffix}${optionalSuffix}`;
-  if (!cell.recorded || !cell.recorded.form.trim()) {
-    return {
-      kind: "missing",
-      label: "Missing",
-      icon: "info",
-      detail: `No word with the gloss “${sourceWord.gloss}” recorded in ${row.language.name}.`,
-    };
-  }
-  if (sameForm(cell.recorded.form, cell.derived)) {
-    return {
-      kind: "match",
-      label: "Matches",
-      icon: "check",
-      detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"}${suffix}.`,
-    };
-  }
-  return {
-    kind: "differs",
-    label: "Differs",
-    icon: "warning",
-    detail: `Rules predict ${formatPhonemic(cell.derived) || "∅"} · recorded ${formatPhonemic(cell.recorded.form) || "∅"}${suffix}.`,
-  };
-}
 
 const CHIP_CLASS = {
   source: "status-match",
@@ -225,21 +78,12 @@ function stepsMarkup(cell, row = null) {
 
 const singleHash = (languageId, wordId) => `#/cognates/${encodeURIComponent(languageId)}/${encodeURIComponent(wordId)}`;
 
-function introSummary(words, targetRows, cellsForMatrix) {
-  let differs = 0;
-  let missing = 0;
-  let errors = 0;
-  let excepted = 0;
-  let optional = 0;
-  if (cellsForMatrix) {
-    for (const cell of cellsForMatrix) {
-      if (cell.status.kind === "differs") differs += 1;
-      else if (cell.status.kind === "error") errors += 1;
-      else if (cell.status.kind === "missing") missing += 1;
-      if (cell.cell?.exceptions?.length) excepted += 1;
-      if (cell.cell?.skippedOptional?.length) optional += 1;
-    }
-  }
+function introSummary(words, targetRows, counts) {
+  const differs = counts?.cellDiffers || 0;
+  const errors = counts?.cellErrors || 0;
+  const missing = counts?.cellMissing || 0;
+  const excepted = counts?.excepted || 0;
+  const optional = counts?.optional || 0;
   return `
     <div class="inventory-summary">
       <span><strong>${words.length}</strong> ${words.length === 1 ? "gloss" : "glosses"}</span>
@@ -271,29 +115,13 @@ function emptyWordsPanel(source) {
     </section>`;
 }
 
-function matrixFlagsForWord(cells) {
-  return {
-    differs: cells.some((item) => item.status.kind === "differs"),
-    error: cells.some((item) => item.status.kind === "error"),
-    missing: cells.some((item) => item.status.kind === "missing"),
-  };
-}
-
 function matchesMatrixStatus(flags, status) {
   if (status === "attention") return flags.differs || flags.error || flags.missing;
   if (status === "clean") return !flags.differs && !flags.error && !flags.missing;
   return status === "all" || Boolean(flags[status]);
 }
 
-function matrixFilterOptions(flagsByWord, status) {
-  const counts = { all: flagsByWord.size, attention: 0, differs: 0, error: 0, missing: 0, clean: 0 };
-  for (const flags of flagsByWord.values()) {
-    if (flags.differs) counts.differs += 1;
-    if (flags.error) counts.error += 1;
-    if (flags.missing) counts.missing += 1;
-    if (flags.differs || flags.error || flags.missing) counts.attention += 1;
-    else counts.clean += 1;
-  }
+function matrixFilterOptions(counts, status) {
   return [
     ["all", "All glosses"],
     ["attention", "Needs attention"],
@@ -309,7 +137,8 @@ function matrixFilterOptions(flagsByWord, status) {
     .join("");
 }
 
-function matrixMarkup(source, words, targetRows, matrixCells, { status = "all", page = 1 } = {}) {
+function matrixMarkup(source, data, { status = "all", page = 1 } = {}) {
+  const { words, targetRows, cellsByWord, flagsByWord, counts } = data;
   const columnTitles = targetRows.map((row) => {
     const via = row.path.length ? ` via ${row.path.map((item) => item.name).join(" › ")}` : " (direct daughter)";
     const broken = row.errors.length ? ` — rule error: ${row.errors[0]}` : "";
@@ -319,12 +148,6 @@ function matrixMarkup(source, words, targetRows, matrixCells, { status = "all", 
     return `${row.language.name}${via}${broken}${optional}`;
   });
 
-  const cellsByWord = new Map();
-  for (const item of matrixCells) {
-    if (!cellsByWord.has(item.word.id)) cellsByWord.set(item.word.id, []);
-    cellsByWord.get(item.word.id).push(item);
-  }
-  const flagsByWord = new Map(words.map((word) => [word.id, matrixFlagsForWord(cellsByWord.get(word.id) || [])]));
   const filtered = words.filter((word) => matchesMatrixStatus(flagsByWord.get(word.id), status));
   const paging = paginate(filtered, page, MATRIX_PAGE_SIZE);
   const columnCount = targetRows.length + 3;
@@ -375,7 +198,7 @@ function matrixMarkup(source, words, targetRows, matrixCells, { status = "all", 
           : ""
       }
       <div class="table-controls">
-        <select class="select check-status-filter" data-matrix-status aria-label="Filter glosses by status">${matrixFilterOptions(flagsByWord, status)}</select>
+        <select class="select check-status-filter" data-matrix-status aria-label="Filter glosses by status">${matrixFilterOptions(counts, status)}</select>
         <span class="table-controls-count">${filtered.length} of ${words.length} gloss${words.length === 1 ? "" : "es"}</span>
       </div>
       <div class="table-scroll cognate-matrix-scroll">
@@ -568,7 +391,7 @@ function correspondenceBodyMarkup(data) {
     ${correspondenceFindingsMarkup(data)}`;
 }
 
-function correspondencePanelMarkup(data, source) {
+function correspondencePanelMarkup(source) {
   return `
     <section class="panel correspondence-panel" data-correspondence-panel>
       <header class="panel-head">
@@ -582,20 +405,21 @@ function correspondencePanelMarkup(data, source) {
         </div>
         <span class="panel-icon">${icon("grid")}</span>
       </header>
-      <div data-correspondence-body>${correspondenceBodyMarkup(data)}</div>
+      <div data-correspondence-body>
+        <div class="panel-body">
+          <p class="correspondence-loading" role="status">Computing correspondences…</p>
+        </div>
+      </div>
     </section>`;
 }
 
-function traceMarkup(project, source, word, rows, optionalRuleIds = []) {
-  const usable = rows.filter((row) => row.descended);
-  const sourceDepth = getLineage(project, source.id).length - 1;
-  const outside = rows.length - usable.length;
-  const showSurface = usable.some((row) => hasSurfaceDisplay(row.language));
+function traceMarkup(source, word, traceData) {
+  const { rows, cellsByLanguage, showSurface, sourceDepth, outside } = traceData;
 
-  const rowsMarkup = usable
+  const rowsMarkup = rows
     .map((row) => {
-      const cell = deriveFor(row, word, project, optionalRuleIds);
-      const status = statusFor(word, row, cell);
+      const cell = cellsByLanguage.get(row.language.id);
+      const status = statusForCognate(word, row, cell);
       // A differing reflex colors the segments that diverged: minimal
       // alignment over the language's own tokenizer, so the user sees which
       // sound moved instead of a binary "Differs".
@@ -681,15 +505,10 @@ export function renderCognates(container, ctx) {
   }
 
   const words = wordsWithForms(source);
-  const rows = buildRows(project, source);
-  const targetRows = rows.filter((row) => row.descended && !row.isSource);
+  const rowData = buildCognateRows(project, source);
+  const { rows, targetRows, allOptionalRules } = rowData;
   const word = words.find((entry) => entry.id === route.wordId) || null;
   const singleMode = Boolean(word);
-  const allOptionalRules = [
-    ...new Map(
-      targetRows.flatMap((row) => row.optionalRules || []).map((rule) => [rule.id, rule])
-    ).values(),
-  ];
   let optionalSelection = new Set(
     [...(optionalVariantMemory.get(source.id) || [])].filter((id) =>
       allOptionalRules.some((rule) => rule.id === id)
@@ -698,41 +517,27 @@ export function renderCognates(container, ctx) {
   optionalVariantMemory.set(source.id, new Set(optionalSelection));
   const optionalRuleIds = [...optionalSelection];
 
-  // Derive once per (target language, gloss). The matrix reuses these cells;
-  // in single-gloss mode only the traced word is derived.
-  const cellsByLanguage = new Map();
-  for (const row of targetRows) {
-    const traced = singleMode ? [word] : words;
-    cellsByLanguage.set(
-      row.language.id,
-      traced.map((entry) => ({ word: entry, ...deriveFor(row, entry, project, optionalRuleIds) }))
-    );
-  }
-
-  let matrixCells = null;
-  if (!singleMode) {
-    matrixCells = [];
-    for (const row of targetRows) {
-      for (const cell of cellsByLanguage.get(row.language.id)) {
-        matrixCells.push({ word: cell.word, cell, row, status: statusFor(cell.word, row, cell) });
-      }
-    }
-  }
+  // The matrix is a data-only pass: no surface forms and no miss diagnostics.
+  // Its cells feed the filter counts and the status chips; the single-gloss
+  // trace is the only path that derives surfaces.
+  const matrixData = singleMode
+    ? null
+    : buildCognateMatrix(project, source, { rows, optionalRuleIds });
+  const traceData = singleMode
+    ? buildCognateTrace(project, source, word, rows, { optionalRuleIds })
+    : null;
 
   // Correspondence tables need the whole lexicon, so they belong to the
-  // all-glosses view. The panel is rendered with recorded forms and switches
-  // to derived forms lazily when the user asks for them.
-  const correspondenceData =
-    !singleMode && targetRows.length && words.length
-      ? buildCorrespondences(project, source.id)
-      : null;
+  // all-glosses view. Build them after the first paint; until then the panel
+  // shows a placeholder below the fold.
+  const showCorrespondences = !singleMode && targetRows.length && words.length;
 
   const rememberedMatrix = matrixViewMemory.get(source.id) || {};
   let matrixStatus = rememberedMatrix.status || "all";
   let matrixPage = rememberedMatrix.page || 1;
   let matrixView = null;
   if (!singleMode && words.length) {
-    matrixView = matrixMarkup(source, words, targetRows, matrixCells, { status: matrixStatus, page: matrixPage });
+    matrixView = matrixMarkup(source, matrixData, { status: matrixStatus, page: matrixPage });
     matrixPage = matrixView.paging.page;
     matrixViewMemory.set(source.id, { status: matrixStatus, page: matrixPage });
   }
@@ -749,7 +554,7 @@ export function renderCognates(container, ctx) {
               : `Pick a language below, and follow every recorded gloss down through its daughters. Chains apply the staged rules of each language, from ${esc(source.name)} onward.`
           }</p>
         </div>
-        ${singleMode ? "" : introSummary(words, targetRows, matrixCells)}
+        ${singleMode ? "" : introSummary(words, targetRows, matrixData?.counts)}
       </section>
 
       <section class="panel">
@@ -782,14 +587,14 @@ export function renderCognates(container, ctx) {
         }
         ${
           singleMode
-            ? traceMarkup(project, source, word, rows, optionalRuleIds)
+            ? traceMarkup(source, word, traceData)
             : words.length
               ? `<div data-matrix-container>${matrixView.html}</div>`
               : emptyWordsPanel(source)
         }
       </section>
 
-      ${correspondenceData ? correspondencePanelMarkup(correspondenceData, source) : ""}
+      ${showCorrespondences ? correspondencePanelMarkup(source) : ""}
     </div>
   `;
 
@@ -818,7 +623,7 @@ export function renderCognates(container, ctx) {
   const matrixContainer = container.querySelector("[data-matrix-container]");
   const renderMatrixPage = () => {
     if (!matrixContainer) return;
-    matrixView = matrixMarkup(source, words, targetRows, matrixCells, { status: matrixStatus, page: matrixPage });
+    matrixView = matrixMarkup(source, matrixData, { status: matrixStatus, page: matrixPage });
     matrixPage = matrixView.paging.page;
     matrixViewMemory.set(source.id, { status: matrixStatus, page: matrixPage });
     matrixContainer.innerHTML = matrixView.html;
@@ -868,7 +673,7 @@ export function renderCognates(container, ctx) {
   container.querySelectorAll("[data-record-for]").forEach((button) => {
     button.addEventListener("click", () => {
       const row = rows.find((item) => item.language.id === button.dataset.recordFor);
-      const cell = cellsByLanguage.get(button.dataset.recordFor)?.find((entry) => entry.word.id === word.id);
+      const cell = traceData?.cellsByLanguage.get(button.dataset.recordFor);
       if (!row || !cell) return;
       const target = row.language;
       const normalizedGloss = word.gloss.trim().toLowerCase();
@@ -894,21 +699,29 @@ export function renderCognates(container, ctx) {
   if (correspondencePanel) {
     const body = correspondencePanel.querySelector("[data-correspondence-body]");
     const buttons = [...correspondencePanel.querySelectorAll("[data-correspondence-mode]")];
-    const cache = new Map([["recorded", correspondenceData]]);
+    const cache = new Map();
     let activeMode = "recorded";
+
+    const dataFor = (mode) => {
+      if (!cache.has(mode)) cache.set(mode, buildCorrespondences(project, source.id, { mode }));
+      return cache.get(mode);
+    };
+
+    const renderBody = (mode) => {
+      body.innerHTML = correspondenceBodyMarkup(dataFor(mode));
+      buttons.forEach((item) => {
+        const active = item.dataset.correspondenceMode === mode;
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-pressed", String(active));
+      });
+    };
 
     buttons.forEach((button) => {
       button.addEventListener("click", () => {
         const mode = button.dataset.correspondenceMode === "derived" ? "derived" : "recorded";
         if (mode === activeMode) return;
         activeMode = mode;
-        if (!cache.has(mode)) cache.set(mode, buildCorrespondences(project, source.id, { mode }));
-        body.innerHTML = correspondenceBodyMarkup(cache.get(mode));
-        buttons.forEach((item) => {
-          const active = item.dataset.correspondenceMode === mode;
-          item.classList.toggle("is-active", active);
-          item.setAttribute("aria-pressed", String(active));
-        });
+        renderBody(mode);
       });
     });
 
@@ -919,5 +732,20 @@ export function renderCognates(container, ctx) {
       const targetWord = words.find((entry) => normalizeGloss(entry.gloss) === gloss);
       if (targetWord) ctx.navigate(singleHash(source.id, targetWord.id));
     });
+
+    // Correspondence counts span the whole lexicon, so this is the last big
+    // computation of the view. Paint the matrix first, then fill the panel on
+    // the next frame. Animation frames pause in occluded tabs, so a timer
+    // starts the work there instead; either path runs only once.
+    let started = false;
+    const fillRecorded = () => {
+      if (started) return;
+      started = true;
+      if (!correspondencePanel.isConnected || activeMode !== "recorded") return;
+      if (!body.querySelector(".correspondence-loading")) return;
+      renderBody("recorded");
+    };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(fillRecorded);
+    window.setTimeout(fillRecorded, 200);
   }
 }
