@@ -31,6 +31,7 @@ WEB_DIR = ROOT / "web"
 DATA_DIR = ROOT / "data"
 ACTIVE_FILE = DATA_DIR / ".active-project"
 SEED_PROJECT_NAME = "example_project.json"
+DEFAULT_PROJECT_TITLE = "Untitled language family"
 
 MAX_BODY_BYTES = 12 * 1024 * 1024  # Compressed bytes on the wire.
 MAX_JSON_BYTES = 128 * 1024 * 1024  # Decompressed JSON limit.
@@ -89,6 +90,46 @@ def project_path(name: object) -> Path:
     if path.parent != DATA_DIR.resolve() or path.name != name:
         raise InvalidProjectRequest("Project files must live directly in data/.")
     return path
+
+
+# New project names must be portable. Windows reads ":" as an NTFS alternate
+# data stream and treats device names such as CON or AUX as devices even when
+# they carry an extension. Existing files with such names can still be opened;
+# this validation only governs names this server creates.
+PORTABLE_NAME_FORBIDDEN = set('<>:"|?*')
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CLOCK$",
+    "CONIN$",
+    "CONOUT$",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
+
+
+def validate_new_project_name(name: object) -> None:
+    """Refuse a new project name that is not portable to Windows."""
+    if not isinstance(name, str) or not name or "\x00" in name:
+        raise InvalidProjectRequest("A project file name is required.")
+    if "/" in name or "\\" in name:
+        raise InvalidProjectRequest("Project files must live directly in data/.")
+    if not name.lower().endswith(".json"):
+        raise InvalidProjectRequest("Project files must use a .json extension.")
+    if any(char in PORTABLE_NAME_FORBIDDEN or ord(char) < 32 for char in name):
+        raise InvalidProjectRequest(
+            'Project file names cannot contain < > : " | ? * or control characters.'
+        )
+    base = name[:-5].strip()
+    if not base:
+        raise InvalidProjectRequest("Project files need a name before .json.")
+    device = base.split(".", 1)[0].strip().upper()
+    if device in WINDOWS_RESERVED_NAMES:
+        raise InvalidProjectRequest(
+            f"{device} is reserved by Windows; choose another file name."
+        )
 
 
 def read_project_file(name: str) -> dict:
@@ -241,6 +282,18 @@ def validate_project(project: object) -> None:
             raise ValueError("Every language needs a string id.")
         if not isinstance(item.get("name"), str):
             raise ValueError("Every language needs a name.")
+
+
+def blank_project(title: str) -> dict:
+    """A brand-new project starts empty; languages are added in the app."""
+    now = utc_now()
+    return {
+        "version": 1,
+        "title": title,
+        "createdAt": now,
+        "updatedAt": now,
+        "languages": [],
+    }
 
 
 def project_summary(name: str) -> dict:
@@ -474,6 +527,71 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
             return
         self.send_json({"ok": True, "savedAt": project["updatedAt"], "file": name})
 
+    def post_project(self) -> None:
+        ok, payload = self.read_json_body()
+        if not ok:
+            return
+        if not isinstance(payload, dict):
+            self.send_json(
+                {"error": "The request must be a JSON object with a file name and title."},
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        title = payload.get("title", "")
+        if not isinstance(title, str):
+            self.send_json({"error": "The project title must be a string."}, HTTPStatus.BAD_REQUEST)
+            return
+        title = title.strip() or DEFAULT_PROJECT_TITLE
+        name = payload.get("file")
+        try:
+            # Validate before reserving the name: on Windows some names (":"
+            # streams, reserved devices) fail only after the base file exists.
+            validate_new_project_name(name)
+            path = project_path(name)
+        except InvalidProjectRequest as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            with SAVE_LOCK:
+                if os.path.lexists(path):
+                    self.send_json(
+                        {"error": f"A project file named {name} already exists."},
+                        HTTPStatus.CONFLICT,
+                    )
+                    return
+                try:
+                    # Reserve the name before writing so a second server process
+                    # cannot create the same project between the check and the
+                    # write. The reserved empty file is replaced atomically below.
+                    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+                except FileExistsError:
+                    self.send_json(
+                        {"error": f"A project file named {name} already exists."},
+                        HTTPStatus.CONFLICT,
+                    )
+                    return
+                try:
+                    os.close(descriptor)
+                    project = blank_project(title)
+                    write_project(project, name)
+                    write_active_name(name)
+                except BaseException:
+                    # A failed creation must not leave a broken file behind.
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+                    raise
+        except OSError as exc:
+            self.log_error("Could not create project %r: %s", name, exc)
+            self.send_json(
+                {"error": "Could not create the project file."},
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+            return
+        self.send_json({"ok": True, "file": name, "project": project}, HTTPStatus.CREATED)
+
     def put_active_project(self) -> None:
         ok, payload = self.read_json_body()
         if not ok:
@@ -535,6 +653,11 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
+        if not self.host_allowed():
+            return
+        if urlparse(self.path).path == "/api/projects":
+            self.post_project()
+            return
         self.method_not_allowed()
 
     def do_DELETE(self) -> None:  # noqa: N802 (stdlib naming)
@@ -587,17 +710,7 @@ def ensure_data_files() -> None:
     """Create a first project and keep the active-project pointer usable."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not project_names():
-        now = utc_now()
-        write_project(
-            {
-                "version": 1,
-                "title": "Example language family",
-                "createdAt": now,
-                "updatedAt": now,
-                "languages": [],
-            },
-            SEED_PROJECT_NAME,
-        )
+        write_project(blank_project("Example language family"), SEED_PROJECT_NAME)
     active = resolve_active_name()
     if active is not None and read_active_name() != active:
         write_active_name(active)

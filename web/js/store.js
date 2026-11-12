@@ -68,10 +68,9 @@ class ProjectStore {
     return listing;
   }
 
-  // Open another project file. Unsaved work is flushed first; a failed save
-  // aborts the switch rather than silently discarding it.
-  async switchProject(file) {
-    if (!file || (file === this.projectFile && this.project)) return false;
+  // Settle pending edits before opening or creating another project. A failed
+  // save aborts the operation rather than silently discarding local work.
+  async #settleSaves(message) {
     if (this.dirty) await this.flush();
     if (this.saveState === "saving") {
       await new Promise((resolve) => {
@@ -83,8 +82,22 @@ class ProjectStore {
       });
     }
     if (this.dirty || this.saveState === "error" || this.saveState === "conflict") {
-      throw new Error(this.saveError || "Could not save the current project before switching.");
+      throw new Error(this.saveError || message);
     }
+  }
+
+  // Create a blank project on the server without opening it. The caller can
+  // then switch to it with switchProject(), which also refreshes the listing.
+  async createProject(title, file) {
+    await this.#settleSaves("Could not save the current project before creating another.");
+    return api.createProject(title, file);
+  }
+
+  // Open another project file. Unsaved work is flushed first; a failed save
+  // aborts the switch rather than silently discarding it.
+  async switchProject(file) {
+    if (!file || (file === this.projectFile && this.project)) return false;
+    await this.#settleSaves("Could not save the current project before switching.");
     // Fetch before changing the active pointer or the open document: a broken
     // or missing file must leave the current project exactly as it was.
     const previousFile = this.projectFile;

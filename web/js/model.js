@@ -162,6 +162,21 @@ function createProject(title = "Untitled language family") {
   };
 }
 
+// A readable default file name for a new project. The create dialog keeps it
+// editable, so this only needs to handle the common case; the server remains
+// the authority on which names are allowed.
+export function projectFileName(title) {
+  const slug = String(title ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .replace(/-+$/g, "");
+  return `${slug || "untitled-project"}.json`;
+}
+
 function ensureAxisNode(node, kind, seen) {
   if (!node || typeof node !== "object" || Array.isArray(node)) return null;
   if (typeof node.id === "number") node.id = String(node.id);

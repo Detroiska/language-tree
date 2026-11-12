@@ -42,6 +42,15 @@ export const api = {
       body: JSON.stringify({ file }),
     });
   },
+  // Create a blank project file and make it active. Creation never overwrites:
+  // the server answers 409 when the file name is already taken.
+  createProject(title, file) {
+    return request("/api/projects", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ title, file }),
+    });
+  },
   loadProject(file = null) {
     return request(`/api/project${projectQuery(file)}`);
   },

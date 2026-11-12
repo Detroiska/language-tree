@@ -593,6 +593,150 @@ try {
     secondProject.title
   );
 
+  /* ---- creating projects ------------------------------------------------- */
+
+  const createHeaders = { "Content-Type": "application/json" };
+  const created = await call(server, "/api/projects", {
+    method: "POST",
+    headers: createHeaders,
+    body: JSON.stringify({ title: "  Fresh family  ", file: "fresh_family.json" }),
+  });
+  equal("POST /api/projects creates a project", created.status, 201);
+  equal("creation trims the title", created.json?.project?.title, "Fresh family");
+  equal(
+    "creation returns a blank version 1 document",
+    [created.json?.project?.version, created.json?.project?.languages],
+    [1, []]
+  );
+  truthy(
+    "creation stamps the new document",
+    typeof created.json?.project?.createdAt === "string" &&
+      created.json.project.createdAt === created.json.project.updatedAt
+  );
+  equal("creation reports the new file", created.json?.file, "fresh_family.json");
+  equal(
+    "creation makes the new project active",
+    (await call(server, "/api/projects")).json?.active,
+    "fresh_family.json"
+  );
+  equal(
+    "the created project opens through the API",
+    (await call(server, "/api/project")).json?.title,
+    "Fresh family"
+  );
+
+  const blankTitle = await call(server, "/api/projects", {
+    method: "POST",
+    headers: createHeaders,
+    body: JSON.stringify({ file: "untitled_family.json", title: "   " }),
+  });
+  equal("creation accepts a blank title", blankTitle.status, 201);
+  equal("a blank title uses the default", blankTitle.json?.project?.title, "Untitled language family");
+
+  const missingTitle = await call(server, "/api/projects", {
+    method: "POST",
+    headers: createHeaders,
+    body: JSON.stringify({ file: "missing_title.json" }),
+  });
+  equal("creation accepts a missing title", missingTitle.status, 201);
+  equal("a missing title uses the default", missingTitle.json?.project?.title, "Untitled language family");
+
+  const secondFamily = await call(server, "/api/projects", {
+    method: "POST",
+    headers: createHeaders,
+    body: JSON.stringify({ file: "second_family.json", title: "Second family" }),
+  });
+  equal("creation can add a second project", secondFamily.status, 201);
+  await call(server, "/api/project?file=second_family.json", {
+    method: "PUT",
+    headers: createHeaders,
+    body: JSON.stringify({ ...project, title: "Keep me" }),
+  });
+  const duplicateCreate = await call(server, "/api/projects", {
+    method: "POST",
+    headers: createHeaders,
+    body: JSON.stringify({ file: "second_family.json", title: "Replacement" }),
+  });
+  equal("creating an existing project is 409", duplicateCreate.status, 409);
+  equal(
+    "a duplicate does not overwrite the existing document",
+    (await call(server, "/api/project?file=second_family.json")).json?.title,
+    "Keep me"
+  );
+  equal(
+    "a failed creation leaves the active project alone",
+    (await call(server, "/api/projects")).json?.active,
+    "second_family.json"
+  );
+
+  const directoryCollision = await call(server, "/api/projects", {
+    method: "POST",
+    headers: createHeaders,
+    body: JSON.stringify({ file: "folder.json" }),
+  });
+  equal("creation refuses to replace a directory named .json", directoryCollision.status, 409);
+  equal(
+    "a directory named .json is not opened as a project",
+    (await call(server, "/api/project?file=folder.json")).status,
+    404
+  );
+  if (symlinkCreated) {
+    const symlinkCollision = await call(server, "/api/projects", {
+      method: "POST",
+      headers: createHeaders,
+      body: JSON.stringify({ file: "alias.json" }),
+    });
+    equal("creation refuses a symlinked project name", symlinkCollision.status, 400);
+  }
+
+  const dataBefore = readdirSync(join(server.root, "data")).sort();
+  const invalidCreates = [
+    ["a missing file name", { title: "No file" }, 400],
+    ["a non-string file name", { file: 42 }, 400],
+    ["a path outside data/", { file: "../outside.json" }, 400],
+    ["a nested file name", { file: "nested/fresh.json" }, 400],
+    ["a non-JSON file name", { file: "notes.txt" }, 400],
+    ["a name with nothing before .json", { file: ".json" }, 400],
+    // These pass project_path() on at least one platform but are not portable
+    // file names. Windows treats ":" as an NTFS stream, and reserved device
+    // names (CON, AUX, …) open devices instead of files.
+    ["a name with a colon", { file: "colon:family.json" }, 400],
+    ["a name with a question mark", { file: "what?.json" }, 400],
+    ["a Windows reserved device name", { file: "con.json" }, 400],
+    ["a reserved device name with a title", { file: "AUX.json", title: "Aux" }, 400],
+    ["an uppercase extension with no name", { file: ".JSON" }, 400],
+    ["a non-string title", { file: "number_title.json", title: 42 }, 400],
+  ];
+  for (const [label, body, status] of invalidCreates) {
+    const response = await call(server, "/api/projects", {
+      method: "POST",
+      headers: createHeaders,
+      body: JSON.stringify(body),
+    });
+    equal(`${label} is ${status}`, response.status, status);
+    truthy(`${label} returns a JSON error`, typeof response.json?.error === "string");
+  }
+
+  const arrayBody = await call(server, "/api/projects", {
+    method: "POST",
+    headers: createHeaders,
+    body: JSON.stringify([{ file: "array.json" }]),
+  });
+  equal("a non-object create body is 400", arrayBody.status, 400);
+  const noBody = await call(server, "/api/projects", { method: "POST" });
+  equal("an empty create body is 400", noBody.status, 400);
+
+  equal(
+    "failed creations leave the data directory unchanged",
+    readdirSync(join(server.root, "data")).sort(),
+    dataBefore
+  );
+  equal(
+    "failed creations leave the active project alone",
+    (await call(server, "/api/projects")).json?.active,
+    "second_family.json"
+  );
+
   const badProjectQuery = await call(server, "/api/project?file=../server.py");
   equal("GET /api/project refuses paths outside data/", badProjectQuery.status, 400);
   const blankProjectQuery = await call(server, "/api/project?file=");
