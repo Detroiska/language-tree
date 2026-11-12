@@ -190,30 +190,38 @@ function renderOverview(content, ctx) {
   content.innerHTML = `
     <div class="overview-grid">
       <section class="overview-main">
-        <div class="stat-grid">
-          <button class="stat-card" type="button" data-goto-tab="phonology">
-            <span class="stat-label">Phonology</span>
-            <span class="stat-value">${stats.consonants + stats.vowels}</span>
-            <span class="stat-detail">${stats.consonants} consonants · ${stats.vowels} vowels</span>
-            ${icon("grid", "stat-icon")}
+        <div class="vitals-strip" role="group" aria-label="Language vitals">
+          <button class="vital" type="button" data-goto-tab="phonology">
+            <span class="vital-top">
+              <span class="vital-label">Phonology</span>
+              ${icon("grid", "vital-icon")}
+            </span>
+            <span class="vital-value">${stats.consonants + stats.vowels}</span>
+            <span class="vital-detail">${stats.consonants} consonants · ${stats.vowels} vowels</span>
           </button>
-          <button class="stat-card" type="button" data-goto-tab="changes">
-            <span class="stat-label">Sound changes</span>
-            <span class="stat-value">${stats.changes}</span>
-            <span class="stat-detail">${parent ? `from ${esc(parent.name)}` : "root language"}</span>
-            ${icon("sound", "stat-icon")}
+          <button class="vital" type="button" data-goto-tab="changes">
+            <span class="vital-top">
+              <span class="vital-label">Sound changes</span>
+              ${icon("sound", "vital-icon")}
+            </span>
+            <span class="vital-value">${stats.changes}</span>
+            <span class="vital-detail">${parent ? `from ${esc(parent.name)}` : "root language"}</span>
           </button>
-          <button class="stat-card" type="button" data-goto-tab="vocabulary">
-            <span class="stat-label">Vocabulary</span>
-            <span class="stat-value">${stats.words}</span>
-            <span class="stat-detail">${stats.words === 1 ? "lexical entry" : "lexical entries"}</span>
-            ${icon("book", "stat-icon")}
+          <button class="vital" type="button" data-goto-tab="vocabulary">
+            <span class="vital-top">
+              <span class="vital-label">Vocabulary</span>
+              ${icon("book", "vital-icon")}
+            </span>
+            <span class="vital-value">${stats.words}</span>
+            <span class="vital-detail">${stats.words === 1 ? "lexical entry" : "lexical entries"}</span>
           </button>
-          <div class="stat-card stat-card-static">
-            <span class="stat-label">Generation</span>
-            <span class="stat-value">${lineage.length}</span>
-            <span class="stat-detail">${children.length} direct ${children.length === 1 ? "daughter" : "daughters"}</span>
-            ${icon("tree", "stat-icon")}
+          <div class="vital vital-static">
+            <span class="vital-top">
+              <span class="vital-label">Generation</span>
+              ${icon("tree", "vital-icon")}
+            </span>
+            <span class="vital-value">${lineage.length}</span>
+            <span class="vital-detail">${children.length} direct ${children.length === 1 ? "daughter" : "daughters"}</span>
           </div>
         </div>
 
@@ -225,7 +233,7 @@ function renderOverview(content, ctx) {
             </div>
           </header>
           <div class="panel-body">
-            <textarea class="textarea notes-area" rows="7" data-language-notes placeholder="Describe the language, its speakers, its position in the family…">${esc(language.notes)}</textarea>
+            <textarea class="textarea notes-area" rows="5" data-language-notes placeholder="Describe the language, its speakers, its position in the family…">${esc(language.notes)}</textarea>
           </div>
         </section>
 
