@@ -3,6 +3,7 @@ import { STRESS_SYSTEMS, normalizeStressSystem, stressLabel } from "../prosody.j
 import { suggestClassRefs } from "../naturalclasses.js";
 import { cellKey, chartLeaves, nodeLeafIds } from "../model.js";
 import { esc, icon, toast } from "../ui.js";
+import { CHECK_PAGE_SIZE, focusPager, pagerMarkup, paginate } from "../paging.js";
 import { languageHref } from "../routes.js";
 import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
 
@@ -259,24 +260,38 @@ function testResultMarkup(result, stress = "none") {
     </div>`;
 }
 
-function wordCheckMarkup(language, checker, results) {
+function matchesWordCheckStatus(result, status) {
+  const value = statusOf(result);
+  if (status === "attention") return value === "invalid" || value === "template-error";
+  return status === "all" || status === value;
+}
+
+function wordCheckMarkup(language, checker, results, { status = "all", page = 1 } = {}) {
   if (!language.vocabulary.length) {
-    return `
-      <div class="notice notice-quiet">
-        ${icon("book")}
-        <p>No words yet. Add vocabulary, then return here to check the forms against the template.</p>
-        <button class="button button-quiet button-small" type="button" data-open-vocabulary>${icon("book")}Open vocabulary</button>
-      </div>`;
+    return {
+      html: `
+        <div class="notice notice-quiet">
+          ${icon("book")}
+          <p>No words yet. Add vocabulary, then return here to check the forms against the template.</p>
+          <button class="button button-quiet button-small" type="button" data-open-vocabulary>${icon("book")}Open vocabulary</button>
+        </div>`,
+      paging: paginate([], page, CHECK_PAGE_SIZE),
+    };
   }
 
   // results are computed once by refresh() and passed in: validating the
   // whole lexicon twice per keystroke doubles the cost for no benefit.
-  const rows = language.vocabulary
-    .map((word, index) => {
-      const result = results[index];
-      const status = statusOf(result);
+  const entries = language.vocabulary.map((word, index) => ({
+    word,
+    result: results[index],
+    status: statusOf(results[index]),
+  }));
+  const filtered = entries.filter((entry) => matchesWordCheckStatus(entry.result, status));
+  const paging = paginate(filtered, page, CHECK_PAGE_SIZE);
+  const rows = paging.items
+    .map(({ word, result, status: rowStatus }) => {
       return `
-        <tr class="${status === "invalid" ? "is-invalid" : ""}">
+        <tr class="${rowStatus === "invalid" ? "is-invalid" : ""}">
           <td class="gloss-cell">${word.gloss.trim() ? esc(word.gloss) : `<span class="muted">untitled</span>`}</td>
           <td><code class="ipa">${word.form.trim() ? esc(word.form) : `<span class="muted">no form</span>`}</code></td>
           <td><code class="ipa">${esc(result.displayText || result.syllableText) || "—"}</code></td>
@@ -292,16 +307,24 @@ function wordCheckMarkup(language, checker, results) {
     })
     .join("");
 
-  return `
-    <div class="table-scroll">
-      <table class="data-table phonotactics-check-table">
-        <thead>
-          <tr><th>Gloss</th><th>Form</th><th>Syllables</th><th>Status</th><th>Issues</th></tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <p class="table-foot">Syllables use the maximal onset principle. A dash in the syllable column means the form could not be fully parsed.</p>`;
+  return {
+    html: `
+      <div class="table-scroll">
+        <table class="data-table phonotactics-check-table">
+          <thead>
+            <tr><th>Gloss</th><th>Form</th><th>Syllables</th><th>Status</th><th>Issues</th></tr>
+          </thead>
+          <tbody>${
+            paging.items.length
+              ? rows
+              : `<tr><td class="table-empty-cell" colspan="5">No forms match this filter.</td></tr>`
+          }</tbody>
+        </table>
+      </div>
+      ${pagerMarkup(paging, { noun: "forms", label: "Vocabulary check pages" })}
+      <p class="table-foot">Syllables use the maximal onset principle. A dash in the syllable column means the form could not be fully parsed.</p>`,
+    paging,
+  };
 }
 
 export function renderPhonotactics(container, ctx, activeTool = "template") {
@@ -518,6 +541,14 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
               <p>Every recorded form against the inventory and syllable template.</p>
             </div>
             <div class="panel-actions">
+              <select class="select check-status-filter" data-phonotactics-word-status aria-label="Filter vocabulary forms by status">
+                <option value="all">All forms</option>
+                <option value="attention">Needs attention</option>
+                <option value="invalid">Invalid</option>
+                <option value="template-error">Template errors</option>
+                <option value="off">Checks off</option>
+                <option value="valid">Valid</option>
+              </select>
               <span class="check-summary" data-phonotactics-word-summary></span>
               <button class="button button-quiet button-small" type="button" data-open-vocabulary>${icon("book")}Open vocabulary</button>
             </div>
@@ -538,12 +569,21 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   const testResultElement = container.querySelector("[data-phonotactics-test-result]");
   const markStressButton = container.querySelector("[data-mark-stress]");
 
+  let wordCheckStatus = "all";
+  let wordCheckPage = 1;
+
   const refresh = () => {
     checker = createPhonotacticsChecker(language);
     const results = language.vocabulary.map((word) => checker.validate(word.form));
     summaryElement.innerHTML = summaryMarkup(results, checker.compiled);
     wordSummaryElement.textContent = summaryText(results, checker.compiled);
-    wordCheckElement.innerHTML = wordCheckMarkup(language, checker, results);
+    const wordCheck = wordCheckMarkup(language, checker, results, {
+      status: wordCheckStatus,
+      page: wordCheckPage,
+    });
+    // A template or filter change can shrink the list under the current page.
+    wordCheckPage = wordCheck.paging.page;
+    wordCheckElement.innerHTML = wordCheck.html;
     templateStatusElement.innerHTML = templateStatusMarkup(checker.compiled);
     templateFeedbackElement.innerHTML = templateFeedbackMarkup(checker.compiled);
     templateShapesElement.innerHTML = shapeMarkup(checker.compiled);
@@ -723,7 +763,21 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
 
   testInput?.addEventListener("input", updateTest);
 
+  container.querySelector("[data-phonotactics-word-status]")?.addEventListener("change", (event) => {
+    wordCheckStatus = event.target.value;
+    wordCheckPage = 1;
+    refresh();
+  });
+
   container.addEventListener("click", (event) => {
+    const pageButton = event.target.closest("[data-pager-page]");
+    if (pageButton) {
+      const action = pageButton.dataset.pagerAction;
+      wordCheckPage = Number(pageButton.dataset.pagerPage);
+      refresh();
+      focusPager(wordCheckElement, action);
+      return;
+    }
     if (event.target.closest("[data-mark-stress]")) {
       if (checker.stress === "none") {
         toast("Choose a stress system first.");

@@ -85,6 +85,15 @@ import {
   normalizeTool,
   toolsForTab,
 } from "../web/js/languageTools.js";
+import {
+  CHECK_PAGE_SIZE,
+  MATRIX_PAGE_SIZE,
+  clampPage,
+  focusPager,
+  pageCount,
+  pagerMarkup,
+  paginate,
+} from "../web/js/paging.js";
 import { alignSegments, diffPairMarkup, formDiffMarkup } from "../web/js/diff.js";
 import { analyzeLexicon } from "../web/js/analytics.js";
 import { alignCognate, buildCorrespondences } from "../web/js/correspondences.js";
@@ -203,6 +212,103 @@ equal(
   languageHref(toolLinkLanguage, "allophony", "bogus"),
   "#/language/Proto%20North/allophony"
 );
+
+/* ---- table paging ------------------------------------------------------- */
+
+const pagingItems = Array.from({ length: 121 }, (_, index) => index + 1);
+const emptyPage = paginate([], 9, CHECK_PAGE_SIZE);
+equal(
+  "empty tables stay on a single empty page",
+  [emptyPage.page, emptyPage.pages, emptyPage.first, emptyPage.last, emptyPage.items.length],
+  [1, 1, 0, 0, 0]
+);
+equal("page counts round up and never drop below one", [pageCount(0, 50), pageCount(121, 50), pageCount(120, 50)], [1, 3, 3]);
+equal("pages clamp into range", [clampPage(0, 121, 50), clampPage(99, 121, 50)], [1, 3]);
+
+const firstPage = paginate(pagingItems, 1, CHECK_PAGE_SIZE);
+equal(
+  "the first page fills its window",
+  [firstPage.items.length, firstPage.items[0], firstPage.items.at(-1), firstPage.first, firstPage.last],
+  [50, 1, 50, 1, 50]
+);
+equal("the first page knows the table total", [firstPage.total, firstPage.pages], [121, 3]);
+
+const middlePage = paginate(pagingItems, 2, CHECK_PAGE_SIZE);
+equal("a middle page slices its own window", [middlePage.items[0], middlePage.items.at(-1), middlePage.start, middlePage.end], [51, 100, 50, 100]);
+
+const lastPage = paginate(pagingItems, 99, CHECK_PAGE_SIZE);
+equal(
+  "an out-of-range page clamps to the last window",
+  [lastPage.page, lastPage.items.length, lastPage.first, lastPage.last],
+  [3, 21, 101, 121]
+);
+equal("check and matrix page sizes stay bounded", [CHECK_PAGE_SIZE, MATRIX_PAGE_SIZE], [50, 25]);
+
+const firstPager = pagerMarkup(firstPage, { noun: "words", label: "Check pages" });
+truthy("the pager shows the visible range", firstPager.includes("1–50 of 121 words"));
+truthy("the pager labels the current page", firstPager.includes("Page 1 of 3"));
+truthy("the pager disables the first and previous buttons on page one", firstPager.includes('data-pager-page="1" disabled'));
+truthy("the pager offers the next page", firstPager.includes('data-pager-page="2"'));
+truthy("the pager is a labelled navigation landmark", firstPager.includes('<nav class="table-pager" aria-label="Check pages"'));
+equal("a single-page table gets a range without page buttons", pagerMarkup(paginate([1, 2], 1, 50)).includes("data-pager-page"), false);
+
+// Minimal DOM stand-in: focusPager only reads data-pager-action, disabled, and
+// calls focus(), so a handful of plain objects covers the keyboard contract.
+function pagerStub(buttons) {
+  const controls = buttons.map(([action, disabled]) => ({
+    dataset: { pagerAction: action },
+    disabled,
+    focused: false,
+    focus() {
+      this.focused = true;
+    },
+  }));
+  return {
+    controls,
+    querySelector: (selector) =>
+      selector === "[data-pager]" ? { querySelectorAll: () => controls } : null,
+  };
+}
+
+const middlePagerStub = pagerStub([
+  ["first", false],
+  ["previous", false],
+  ["next", false],
+  ["last", false],
+]);
+equal("focus restoration reports success", focusPager(middlePagerStub, "next"), true);
+equal(
+  "focus returns to the same pager control after paging",
+  middlePagerStub.controls.find((control) => control.dataset.pagerAction === "next").focused,
+  true
+);
+
+const boundaryPagerStub = pagerStub([
+  ["first", false],
+  ["previous", false],
+  ["next", true],
+  ["last", true],
+]);
+focusPager(boundaryPagerStub, "next");
+equal(
+  "a disabled Next hands focus to Previous instead of dropping it",
+  boundaryPagerStub.controls.find((control) => control.dataset.pagerAction === "previous").focused,
+  true
+);
+
+const openingPagerStub = pagerStub([
+  ["first", true],
+  ["previous", true],
+  ["next", false],
+  ["last", false],
+]);
+focusPager(openingPagerStub, "previous");
+equal(
+  "a disabled Previous hands focus to Next on the first page",
+  openingPagerStub.controls.find((control) => control.dataset.pagerAction === "next").focused,
+  true
+);
+equal("focus restoration is a no-op without a pager", focusPager(null, "next"), false);
 
 /* ---- language tree order ------------------------------------------------ */
 
