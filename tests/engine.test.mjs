@@ -21,6 +21,7 @@ import {
   normalizeRuleDate,
   normalizeRuleExceptions,
   normalizeRuleRate,
+  projectFileName,
   restoreAllophonyGroup,
   restoreAllophonyRule,
   restoreDeletedLanguages,
@@ -1548,6 +1549,26 @@ equal(
 const emptyProject = ensureProject({ title: "Empty", languages: [] });
 equal("an empty project stays empty", emptyProject.languages, []);
 equal("an empty project keeps its title", emptyProject.title, "Empty");
+
+equal(
+  "a project title becomes a readable file name",
+  projectFileName("Proto-Balto-Slavic Family"),
+  "proto-balto-slavic-family.json"
+);
+equal("file names drop diacritics and punctuation", projectFileName("Café & Crème"), "cafe-creme.json");
+equal(
+  "a title with no Latin letters falls back to a stable name",
+  projectFileName("Классический науатль"),
+  "untitled-project.json"
+);
+equal("a blank title falls back to a stable name", projectFileName("   "), "untitled-project.json");
+const longFileName = projectFileName("a".repeat(200));
+equal("generated file names are bounded", [longFileName.length, longFileName.endsWith(".json")], [65, true]);
+equal(
+  "a generated file name never ends in a hyphen",
+  projectFileName(`${"a".repeat(59)} b`),
+  `${"a".repeat(59)}.json`
+);
 
 // Unknown fields are the forward-compatibility boundary: a newer build may
 // write data this build does not understand, and loading must not erase it.

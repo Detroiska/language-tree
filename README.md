@@ -26,7 +26,7 @@ python3 server.py
 
 The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the browser launch, or `--port 9000` to choose another port.
 
-The repository ships with a demo family, `data/example_project.json`: a documented Classical Nahuatl root whose 221-word lexicon comes from the Wiktionary Classical Nahuatl lemmas, plus 22 speculative descendants in two branches (a Proto-Balto-Slavic-style branch and a Proto-Arabic-style branch) over three derived generations, ending in Lithuanian, Polish, Palestinian, Mahri and more. Every `.json` file directly under `data/` is a project: use the project switcher in the top bar to list them and open one, and the server remembers that choice in the gitignored `data/.active-project`. Other project files, such as `data/personal_project.json`, are gitignored too, so personal families stay local; only `example_project.json` is tracked. Add a project by dropping its `.json` file into `data/` and picking it in the switcher.
+The repository ships with a demo family, `data/example_project.json`: a documented Classical Nahuatl root whose 221-word lexicon comes from the Wiktionary Classical Nahuatl lemmas, plus 22 speculative descendants in two branches (a Proto-Balto-Slavic-style branch and a Proto-Arabic-style branch) over three derived generations, ending in Lithuanian, Polish, Palestinian, Mahri and more. Every `.json` file directly under `data/` is a project: use the project switcher in the top bar to list them, open one, or create a new one from a title and file name. A new project starts as a blank document, and the server remembers the active choice in the gitignored `data/.active-project`. Other project files, such as `data/personal_project.json`, are gitignored too, so personal families stay local; only `example_project.json` is tracked. You can also add a project by dropping its `.json` file into `data/` and picking it in the switcher.
 
 ## What is here
 
@@ -50,7 +50,7 @@ The repository ships with a demo family, `data/example_project.json`: a document
 - **Chart-class autocomplete** — typing in a sound-change or allophony rule field suggests the class references the lineage's charts actually support (`plosive.plain`, `V.back`), with member counts; ↑/↓/Enter or a click inserts the exact spelling at the caret, so a mistyped class cannot sneak in.
 - **Bulk vocabulary import / export** — paste a TSV, CSV, space-aligned, or JSON word list into any language with a live preview and dedupe control; export the same list back to TSV (spreadsheets) or JSON (tools).
 - **Family report & JSON backup** — download the whole family as a plain-text Markdown report or a self-contained HTML page (tree, inventories, phonotactics, sound changes, allophony, vocabulary, cognate sets), or snapshot the exact project document as JSON.
-- **Selectable JSON projects** — any `.json` file under `data/`, pretty-printed for readable diffs. The top-bar project switcher lists them and remembers the active file; the tracked `example_project.json` is the demo family, while personal projects stay gitignored.
+- **Selectable JSON projects** — create a blank project from the top-bar switcher or open any `.json` file under `data/`, pretty-printed for readable diffs. The switcher lists them and remembers the active file; creation refuses an existing file name, so it cannot overwrite a family. The tracked `example_project.json` is the demo family, while personal projects stay gitignored.
 - **Collapsible sidebar** — the menu button in the top bar hides the language tree and family links for a wider workspace on desktop, and the choice is remembered; on narrow screens the same button opens the sidebar as an overlay.
 
 ## Using the app
@@ -367,7 +367,7 @@ The report writes lexical forms as `/…/` and surface examples as `[…]`, incl
 
 ## Data and git
 
-Everything is saved to the active project file in `data/` automatically after a short debounce. Switching projects flushes pending changes and stores the new filename in `data/.active-project`, so the next launch reopens it. The file is deliberately human-readable and stable enough for line-based diffs. Loading normalizes known fields but preserves unknown ones and a numeric `version` marker, so a document written by a future build is not silently stripped when this build opens and saves it. Each language keeps its diachronic `soundChanges` and its ordered synchronic `allophony` list as separate arrays, and word/chart forms are stored as bare IPA. Rules can also carry `optional: true` and a descriptive integer `rate` (0–100) for variation; the engine treats an unset flag as mandatory and the load-time normalization clamps the rate. The allophony array holds rule objects and optional one-level group containers (`{ "type": "group", "name", "collapsed", "enabled", "rules": [...] }`); groups are flattened in display order whenever rules are applied or counted.
+Everything is saved to the active project file in `data/` automatically after a short debounce. Switching projects flushes pending changes and stores the new filename in `data/.active-project`, so the next launch reopens it. Creating a project adds a new blank file under `data/`, refuses a name that is already taken, and activates it. The file is deliberately human-readable and stable enough for line-based diffs. Loading normalizes known fields but preserves unknown ones and a numeric `version` marker, so a document written by a future build is not silently stripped when this build opens and saves it. Each language keeps its diachronic `soundChanges` and its ordered synchronic `allophony` list as separate arrays, and word/chart forms are stored as bare IPA. Rules can also carry `optional: true` and a descriptive integer `rate` (0–100) for variation; the engine treats an unset flag as mandatory and the load-time normalization clamps the rate. The allophony array holds rule objects and optional one-level group containers (`{ "type": "group", "name", "collapsed", "enabled", "rules": [...] }`); groups are flattened in display order whenever rules are applied or counted.
 
 Each language also keeps `featureOverrides`, keyed by normalized IPA symbol. An override stores a complete bundle (`place` as a string or `null`, every other feature as `true`, `false`, or `null`); sounds without an override fall back to the curated table in `web/js/features.js`. Overrides are copied when a daughter, sibling, or ancestor is created, and they travel with the language in the JSON backup.
 
@@ -499,10 +499,11 @@ The ledger of language IDs and tree links is kept as a simple adjacency list (`p
 
 ## API
 
-The local server exposes four paths:
+The local server exposes five paths:
 
 - `GET /api/health` — return a small liveness response.
 - `GET /api/projects` — list project files and the active one.
+- `POST /api/projects` — create a blank project from `{ "title", "file" }`, make it active, and return `201` with the document. An existing file name is a `409`, so creation never overwrites.
 - `GET`/`PUT /api/project` — read or atomically replace a project. Both accept an optional `?file=<name>`; `PUT` also accepts `X-Base-Revision` and rejects a save based on an outdated `updatedAt`.
 - `PUT /api/projects/active` — remember the active project.
 

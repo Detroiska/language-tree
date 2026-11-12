@@ -17,7 +17,7 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - Run:       python server.py --no-browser  # Windows; use python3 on macOS/Linux; http://127.0.0.1:8765/ ; Python 3.10+; flags: --port 9000, --host 0.0.0.0 (trusted network only). ./start.sh / start.bat pass flags through
 
 ## Layout
-- server.py            # local HTTP server + four API paths: GET /api/health, GET /api/projects, GET/PUT /api/project (?file=), PUT /api/projects/active; atomic 2-space JSON saves through a unique .<name>.<random>.tmp, gzip request bodies, X-Base-Revision concurrency, loopback Host check
+- server.py            # local HTTP server + five API paths: GET /api/health, GET/POST /api/projects, GET/PUT /api/project (?file=), PUT /api/projects/active; atomic 2-space JSON saves through a unique .<name>.<random>.tmp, gzip request bodies, X-Base-Revision concurrency, loopback Host check
 - web/index.html, web/css/styles.css   # app shell and the single stylesheet
 - web/js/              # DOM-free engine modules importable from Node plus UI modules; keep new engine logic DOM-free. README "Project layout" lists every module
 - web/js/views/        # render modules for language tabs and family-level views; views/language.js owns the tab bar

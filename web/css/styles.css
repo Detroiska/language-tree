@@ -2345,6 +2345,13 @@ a.lineage-chip:hover {
   line-height: 1.45;
 }
 
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 .input,
 .select,
 .textarea {

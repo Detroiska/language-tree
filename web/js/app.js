@@ -1,6 +1,7 @@
 import {
   childrenOf,
   findLanguage,
+  projectFileName,
   projectStats,
 } from "./model.js";
 import { store } from "./store.js";
@@ -11,6 +12,7 @@ import {
   hydrateIcons,
   icon,
   openMenu,
+  openModal,
   promptDialog,
   toast,
 } from "./ui.js";
@@ -175,7 +177,7 @@ function setDesktopSidebarHidden(hidden) {
 
 if (storedSidebarHidden()) appShell.classList.add("sidebar-hidden");
 
-async function switchToProject(file) {
+async function switchToProject(file, successMessage = null) {
   if (!file) return;
   try {
     if (!(await store.switchProject(file))) return;
@@ -189,7 +191,134 @@ async function switchToProject(file) {
   appShell.classList.add("is-ready");
   window.history.replaceState(null, "", "#/tree");
   render();
-  toast(`Opened ${file}.`, { type: "success", duration: 2600 });
+  toast(successMessage || `Opened ${file}.`, { type: "success", duration: 2600 });
+}
+
+function newProjectDialog() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    openModal({
+      title: "New project",
+      width: "small",
+      body: `
+        <form class="form-stack" id="new-project-form">
+          <label class="field">
+            <span class="field-label">Project title</span>
+            <input class="input" name="title" placeholder="Untitled language family" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">File name</span>
+            <input class="input" name="file" value="untitled-project.json" autocomplete="off" spellcheck="false">
+            <span class="field-help">Saved directly in data/. The .json extension is added automatically.</span>
+          </label>
+          <p class="form-error" data-form-error role="alert" hidden></p>
+        </form>
+      `,
+      footer: `
+        <button type="button" class="button button-quiet" data-cancel>Cancel</button>
+        <button type="submit" form="new-project-form" class="button button-primary" data-create>Create project</button>
+      `,
+      onMount({ root, close }) {
+        const form = root.querySelector("#new-project-form");
+        const titleInput = form.querySelector('input[name="title"]');
+        const fileInput = form.querySelector('input[name="file"]');
+        const errorNode = form.querySelector("[data-form-error]");
+        const submit = root.querySelector("[data-create]");
+        let fileEdited = false;
+
+        const showError = (message, input = null) => {
+          errorNode.textContent = message;
+          errorNode.hidden = false;
+          titleInput.classList.remove("input-invalid");
+          fileInput.classList.remove("input-invalid");
+          if (input) {
+            input.classList.add("input-invalid");
+            input.focus();
+          }
+        };
+        const clearError = () => {
+          errorNode.hidden = true;
+          errorNode.textContent = "";
+          titleInput.classList.remove("input-invalid");
+          fileInput.classList.remove("input-invalid");
+        };
+
+        titleInput.addEventListener("input", () => {
+          if (!fileEdited) fileInput.value = projectFileName(titleInput.value);
+          clearError();
+        });
+        fileInput.addEventListener("input", () => {
+          fileEdited = true;
+          clearError();
+        });
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const title = titleInput.value.trim();
+          if (!title) {
+            showError("Give the project a title.", titleInput);
+            return;
+          }
+          let file = fileInput.value.trim();
+          if (!file) {
+            showError("Choose a file name.", fileInput);
+            return;
+          }
+          if (!file.toLowerCase().endsWith(".json")) file = `${file}.json`;
+          if (/[\\/]/.test(file) || file === "." || file === "..") {
+            showError("File names cannot contain folders.", fileInput);
+            return;
+          }
+          if (file === ".json") {
+            showError("Add a name before .json.", fileInput);
+            return;
+          }
+          if (store.projects.some((entry) => entry.file.toLowerCase() === file.toLowerCase())) {
+            showError("A project with this file name already exists.", fileInput);
+            return;
+          }
+          fileInput.value = file;
+          clearError();
+          submit.disabled = true;
+          submit.textContent = "Creating…";
+          try {
+            const result = await store.createProject(title, file);
+            finish({ file: result?.file || file });
+            close();
+          } catch (error) {
+            submit.disabled = false;
+            submit.textContent = "Create project";
+            showError(error.message || String(error), error.status === 409 ? fileInput : null);
+          }
+        });
+        root.querySelector("[data-cancel]").addEventListener("click", () => {
+          finish(null);
+          close();
+        });
+        const backdrop = root.querySelector(".modal-backdrop");
+        backdrop.addEventListener("pointerdown", (event) => {
+          if (event.target === backdrop) finish(null);
+        });
+      },
+    });
+    const observer = new MutationObserver(() => {
+      if (!document.getElementById("modal-root").querySelector(".modal-backdrop")) {
+        finish(null);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.getElementById("modal-root"), { childList: true });
+  });
+}
+
+async function newProjectFlow() {
+  const choice = await newProjectDialog();
+  if (!choice?.file) return;
+  await switchToProject(choice.file, `Created ${choice.file}.`);
 }
 
 async function openProjectMenu() {
@@ -220,12 +349,11 @@ async function openProjectMenu() {
   });
   if (!items.length) {
     items.push({ label: "No .json project files in data/", disabled: true });
-  } else {
-    items.push(
-      { separator: true },
-      { label: "Add a .json file to data/ to create another project.", disabled: true }
-    );
   }
+  items.push(
+    { separator: true },
+    { label: "New project…", icon: "plus", onClick: () => void newProjectFlow() }
+  );
   openMenu(projectSwitch, items);
 }
 
@@ -486,7 +614,7 @@ function bootError(error) {
         <button class="button button-primary" type="button" id="retry-load">${icon("refresh")}Try again</button>
         <button class="button button-quiet" type="button" id="reload-page">${icon("external")}Reload page</button>
       </div>
-      <p class="boot-hint">The local server is normally started with <code>start.bat</code> or <code>python server.py</code>. Project files live in <code>data/</code>; use the project switcher in the top bar to open another one.</p>
+      <p class="boot-hint">The local server is normally started with <code>start.bat</code> or <code>python server.py</code>. Project files live in <code>data/</code>; use the project switcher in the top bar to open another project or create a new one.</p>
     </div>`;
   // "Try again" re-runs the load in place — a server that was just started
   // does not need a full page reload — while "Reload page" resets everything.
