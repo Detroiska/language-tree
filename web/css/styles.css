@@ -2083,6 +2083,12 @@ button.vital:hover {
   background: var(--surface-soft);
 }
 
+button.vital:focus-visible {
+  /* The strip clips overflow to keep its outer corners clean; draw the ring
+     inside the cell so keyboard focus stays fully visible. */
+  outline-offset: -2px;
+}
+
 .vital + .vital {
   border-left: 1px solid var(--line);
 }

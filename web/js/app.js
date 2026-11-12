@@ -581,10 +581,12 @@ async function init() {
     store.navigate(`#/language/${button.dataset.sidebarLang}/overview`);
   });
   sidebar?.addEventListener("click", (event) => {
-    // The drawer closes on the next render; move focus out of the now-hidden
-    // panel before its links or language buttons are replaced.
+    // Close the drawer before its links navigate or a dialog opens: the next
+    // render replaces the clicked control, which would otherwise drop focus.
+    // This also closes the overlay when the target route is already current.
     if (!document.body.classList.contains("sidebar-open")) return;
-    if (event.target.closest("a, button")) sidebarToggle?.focus();
+    if (!event.target.closest("a, button")) return;
+    closeSidebarOverlay({ focusToggle: true });
   });
   saveState.addEventListener("click", async () => {
     if (store.saveState === "conflict") {

@@ -72,7 +72,7 @@ Each tool shows a one-line hint about its purpose. Long explanatory intro copy i
 
 The **Overview** tab opens each language with a compact vitals strip: phoneme, sound-change, vocabulary, and generation totals, with the first three jumping straight to their tabs. Notes, daughter languages, position in the tree, and the lineage follow below. At narrower widths the strip becomes a two-column block while the rest of the page stacks.
 
-The top-bar save indicator exposes its live state as its accessible name — **Saved**, **Unsaved changes**, **Saving…**, **Save failed**, or **Save conflict** — so the state is still announced when the visible label is hidden on narrow screens. Error and conflict states keep their click-to-retry and click-to-resolve behavior. On narrow screens the sidebar opens as an overlay; closing it after a link or language activation returns keyboard focus to the top-bar menu button, while closing from a top-bar control such as project switch or quick search leaves focus on that control.
+The top-bar save indicator exposes its live state as its accessible name — **Saved**, **Unsaved changes**, **Saving…**, **Save failed**, or **Save conflict** — so the state is still announced when the visible label is hidden on narrow screens. Error and conflict states keep their click-to-retry and click-to-resolve behavior. On narrow screens the sidebar opens as an overlay; closing it after a link or language activation returns keyboard focus to the top-bar menu button, while closing it through a render with a top-bar control such as quick search focused leaves that control focused.
 
 ### Phonemic and phonetic notation
 
