@@ -12,7 +12,6 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -690,6 +689,7 @@ try {
     equal("creation refuses a symlinked project name", symlinkCollision.status, 400);
   }
 
+  const dataBefore = readdirSync(join(server.root, "data")).sort();
   const invalidCreates = [
     ["a missing file name", { title: "No file" }, 400],
     ["a non-string file name", { file: 42 }, 400],
@@ -697,6 +697,14 @@ try {
     ["a nested file name", { file: "nested/fresh.json" }, 400],
     ["a non-JSON file name", { file: "notes.txt" }, 400],
     ["a name with nothing before .json", { file: ".json" }, 400],
+    // These pass project_path() on at least one platform but are not portable
+    // file names. Windows treats ":" as an NTFS stream, and reserved device
+    // names (CON, AUX, …) open devices instead of files.
+    ["a name with a colon", { file: "colon:family.json" }, 400],
+    ["a name with a question mark", { file: "what?.json" }, 400],
+    ["a Windows reserved device name", { file: "con.json" }, 400],
+    ["a reserved device name with a title", { file: "AUX.json", title: "Aux" }, 400],
+    ["an uppercase extension with no name", { file: ".JSON" }, 400],
     ["a non-string title", { file: "number_title.json", title: 42 }, 400],
   ];
   for (const [label, body, status] of invalidCreates) {
@@ -718,14 +726,10 @@ try {
   const noBody = await call(server, "/api/projects", { method: "POST" });
   equal("an empty create body is 400", noBody.status, 400);
 
-  const rejectedNames = [".json", "nested", "outside.json", "notes.txt", "array.json", "number_title.json"];
   equal(
-    "failed creations leave no files behind",
-    [
-      ...rejectedNames.filter((name) => existsSync(join(server.root, name))),
-      ...rejectedNames.filter((name) => existsSync(join(server.root, "data", name))),
-    ],
-    []
+    "failed creations leave the data directory unchanged",
+    readdirSync(join(server.root, "data")).sort(),
+    dataBefore
   );
   equal(
     "failed creations leave the active project alone",

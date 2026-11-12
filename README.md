@@ -503,7 +503,7 @@ The local server exposes five paths:
 
 - `GET /api/health` — return a small liveness response.
 - `GET /api/projects` — list project files and the active one.
-- `POST /api/projects` — create a blank project from `{ "title", "file" }`, make it active, and return `201` with the document. An existing file name is a `409`, so creation never overwrites.
+- `POST /api/projects` — create a blank project from `{ "title", "file" }`, make it active, and return `201` with the document. An existing file name is a `409`, so creation never overwrites. New names must be portable: a `.json` extension with a name before it, no `< > : " | ? *` or control characters, and no Windows reserved device names (CON, AUX, NUL, COM1–COM9, …).
 - `GET`/`PUT /api/project` — read or atomically replace a project. Both accept an optional `?file=<name>`; `PUT` also accepts `X-Base-Revision` and rejects a save based on an outdated `updatedAt`.
 - `PUT /api/projects/active` — remember the active project.
 

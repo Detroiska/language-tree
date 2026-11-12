@@ -92,6 +92,46 @@ def project_path(name: object) -> Path:
     return path
 
 
+# New project names must be portable. Windows reads ":" as an NTFS alternate
+# data stream and treats device names such as CON or AUX as devices even when
+# they carry an extension. Existing files with such names can still be opened;
+# this validation only governs names this server creates.
+PORTABLE_NAME_FORBIDDEN = set('<>:"|?*')
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CLOCK$",
+    "CONIN$",
+    "CONOUT$",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
+
+
+def validate_new_project_name(name: object) -> None:
+    """Refuse a new project name that is not portable to Windows."""
+    if not isinstance(name, str) or not name or "\x00" in name:
+        raise InvalidProjectRequest("A project file name is required.")
+    if "/" in name or "\\" in name:
+        raise InvalidProjectRequest("Project files must live directly in data/.")
+    if not name.lower().endswith(".json"):
+        raise InvalidProjectRequest("Project files must use a .json extension.")
+    if any(char in PORTABLE_NAME_FORBIDDEN or ord(char) < 32 for char in name):
+        raise InvalidProjectRequest(
+            'Project file names cannot contain < > : " | ? * or control characters.'
+        )
+    base = name[:-5].strip()
+    if not base:
+        raise InvalidProjectRequest("Project files need a name before .json.")
+    device = base.split(".", 1)[0].strip().upper()
+    if device in WINDOWS_RESERVED_NAMES:
+        raise InvalidProjectRequest(
+            f"{device} is reserved by Windows; choose another file name."
+        )
+
+
 def read_project_file(name: str) -> dict:
     path = project_path(name)
     # Opening a FIFO or a directory can block forever while SAVE_LOCK is held;
@@ -504,9 +544,10 @@ class LanguageTreeHandler(SimpleHTTPRequestHandler):
         title = title.strip() or DEFAULT_PROJECT_TITLE
         name = payload.get("file")
         try:
+            # Validate before reserving the name: on Windows some names (":"
+            # streams, reserved devices) fail only after the base file exists.
+            validate_new_project_name(name)
             path = project_path(name)
-            if path.name == ".json":
-                raise InvalidProjectRequest("Project files need a name before .json.")
         except InvalidProjectRequest as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
