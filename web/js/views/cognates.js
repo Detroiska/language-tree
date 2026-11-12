@@ -14,6 +14,7 @@ import { formatPhonemic, formatPhonetic, joinSegments, sameForm } from "../notat
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { buildCorrespondences } from "../correspondences.js";
+import { MATRIX_PAGE_SIZE, focusPager, pagerMarkup, paginate } from "../paging.js";
 import { esc, icon, toast } from "../ui.js";
 
 // The explorer follows one word (a gloss plus its form) through the family.
@@ -25,6 +26,9 @@ import { esc, icon, toast } from "../ui.js";
 // Optional rules are skipped in the primary chain. Tick one in the picker to
 // re-render the matrix or trace with that change forced on.
 const optionalVariantMemory = new Map();
+// The matrix filter and page survive a full re-render (recording a word,
+// changing an optional rule) but stay scoped to the selected source language.
+const matrixViewMemory = new Map();
 
 function wordsWithForms(language) {
   return language.vocabulary.filter((word) => word.gloss.trim() && word.form.trim());
@@ -267,7 +271,45 @@ function emptyWordsPanel(source) {
     </section>`;
 }
 
-function matrixMarkup(source, words, targetRows, matrixCells) {
+function matrixFlagsForWord(cells) {
+  return {
+    differs: cells.some((item) => item.status.kind === "differs"),
+    error: cells.some((item) => item.status.kind === "error"),
+    missing: cells.some((item) => item.status.kind === "missing"),
+  };
+}
+
+function matchesMatrixStatus(flags, status) {
+  if (status === "attention") return flags.differs || flags.error || flags.missing;
+  if (status === "clean") return !flags.differs && !flags.error && !flags.missing;
+  return status === "all" || Boolean(flags[status]);
+}
+
+function matrixFilterOptions(flagsByWord, status) {
+  const counts = { all: flagsByWord.size, attention: 0, differs: 0, error: 0, missing: 0, clean: 0 };
+  for (const flags of flagsByWord.values()) {
+    if (flags.differs) counts.differs += 1;
+    if (flags.error) counts.error += 1;
+    if (flags.missing) counts.missing += 1;
+    if (flags.differs || flags.error || flags.missing) counts.attention += 1;
+    else counts.clean += 1;
+  }
+  return [
+    ["all", "All glosses"],
+    ["attention", "Needs attention"],
+    ["differs", "Differences"],
+    ["error", "Rule errors"],
+    ["missing", "Unrecorded"],
+    ["clean", "All matching"],
+  ]
+    .map(
+      ([value, label]) =>
+        `<option value="${value}" ${value === status ? "selected" : ""}>${label} (${counts[value]})</option>`
+    )
+    .join("");
+}
+
+function matrixMarkup(source, words, targetRows, matrixCells, { status = "all", page = 1 } = {}) {
   const columnTitles = targetRows.map((row) => {
     const via = row.path.length ? ` via ${row.path.map((item) => item.name).join(" › ")}` : " (direct daughter)";
     const broken = row.errors.length ? ` — rule error: ${row.errors[0]}` : "";
@@ -277,64 +319,84 @@ function matrixMarkup(source, words, targetRows, matrixCells) {
     return `${row.language.name}${via}${broken}${optional}`;
   });
 
-  const rows = words
-    .map((word) => {
-      const cellStatuses = matrixCells.filter((item) => item.word.id === word.id);
-      return `
-        <tr data-matrix-word="${esc(word.id)}">
-          <td class="cognate-sticky matrix-gloss">${esc(word.gloss)}</td>
-          <td class="matrix-form-cell"><code class="ipa">${esc(formatPhonemic(word.form))}</code></td>
-          ${cellStatuses
-            .map(
-              (item) =>
-                `<td class="cognate-cell">${chipMarkup(item.status, { compact: true })}${
-                  item.cell.skippedOptional?.length
-                    ? `<span class="cognate-optional-mark" title="${esc(
-                        `${item.cell.skippedOptional.length} optional ${
-                          item.cell.skippedOptional.length === 1 ? "change" : "changes"
-                        } skipped: ${item.cell.skippedOptional
-                          .map((rule) => rule.notation || rule.label)
-                          .filter(Boolean)
-                          .join("; ")}`
-                      )}">opt</span>`
-                    : ""
-                }</td>`
-            )
-            .join("")}
-          <td class="row-actions">
-            <button class="icon-button icon-button-small" type="button" data-matrix-trace="${esc(word.id)}" title="Trace this word step by step" aria-label="Trace this word">${icon("chevronRight")}</button>
-          </td>
-        </tr>`;
-    })
-    .join("");
+  const cellsByWord = new Map();
+  for (const item of matrixCells) {
+    if (!cellsByWord.has(item.word.id)) cellsByWord.set(item.word.id, []);
+    cellsByWord.get(item.word.id).push(item);
+  }
+  const flagsByWord = new Map(words.map((word) => [word.id, matrixFlagsForWord(cellsByWord.get(word.id) || [])]));
+  const filtered = words.filter((word) => matchesMatrixStatus(flagsByWord.get(word.id), status));
+  const paging = paginate(filtered, page, MATRIX_PAGE_SIZE);
+  const columnCount = targetRows.length + 3;
+
+  const rows = paging.items.length
+    ? paging.items
+        .map((word) => {
+          const cellStatuses = cellsByWord.get(word.id) || [];
+          return `
+            <tr data-matrix-word="${esc(word.id)}">
+              <td class="cognate-sticky matrix-gloss">${esc(word.gloss)}</td>
+              <td class="matrix-form-cell"><code class="ipa">${esc(formatPhonemic(word.form))}</code></td>
+              ${cellStatuses
+                .map(
+                  (item) =>
+                    `<td class="cognate-cell">${chipMarkup(item.status, { compact: true })}${
+                      item.cell.skippedOptional?.length
+                        ? `<span class="cognate-optional-mark" title="${esc(
+                            `${item.cell.skippedOptional.length} optional ${
+                              item.cell.skippedOptional.length === 1 ? "change" : "changes"
+                            } skipped: ${item.cell.skippedOptional
+                              .map((rule) => rule.notation || rule.label)
+                              .filter(Boolean)
+                              .join("; ")}`
+                          )}">opt</span>`
+                        : ""
+                    }</td>`
+                )
+                .join("")}
+              <td class="row-actions">
+                <button class="icon-button icon-button-small" type="button" data-matrix-trace="${esc(word.id)}" title="Trace this word step by step" aria-label="Trace this word">${icon("chevronRight")}</button>
+              </td>
+            </tr>`;
+        })
+        .join("")
+    : `<tr><td class="table-empty-cell" colspan="${columnCount}">No glosses match this filter.</td></tr>`;
 
   const noDaughters = !targetRows.length;
-  return `
-    ${
-      noDaughters
-        ? `<div class="notice cognate-no-daughters">
-            ${icon("tree")}
-            <p>No daughter languages descend from <strong>${esc(source.name)}</strong> yet, so there is nothing to compare. Create a daughter in the family tree, give it rules and vocabulary, and its reflexes will appear as columns here.</p>
-            <a class="button button-quiet button-tiny" type="button" href="#/tree">${icon("tree")}Open family tree</a>
-          </div>`
-        : ""
-    }
-    <div class="table-scroll">
-      <table class="data-table cognate-matrix">
-        <thead>
-          <tr>
-            <th class="cognate-sticky">Gloss</th>
-            <th class="matrix-source-col">${esc(source.name)} <span class="th-note">form</span></th>
-            ${targetRows
-              .map((row, index) => `<th class="matrix-lang-col" title="${esc(columnTitles[index])}">${esc(row.language.name)}</th>`)
-              .join("")}
-            <th class="row-actions-head"></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <p class="check-foot">Each chip compares the recorded form with the output of that language’s chain of rules from ${esc(source.name)}. Optional changes are skipped in the primary chain; “opt” marks a cell where one was skipped, and the trace view can include them. Click a row to see the derivation step by step.${words.length ? "" : " No glosses are recorded in the source language yet."}</p>`;
+  return {
+    html: `
+      ${
+        noDaughters
+          ? `<div class="notice cognate-no-daughters">
+              ${icon("tree")}
+              <p>No daughter languages descend from <strong>${esc(source.name)}</strong> yet, so there is nothing to compare. Create a daughter in the family tree, give it rules and vocabulary, and its reflexes will appear as columns here.</p>
+              <a class="button button-quiet button-tiny" type="button" href="#/tree">${icon("tree")}Open family tree</a>
+            </div>`
+          : ""
+      }
+      <div class="table-controls">
+        <select class="select check-status-filter" data-matrix-status aria-label="Filter glosses by status">${matrixFilterOptions(flagsByWord, status)}</select>
+        <span class="table-controls-count">${filtered.length} of ${words.length} gloss${words.length === 1 ? "" : "es"}</span>
+      </div>
+      <div class="table-scroll cognate-matrix-scroll">
+        <table class="data-table cognate-matrix">
+          <thead>
+            <tr>
+              <th class="cognate-sticky">Gloss</th>
+              <th class="matrix-source-col">${esc(source.name)} <span class="th-note">form</span></th>
+              ${targetRows
+                .map((row, index) => `<th class="matrix-lang-col" title="${esc(columnTitles[index])}">${esc(row.language.name)}</th>`)
+                .join("")}
+              <th class="row-actions-head"></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${pagerMarkup(paging, { noun: "glosses", label: "Cognate matrix pages" })}
+      <p class="check-foot">Each chip compares the recorded form with the output of that language’s chain of rules from ${esc(source.name)}. Optional changes are skipped in the primary chain; “opt” marks a cell where one was skipped, and the trace view can include them. Click a row to see the derivation step by step.${words.length ? "" : " No glosses are recorded in the source language yet."}</p>`,
+    paging,
+  };
 }
 
 function correspondenceReflexTitle(reflex, count, glosses, tied = false) {
@@ -665,6 +727,16 @@ export function renderCognates(container, ctx) {
       ? buildCorrespondences(project, source.id)
       : null;
 
+  const rememberedMatrix = matrixViewMemory.get(source.id) || {};
+  let matrixStatus = rememberedMatrix.status || "all";
+  let matrixPage = rememberedMatrix.page || 1;
+  let matrixView = null;
+  if (!singleMode && words.length) {
+    matrixView = matrixMarkup(source, words, targetRows, matrixCells, { status: matrixStatus, page: matrixPage });
+    matrixPage = matrixView.paging.page;
+    matrixViewMemory.set(source.id, { status: matrixStatus, page: matrixPage });
+  }
+
   container.innerHTML = `
     <div class="page workspace-stack">
       <section class="section-intro">
@@ -712,7 +784,7 @@ export function renderCognates(container, ctx) {
           singleMode
             ? traceMarkup(project, source, word, rows, optionalRuleIds)
             : words.length
-              ? matrixMarkup(source, words, targetRows, matrixCells)
+              ? `<div data-matrix-container>${matrixView.html}</div>`
               : emptyWordsPanel(source)
         }
       </section>
@@ -743,18 +815,43 @@ export function renderCognates(container, ctx) {
     });
   });
 
-  container.querySelectorAll("[data-matrix-word]").forEach((rowElement) => {
-    rowElement.addEventListener("click", (event) => {
-      if (event.target.closest("button, a")) return;
-      ctx.navigate(singleHash(source.id, rowElement.dataset.matrixWord));
-    });
+  const matrixContainer = container.querySelector("[data-matrix-container]");
+  const renderMatrixPage = () => {
+    if (!matrixContainer) return;
+    matrixView = matrixMarkup(source, words, targetRows, matrixCells, { status: matrixStatus, page: matrixPage });
+    matrixPage = matrixView.paging.page;
+    matrixViewMemory.set(source.id, { status: matrixStatus, page: matrixPage });
+    matrixContainer.innerHTML = matrixView.html;
+  };
+
+  matrixContainer?.addEventListener("change", (event) => {
+    if (!event.target.matches("[data-matrix-status]")) return;
+    matrixStatus = event.target.value;
+    matrixPage = 1;
+    renderMatrixPage();
+    // The re-render replaces the select itself, so hand focus back to it.
+    matrixContainer.querySelector("[data-matrix-status]")?.focus();
   });
 
-  container.querySelectorAll("[data-matrix-trace]").forEach((button) => {
-    button.addEventListener("click", (event) => {
+  matrixContainer?.addEventListener("click", (event) => {
+    const pageButton = event.target.closest("[data-pager-page]");
+    if (pageButton) {
+      const action = pageButton.dataset.pagerAction;
+      matrixPage = Number(pageButton.dataset.pagerPage);
+      renderMatrixPage();
+      focusPager(matrixContainer, action);
+      return;
+    }
+    const traceButton = event.target.closest("[data-matrix-trace]");
+    if (traceButton) {
       event.stopPropagation();
-      ctx.navigate(singleHash(source.id, button.dataset.matrixTrace));
-    });
+      ctx.navigate(singleHash(source.id, traceButton.dataset.matrixTrace));
+      return;
+    }
+    const rowElement = event.target.closest("[data-matrix-word]");
+    if (rowElement && !event.target.closest("button, a")) {
+      ctx.navigate(singleHash(source.id, rowElement.dataset.matrixWord));
+    }
   });
 
   container.querySelectorAll("[data-toggle-steps]").forEach((button) => {
