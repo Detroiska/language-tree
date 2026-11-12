@@ -313,6 +313,9 @@ function ensureAllophony(value) {
   const normalizeRule = (rule) => {
     if (!rule || typeof rule !== "object" || Array.isArray(rule) || isAllophonyGroup(rule)) return null;
     return {
+      // Preserve unknown keys so a newer build's fields survive a load/save
+      // through this one; the normalized fields intentionally win.
+      ...rule,
       id: uniqueId(rule.id, "allo"),
       notation: typeof rule.notation === "string" ? rule.notation : "",
       note: typeof rule.note === "string" ? rule.note : "",
@@ -347,6 +350,7 @@ function ensureAllophony(value) {
     const rules = [];
     collectRules(entry.rules, rules);
     items.push({
+      ...entry,
       id: uniqueId(entry.id, "allogroup"),
       type: "group",
       name: typeof entry.name === "string" ? entry.name : "",
@@ -509,6 +513,7 @@ function ensurePhonotactics(value) {
   const base = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const mode = (raw) => (raw === "forbidden" ? "forbidden" : "allowed");
   return {
+    ...base,
     // An explicitly empty template is meaningful: it turns phonotactic
     // checking off. Only a missing field gets the default template.
     template: typeof base.template === "string" ? base.template : defaults.template,
@@ -526,6 +531,7 @@ function ensurePhonotactics(value) {
       ? base.classes
           .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
           .map((entry) => ({
+            ...entry,
             name: typeof entry.name === "string" ? entry.name : "",
             sounds: typeof entry.sounds === "string" ? entry.sounds : "",
           }))
@@ -540,7 +546,11 @@ export function ensureProject(raw) {
   if (!Array.isArray(project.languages)) project.languages = [];
   if (!project.createdAt) project.createdAt = new Date().toISOString();
   if (!project.updatedAt) project.updatedAt = project.createdAt;
-  project.version = 1;
+  // Keep a newer document's version marker instead of rewriting it down to 1.
+  // Unknown fields are preserved below, so an older build can read and save a
+  // newer document without pretending it understood a newer schema.
+  const version = Number(project.version);
+  project.version = Number.isInteger(version) && version > 0 ? version : 1;
 
   const ids = new Set();
   const idRemap = new Map();
@@ -569,6 +579,7 @@ export function ensureProject(raw) {
       ? language.soundChanges
           .filter((rule) => rule && typeof rule === "object")
           .map((rule) => ({
+            ...rule,
             id: normalizeId(rule.id, ruleIds, "rule", ruleRemap),
             notation: typeof rule.notation === "string" ? rule.notation : "",
             note: typeof rule.note === "string" ? rule.note : "",
@@ -604,6 +615,7 @@ export function ensureProject(raw) {
       ? language.vocabulary
           .filter((entry) => entry && typeof entry === "object")
           .map((entry) => ({
+            ...entry,
             id: normalizeId(entry.id, wordIds, "word"),
             gloss: typeof entry.gloss === "string" ? entry.gloss : "",
             // A form pasted as /kasa/ or [kʰasa] is still one lexical form.

@@ -1089,7 +1089,9 @@ export function normalizeFeatureOverrides(raw) {
   for (const [sound, bundle] of Object.entries(raw)) {
     const key = soundKey(sound);
     if (!key || !bundle || typeof bundle !== "object" || Array.isArray(bundle)) continue;
-    result[key] = normalizeBundle(bundle);
+    // Preserve unknown bundle keys for forward compatibility; normalized
+    // feature values win over stale or malformed ones.
+    result[key] = { ...bundle, ...normalizeBundle(bundle) };
   }
   return result;
 }
