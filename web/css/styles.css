@@ -2053,73 +2053,85 @@ code {
   min-width: 0;
 }
 
-.stat-grid {
+.vitals-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.vital {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 14px 9px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+}
+
+button.vital {
+  transition: background 130ms ease;
+}
+
+button.vital:hover {
+  background: var(--surface-soft);
+}
+
+button.vital:focus-visible {
+  /* The strip clips overflow to keep its outer corners clean; draw the ring
+     inside the cell so keyboard focus stays fully visible. */
+  outline-offset: -2px;
+}
+
+.vital + .vital {
+  border-left: 1px solid var(--line);
+}
+
+.vital-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.stat-card {
-  position: relative;
-  display: flex;
-  min-height: 94px;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 12px 14px;
-  overflow: hidden;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  box-shadow: none;
-  text-align: left;
-  transition: border-color 130ms ease, box-shadow 130ms ease, transform 130ms ease;
-}
-
-button.stat-card:hover {
-  border-color: var(--line-strong);
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
-}
-
-.stat-card-static {
-  cursor: default;
-}
-
-.stat-label {
+.vital-label {
   color: var(--muted);
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.stat-value {
-  margin-top: 4px;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.stat-detail {
-  margin-top: auto;
-  padding-top: 6px;
-  color: var(--faint);
-  font-size: 9.5px;
-}
-
-.stat-icon {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 16px;
-  height: 16px;
+.vital-icon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
   color: var(--line-strong);
 }
 
+.vital-value {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.vital-detail {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .notes-area {
-  min-height: 150px;
+  min-height: 110px;
 }
 
 .child-list {
@@ -5355,8 +5367,16 @@ th:hover > .axis-menu,
 }
 
 @media (max-width: 1220px) {
-  .stat-grid {
+  .vitals-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vital:nth-child(3) {
+    border-left: 0;
+  }
+
+  .vital:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
   }
 
   .changes-layout {
@@ -5533,10 +5553,6 @@ th:hover > .axis-menu,
     opacity: 0.7;
   }
 
-  .stat-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .form-row,
   .overview-aside {
     grid-template-columns: 1fr;
@@ -5627,18 +5643,12 @@ th:hover > .axis-menu,
     font-size: 11px;
   }
 
-  .stat-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 7px;
+  .vital {
+    padding: 8px 11px 9px;
   }
 
-  .stat-card {
-    min-height: 101px;
-    padding: 12px;
-  }
-
-  .stat-value {
-    font-size: 26px;
+  .vital-value {
+    font-size: 20px;
   }
 
   .overview-aside {
