@@ -26,6 +26,7 @@ import { subgroupingEvidence } from "../web/js/subgrouping.js";
 import { analyzeLexicon } from "../web/js/analytics.js";
 import { timelineStages } from "../web/js/timeline.js";
 import { buildCorrespondences } from "../web/js/correspondences.js";
+import { buildCognateMatrix, buildCognateRows, buildCognateTrace } from "../web/js/cognateData.js";
 
 let passed = 0;
 const failures = [];
@@ -355,6 +356,80 @@ truthy(
   timeline.stages.every(
     (stage, index) => index === 0 || timeline.stages[index - 1].date < stage.date
   )
+);
+
+/* ---- cognate explorer data ----------------------------------------------- */
+
+const cognateRows = buildCognateRows(project, root);
+const cognateMatrix = buildCognateMatrix(project, root, { rows: cognateRows.rows });
+equal("cognate rows cover the demo family", cognateRows.rows.length, 23);
+equal("cognate targets cover every daughter", cognateRows.targetRows.length, 22);
+equal("the matrix lists every root gloss", cognateMatrix.words.length, 221);
+equal("the matrix has a cell per gloss and daughter", cognateMatrix.matrixCells.length, 4862);
+equal("the matrix builds a column per daughter", cognateMatrix.cellsByLanguage.size, 22);
+equal("the matrix builds a row per gloss", cognateMatrix.cellsByWord.size, 221);
+truthy(
+  "every matrix gloss has a cell for every daughter",
+  [...cognateMatrix.cellsByWord.values()].every((cells) => cells.length === 22)
+);
+truthy(
+  "matrix cells expose no surface forms",
+  cognateMatrix.matrixCells.every((item) => item.cell.surface === "")
+);
+const cognateMatches = cognateMatrix.matrixCells.filter(
+  (item) => item.status.kind === "match"
+).length;
+equal(
+  "matrix status counts add up to every cell",
+  cognateMatrix.counts.cellDiffers +
+    cognateMatrix.counts.cellErrors +
+    cognateMatrix.counts.cellMissing +
+    cognateMatches,
+  4862
+);
+equal(
+  "matrix attention and clean cover every gloss",
+  cognateMatrix.counts.attention + cognateMatrix.counts.clean,
+  221
+);
+const cognateFlags = [...cognateMatrix.flagsByWord.values()];
+equal(
+  "matrix difference counts agree with word flags",
+  cognateMatrix.counts.differs,
+  cognateFlags.filter((flags) => flags.differs).length
+);
+equal(
+  "matrix error counts agree with word flags",
+  cognateMatrix.counts.error,
+  cognateFlags.filter((flags) => flags.error).length
+);
+equal(
+  "matrix missing counts agree with word flags",
+  cognateMatrix.counts.missing,
+  cognateFlags.filter((flags) => flags.missing).length
+);
+
+const cognateTrace = buildCognateTrace(project, root, rootWords[0], cognateRows.rows);
+equal("the demo trace covers every language", cognateTrace.rows.length, 23);
+equal("the demo trace has a cell per language", cognateTrace.cellsByLanguage.size, 23);
+truthy(
+  "the demo trace derives surfaces",
+  cognateTrace.showSurface &&
+    [...cognateTrace.cellsByLanguage.values()].some((cell) => cell.surface)
+);
+const cognateTraceTarget = cognateTrace.cellsByLanguage.get("lang_pbs");
+equal(
+  "the demo trace agrees with a direct derivation",
+  cognateTraceTarget.derived,
+  deriveForm(rootWords[0].form, project, "lang_pbs", { gloss: rootWords[0].gloss }).text
+);
+const cognateMatrixTarget = cognateMatrix.cellsByLanguage
+  .get("lang_pbs")
+  .find((cell) => cell.word.id === rootWords[0].id);
+equal(
+  "the demo matrix and trace agree on a derived form",
+  cognateMatrixTarget.derived,
+  cognateTraceTarget.derived
 );
 
 /* ---- correspondences ----------------------------------------------------- */

@@ -2164,33 +2164,66 @@ export function compileRuleStages(rules, context) {
 // later language applies its own rules to what it receives — the same
 // convention the inherited check uses for a single step, extended down the
 // tree. Languages outside the source's line of descent have no chain.
-export function compileChainFrom(project, sourceId, targetId) {
+export function compileChainFrom(project, sourceId, targetId, { contextFor, stagesFor } = {}) {
   const lineage = getLineage(project, targetId);
   const sourceIndex = lineage.findIndex((language) => language.id === sourceId);
   if (sourceIndex === -1) {
     return { ok: false, reason: "not-descended", lineage, stages: [], context: null };
   }
-  const context = contextForLanguage(project, targetId);
+  const context = contextFor ? contextFor(targetId) : contextForLanguage(project, targetId);
   // Each generation's rules belong to that generation: its own categories
   // (and its own place in the lineage) decide what `N` or `back` means there.
   // Compiling every stage with the target's categories made an ancestor's rule
   // change meaning when a later language redefined a category.
   const stages = lineage.slice(sourceIndex + 1).map((language) => {
-    const stageContext = language.id === targetId ? context : contextForLanguage(project, language.id);
+    const stageContext =
+      language.id === targetId ? context : contextFor ? contextFor(language.id) : contextForLanguage(project, language.id);
     return {
       language,
       context: stageContext,
-      groups: compileRuleStages(language.soundChanges, stageContext),
+      groups: stagesFor ? stagesFor(language, stageContext) : compileRuleStages(language.soundChanges, stageContext),
     };
   });
   return { ok: true, reason: "", lineage, sourceIndex, stages, context };
+}
+
+// A single render asks for many chains: the matrix, the trace, and the
+// correspondence table all want the same contexts and compiled rule stages.
+// Cache them per project for one compiler's lifetime. Callers create a new
+// compiler after a change to the project's languages or rules.
+export function createChainCompiler(project) {
+  const contexts = new Map();
+  const compiledStages = new Map();
+  const contextFor = (languageId) => {
+    if (!contexts.has(languageId)) contexts.set(languageId, contextForLanguage(project, languageId));
+    return contexts.get(languageId);
+  };
+  const stagesFor = (language, context) => {
+    if (!compiledStages.has(language.id)) {
+      compiledStages.set(language.id, compileRuleStages(language.soundChanges, context));
+    }
+    return compiledStages.get(language.id);
+  };
+  return {
+    contextFor,
+    compileChainFrom: (sourceId, targetId) =>
+      compileChainFrom(project, sourceId, targetId, { contextFor, stagesFor }),
+  };
 }
 
 // Top-level rules all match the frozen ancestral form. Their edits are
 // combined in one pass, so the order of the list never changes which rules
 // apply. Two top-level rules that touch the same part of the form are a
 // conflict: the derivation stops with an error instead of guessing an order.
-function applyParallel(tokens, groups, context, gloss = "", junctures = null, optionalRuleIds = new Set()) {
+function applyParallel(
+  tokens,
+  groups,
+  context,
+  gloss = "",
+  junctures = null,
+  optionalRuleIds = new Set(),
+  diagnostics = true
+) {
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const entries = [];
   for (const group of groups) {
@@ -2201,8 +2234,9 @@ function applyParallel(tokens, groups, context, gloss = "", junctures = null, op
     // A rule that matched nothing gets a diagnosis instead of a bare
     // "0 matches" — the tester shows this under its entry in the step list.
     // An exception is a deliberate skip, not a failed match, so it needs no
-    // diagnosis.
-    if (!optionalSkipped && !excepted && !matches.length) {
+    // diagnosis. Data-only passes turn diagnostics off: they still need the
+    // match counts, but not the prose explaining a miss.
+    if (diagnostics && !optionalSkipped && !excepted && !matches.length) {
       entry.debug = explainRuleMiss(tokens, group.compiled.rule, context, cuts) || "";
     }
     entries.push(entry);
@@ -2274,6 +2308,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
   const errors = [];
   let fatal = false;
   const gloss = options.gloss || "";
+  const diagnostics = options.diagnostics !== false;
   const optionalRuleIds = forcedRuleIds(options.optionalRuleIds);
 
   for (const stage of stages) {
@@ -2321,7 +2356,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
       stageContext,
       gloss,
       currentJunctures,
-      optionalRuleIds
+      optionalRuleIds,
+      diagnostics
     );
     if (!parallel.ok) {
       steps.push({
@@ -2467,7 +2503,9 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           changed: result.changed,
           debug: result.changed
             ? ""
-            : explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures) || "",
+            : diagnostics
+              ? explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures) || ""
+              : "",
           optional: child.rule.optional === true,
           rate: normalizeRuleRate(child.rule.rate),
           languageName,

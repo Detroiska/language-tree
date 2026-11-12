@@ -1,7 +1,7 @@
 import { alignSegments } from "./diff.js";
-import { normalizeGloss } from "./gloss.js";
+import { indexWordsByGloss, normalizeGloss } from "./gloss.js";
 import { getLineage, languagesInTreeOrder } from "./model.js";
-import { compileChainFrom, contextForLanguage, deriveStages } from "./phonology.js";
+import { createChainCompiler, deriveStages } from "./phonology.js";
 
 // Comparative-method correspondence tables.
 //
@@ -24,30 +24,10 @@ const POSITION_RANK = {
   only: 3,
 };
 
-function formOf(word) {
-  return String(word?.form || "").trim();
-}
-
 // One word per gloss, first form wins — the same convention as the cognate
-// explorer's recordedFor() and the vocabulary inherited check.
+// explorer's recorded lookup and the vocabulary inherited check.
 function wordsForCorrespondence(language) {
-  const seen = new Set();
-  const words = [];
-  for (const word of language.vocabulary || []) {
-    const gloss = normalizeGloss(word.gloss);
-    if (!gloss || !formOf(word) || seen.has(gloss)) continue;
-    seen.add(gloss);
-    words.push(word);
-  }
-  return words;
-}
-
-function wordForGloss(language, gloss) {
-  const key = normalizeGloss(gloss);
-  if (!key) return null;
-  return (
-    (language.vocabulary || []).find((word) => normalizeGloss(word.gloss) === key && formOf(word)) || null
-  );
+  return [...indexWordsByGloss(language.vocabulary).values()];
 }
 
 // A source segment's position is relative to its source word. Words of one
@@ -130,7 +110,8 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
   if (!source) return emptyResult(null, selectedMode);
 
   const sourceWords = wordsForCorrespondence(source);
-  const sourceContext = contextForLanguage(project, source.id);
+  const compiler = createChainCompiler(project);
+  const sourceContext = compiler.contextFor(source.id);
   const ordered = languagesInTreeOrder(project);
 
   const daughters = [];
@@ -145,11 +126,12 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
       language,
       // Recorded mode tokenizes the daughter's lexicon; derived mode reuses
       // the context the chain already built, so only one of the two is needed.
-      context: selectedMode === "recorded" ? contextForLanguage(project, language.id) : null,
+      context: selectedMode === "recorded" ? compiler.contextFor(language.id) : null,
+      recordedByGloss: selectedMode === "recorded" ? indexWordsByGloss(language.vocabulary) : null,
       chain: null,
     };
     if (selectedMode === "derived") {
-      daughter.chain = compileChainFrom(project, source.id, language.id);
+      daughter.chain = compiler.compileChainFrom(source.id, language.id);
     }
     daughters.push(daughter);
   }
@@ -193,6 +175,7 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
         const derived = deriveStages(parsed.tokens, daughter.chain.stages, daughter.chain.context, {
           gloss: word.gloss,
           junctures: parsed.junctures,
+          diagnostics: false,
         });
         if (derived.errors.length) {
           coverage.get(daughter.id).errors.add(derived.errors[0]);
@@ -200,7 +183,7 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
         }
         tokens = derived.tokens;
       } else {
-        const recorded = wordForGloss(daughter.language, word.gloss);
+        const recorded = daughter.recordedByGloss.get(normalizeGloss(word.gloss));
         if (!recorded) continue;
         tokens = daughter.context.tokenize(recorded.form);
       }

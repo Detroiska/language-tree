@@ -5866,6 +5866,13 @@ th:hover > .axis-menu,
   text-transform: uppercase;
 }
 
+.correspondence-loading {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
 .correspondence-table {
   min-width: 480px;
 }
