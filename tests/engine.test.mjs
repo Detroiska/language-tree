@@ -40,6 +40,7 @@ import {
   compileRuleStages,
   applyRule,
   compileChainFrom,
+  createChainCompiler,
   deriveForm,
   deriveStages,
   exceptionRulesFromSteps,
@@ -60,7 +61,7 @@ import {
   stripLevelMarks,
 } from "../web/js/notation.js";
 import { esc, escapeDialogCopy } from "../web/js/escape.js";
-import { normalizeGloss } from "../web/js/gloss.js";
+import { indexWordsByGloss, normalizeGloss } from "../web/js/gloss.js";
 import { compileClasses } from "../web/js/categories.js";
 import {
   IPA_FEATURES,
@@ -97,6 +98,12 @@ import {
 import { alignSegments, diffPairMarkup, formDiffMarkup } from "../web/js/diff.js";
 import { analyzeLexicon } from "../web/js/analytics.js";
 import { alignCognate, buildCorrespondences } from "../web/js/correspondences.js";
+import {
+  buildCognateMatrix,
+  buildCognateRows,
+  buildCognateTrace,
+  wordsWithForms,
+} from "../web/js/cognateData.js";
 import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } from "../web/js/reconstruction.js";
 import { subgroupingEvidence } from "../web/js/subgrouping.js";
 import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
@@ -1264,6 +1271,172 @@ equal(
   categoryChainResult.tokens.join(""),
   "ma"
 );
+const chainCompiler = createChainCompiler(chainCategoryProject);
+const compiledCategoryChain = chainCompiler.compileChainFrom("root", "leaf");
+equal(
+  "a cached chain derives the same form",
+  deriveStages(
+    compiledCategoryChain.context.tokenize("maŋ"),
+    compiledCategoryChain.stages,
+    compiledCategoryChain.context
+  ).tokens.join(""),
+  "ma"
+);
+truthy(
+  "the chain compiler reuses the target context",
+  compiledCategoryChain.context === chainCompiler.contextFor("leaf")
+);
+truthy(
+  "the chain compiler reuses an ancestor context",
+  compiledCategoryChain.stages[0].context === chainCompiler.contextFor("mid")
+);
+truthy(
+  "the chain compiler reuses compiled rule stages",
+  compiledCategoryChain.stages[0].groups ===
+    chainCompiler.compileChainFrom("root", "leaf").stages[0].groups
+);
+equal(
+  "the chain compiler still reports a non-descended target",
+  chainCompiler.compileChainFrom("leaf", "root").ok,
+  false
+);
+
+/* ---- cognate explorer data ---------------------------------------------- */
+
+const cognateLanguage = {
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "penult" },
+};
+const cognateProject = {
+  title: "Cognate data",
+  languages: [
+    {
+      id: "root",
+      name: "Root",
+      parentId: null,
+      ...cognateLanguage,
+      soundChanges: [],
+      vocabulary: [
+        { id: "w1", gloss: "hand", form: "pata" },
+        { id: "w2", gloss: "foot", form: "kasa" },
+        { id: "w3", gloss: "sun", form: "tapa" },
+      ],
+    },
+    {
+      id: "child",
+      name: "Child",
+      parentId: "root",
+      ...cognateLanguage,
+      soundChanges: [{ id: "r1", notation: "p > f", note: "", enabled: true }],
+      vocabulary: [
+        { id: "w4", gloss: " Hand ", form: "fata" },
+        { id: "w5", gloss: "foot", form: "kata" },
+      ],
+    },
+  ],
+};
+const cognateRoot = cognateProject.languages[0];
+const cognateRows = buildCognateRows(cognateProject, cognateRoot);
+equal("cognate rows cover every language", cognateRows.rows.length, 2);
+equal("cognate rows list only descended targets", cognateRows.targetRows.map((row) => row.language.id), [
+  "child",
+]);
+equal("the source row has no rule chain", cognateRows.rows[0].chain, null);
+equal("the target row records the direct path", cognateRows.targetRows[0].path, []);
+equal("the source contributes no optional rules", cognateRows.allOptionalRules, []);
+
+const cognateMatrix = buildCognateMatrix(cognateProject, cognateRoot, {
+  rows: cognateRows.rows,
+});
+equal("the matrix lists every source gloss", cognateMatrix.words.map((word) => word.gloss), [
+  "hand",
+  "foot",
+  "sun",
+]);
+equal("the matrix has one cell per target and gloss", cognateMatrix.matrixCells.length, 3);
+equal(
+  "matrix statuses follow recorded and derived forms",
+  [...cognateMatrix.cellsByWord.values()].map((cells) => cells[0].status.kind),
+  ["match", "differs", "missing"]
+);
+equal(
+  "the matrix counts words for the filter",
+  [
+    cognateMatrix.counts.all,
+    cognateMatrix.counts.attention,
+    cognateMatrix.counts.differs,
+    cognateMatrix.counts.error,
+    cognateMatrix.counts.missing,
+    cognateMatrix.counts.clean,
+  ],
+  [3, 2, 1, 0, 1, 1]
+);
+equal(
+  "the matrix counts cells for the summary",
+  [
+    cognateMatrix.counts.cellDiffers,
+    cognateMatrix.counts.cellErrors,
+    cognateMatrix.counts.cellMissing,
+    cognateMatrix.counts.excepted,
+    cognateMatrix.counts.optional,
+  ],
+  [1, 0, 1, 0, 0]
+);
+truthy(
+  "matrix cells expose no surface forms",
+  cognateMatrix.matrixCells.every((item) => item.cell.surface === "")
+);
+const matrixFootCell = cognateMatrix.cellsByLanguage
+  .get("child")
+  .find((cell) => cell.word.gloss === "foot");
+truthy(
+  "matrix cells skip miss diagnostics",
+  matrixFootCell.steps
+    .find((step) => step.kind === "parallel")
+    .entries.every((entry) => !entry.debug)
+);
+
+const cognateTrace = buildCognateTrace(cognateProject, cognateRoot, cognateProject.languages[0].vocabulary[0], cognateRows.rows);
+equal("the trace covers the source and its descendants", cognateTrace.rows.length, 2);
+equal("the trace has a cell per language", cognateTrace.cellsByLanguage.size, 2);
+truthy("the trace shows surfaces when stress is predicted", cognateTrace.showSurface);
+truthy(
+  "the source trace cell has a surface form",
+  cognateTrace.cellsByLanguage.get("root").surface.length > 0
+);
+truthy(
+  "the target trace cell has a surface form",
+  cognateTrace.cellsByLanguage.get("child").surface.length > 0
+);
+equal(
+  "the trace and matrix agree on the derivation",
+  cognateTrace.cellsByLanguage.get("child").derived,
+  cognateMatrix.cellsByLanguage.get("child").find((cell) => cell.word.id === "w1").derived
+);
+const traceFoot = buildCognateTrace(
+  cognateProject,
+  cognateRoot,
+  cognateProject.languages[0].vocabulary[1],
+  cognateRows.rows
+);
+truthy(
+  "the trace keeps miss diagnostics",
+  traceFoot.cellsByLanguage
+    .get("child")
+    .steps.find((step) => step.kind === "parallel")
+    .entries.some((entry) => entry.debug)
+);
+equal(
+  "words with forms ignores incomplete entries",
+  wordsWithForms({
+    vocabulary: [
+      { gloss: "hand", form: "pata" },
+      { gloss: "", form: "kasa" },
+      { gloss: "foot", form: " " },
+    ],
+  }).length,
+  1
+);
 
 /* ---- phonotactics ------------------------------------------------------- */
 
@@ -1854,6 +2027,17 @@ equal(
   "kát ta"
 );
 equal("gloss normalization tolerates null", normalizeGloss(null), "");
+const glossIndex = indexWordsByGloss([
+  { gloss: " Hand ", form: "kasa" },
+  { gloss: "hand", form: "ka" },
+  { gloss: "Foot", form: "" },
+  { gloss: "", form: "mata" },
+  { gloss: "foot", form: "tasa" },
+]);
+equal("the gloss index normalizes keys and keeps their first order", [...glossIndex.keys()], ["hand", "foot"]);
+equal("the gloss index keeps the first non-empty form", glossIndex.get("hand").form, "kasa");
+equal("the gloss index skips empty forms", glossIndex.get("foot").form, "tasa");
+equal("the gloss index ignores an empty gloss", glossIndex.has(""), false);
 equal("escape covers markup characters", esc(`<a href="x">&'`), "&lt;a href=&quot;x&quot;&gt;&amp;&#039;");
 equal("dialog copy escapes markup by default", escapeDialogCopy("<b>x</b>"), "&lt;b&gt;x&lt;/b&gt;");
 equal("dialog copy keeps explicit markup", escapeDialogCopy("<b>x</b>", true), "<b>x</b>");
@@ -3677,6 +3861,48 @@ truthy(
   "sequential steps explain a failed environment",
   seqStep && !seqStep.changed && /left environment/u.test(seqStep.debug || "")
 );
+
+const diagnosticContext = contextForLanguage(project, "child");
+const diagnosticStages = [
+  {
+    language: project.languages[1],
+    context: diagnosticContext,
+    groups: compileRuleStages(project.languages[1].soundChanges, diagnosticContext),
+  },
+];
+const diagnosticInput = diagnosticContext.tokenize("kasa");
+const explained = deriveStages(diagnosticInput, diagnosticStages, diagnosticContext);
+const unexplained = deriveStages(diagnosticInput, diagnosticStages, diagnosticContext, {
+  diagnostics: false,
+});
+equal("diagnostics do not change the derived tokens", unexplained.tokens, explained.tokens);
+const explainedParallel = explained.steps.find((step) => step.kind === "parallel");
+const unexplainedParallel = unexplained.steps.find((step) => step.kind === "parallel");
+truthy(
+  "parallel misses are explained by default",
+  explainedParallel.entries.some((entry) => entry.debug)
+);
+truthy(
+  "diagnostics:false omits parallel miss prose",
+  unexplainedParallel.entries.every((entry) => !entry.debug)
+);
+
+const diagnosticSeqContext = contextForLanguage(seqStaged, "child");
+const diagnosticSeqStages = [
+  {
+    language: seqStaged.languages[1],
+    context: diagnosticSeqContext,
+    groups: compileRuleStages(seqStaged.languages[1].soundChanges, diagnosticSeqContext),
+  },
+];
+const unexplainedSeq = deriveStages(
+  diagnosticSeqContext.tokenize("kata"),
+  diagnosticSeqStages,
+  diagnosticSeqContext,
+  { diagnostics: false }
+);
+const unexplainedSeqStep = unexplainedSeq.steps.find((step) => step.kind === "sequential");
+equal("diagnostics:false omits sequential miss prose", unexplainedSeqStep.debug, "");
 
 /* ---- lexicon analytics ---------------------------------------------------- */
 
