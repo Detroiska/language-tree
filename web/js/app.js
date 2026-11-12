@@ -150,10 +150,16 @@ function updateSidebarToggle() {
   sidebarToggle.title = label;
 }
 
-function closeSidebarOverlay() {
+function closeSidebarOverlay({ focusToggle = false } = {}) {
   if (!document.body.classList.contains("sidebar-open")) return;
+  // A navigation from inside the drawer can drop focus to <body> when the
+  // sidebar re-renders, so sidebar activations focus the toggle before they
+  // navigate. The fallback covers programmatic closes while focus is still in
+  // the drawer; closing from a top-bar control leaves that control focused.
+  const focusInside = Boolean(sidebar?.contains(document.activeElement));
   document.body.classList.remove("sidebar-open");
   updateSidebarToggle();
+  if (focusToggle || focusInside) sidebarToggle?.focus();
 }
 
 function setDesktopSidebarHidden(hidden) {
@@ -496,13 +502,23 @@ function bootError(error) {
 function setSaveState(state, error) {
   saveState.dataset.state = state;
   const label = saveState.querySelector(".save-label");
-  if (!label) return;
-  if (state === "saving") label.textContent = "Saving…";
-  else if (state === "pending") label.textContent = "Unsaved changes";
-  else if (state === "error") label.textContent = "Save failed";
-  else if (state === "conflict") label.textContent = "Save conflict";
-  else if (state === "loading") label.textContent = "Loading…";
-  else label.textContent = store.lastSavedAt ? `Saved · ${new Date(store.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved";
+  const savedTime = store.lastSavedAt
+    ? new Date(store.lastSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
+  let labelText = "Saved";
+  if (state === "saving") labelText = "Saving…";
+  else if (state === "pending") labelText = "Unsaved changes";
+  else if (state === "error") labelText = "Save failed";
+  else if (state === "conflict") labelText = "Save conflict";
+  else if (state === "loading") labelText = "Loading…";
+  else if (savedTime) labelText = `Saved · ${savedTime}`;
+  if (label) label.textContent = labelText;
+  // The visible label is hidden below 560 px; the accessible name always
+  // carries the live state, with the saved time read as ordinary words.
+  saveState.setAttribute(
+    "aria-label",
+    state === "saved" && savedTime ? `Saved at ${savedTime}` : labelText
+  );
   const file = store.projectFile ? `data/${store.projectFile}` : "the project file";
   saveState.title =
     state === "conflict"
@@ -564,6 +580,12 @@ async function init() {
     if (!button) return;
     store.navigate(`#/language/${button.dataset.sidebarLang}/overview`);
   });
+  sidebar?.addEventListener("click", (event) => {
+    // The drawer closes on the next render; move focus out of the now-hidden
+    // panel before its links or language buttons are replaced.
+    if (!document.body.classList.contains("sidebar-open")) return;
+    if (event.target.closest("a, button")) sidebarToggle?.focus();
+  });
   saveState.addEventListener("click", async () => {
     if (store.saveState === "conflict") {
       // Another tab saved over this tab's baseline. Both exits are destructive
@@ -612,7 +634,7 @@ async function init() {
     }
     setDesktopSidebarHidden(!appShell.classList.contains("sidebar-hidden"));
   });
-  scrim.addEventListener("click", closeSidebarOverlay);
+  scrim.addEventListener("click", () => closeSidebarOverlay({ focusToggle: true }));
   window.matchMedia(NARROW_SIDEBAR).addEventListener("change", () => {
     closeSidebarOverlay();
     updateSidebarToggle();
@@ -629,7 +651,7 @@ async function init() {
   });
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !document.body.classList.contains("sidebar-open")) return;
-    closeSidebarOverlay();
+    closeSidebarOverlay({ focusToggle: true });
   });
   window.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
