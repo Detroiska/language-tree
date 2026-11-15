@@ -1,6 +1,11 @@
-import { stripLevelMarks } from "./notation.js";
+import { stripLevelMarks, stripStressMarks } from "./notation.js";
 import { normalizeFeatureOverrides } from "./features.js";
-import { normalizeStressSystem } from "./prosody.js";
+import {
+  normalizeStressScope,
+  normalizeStressSystem,
+  normalizeWordStress,
+  stressMarksFromForm,
+} from "./prosody.js";
 
 let fallbackCounter = 0;
 
@@ -120,6 +125,9 @@ function defaultPhonotactics() {
     notes: "",
     classes: [],
     stress: "none",
+    // Stress is surface-only by default. Choosing phonemic scope makes the
+    // stored word stress part of the phonemic form and visible to rules.
+    stressScope: "phonetic",
   };
 }
 
@@ -527,7 +535,7 @@ function ensurePhonotactics(value) {
   const defaults = defaultPhonotactics();
   const base = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const mode = (raw) => (raw === "forbidden" ? "forbidden" : "allowed");
-  return {
+  const phonotactics = {
     ...base,
     // An explicitly empty template is meaningful: it turns phonotactic
     // checking off. Only a missing field gets the default template.
@@ -553,6 +561,14 @@ function ensurePhonotactics(value) {
       : [],
     stress: normalizeStressSystem(base.stress),
   };
+  // Older files did not have a scope field, and the tracked demo must stay
+  // byte-identical through ensureProject. Missing means the phonetic default;
+  // write the field only when the file already carried one or migration sets
+  // it explicitly.
+  if (Object.prototype.hasOwnProperty.call(base, "stressScope")) {
+    phonotactics.stressScope = normalizeStressScope(base.stressScope);
+  }
+  return phonotactics;
 }
 
 export function ensureProject(raw) {
@@ -587,7 +603,17 @@ export function ensureProject(raw) {
     language.inventory = language.inventory && typeof language.inventory === "object" && !Array.isArray(language.inventory) ? language.inventory : {};
     language.inventory.consonants = ensureChart(language.inventory.consonants, defaultConsonantChart, "row");
     language.inventory.vowels = ensureChart(language.inventory.vowels, defaultVowelChart, "col");
+    // A file written before stress scope existed has no opinion here. Existing
+    // projects keep the old surface-only rendering unless a rule already tests
+    // stress or a word already carries it; either one opts into phonemic scope.
+    const hadStressScope = Boolean(
+      language.phonotactics &&
+        typeof language.phonotactics === "object" &&
+        typeof language.phonotactics.stressScope === "string"
+    );
     language.phonotactics = ensurePhonotactics(language.phonotactics);
+    const stressVowels = chartPhonemeList(language.inventory.vowels);
+    let stressNotation = false;
     const ruleIds = new Set();
     const ruleRemap = new Map();
     language.soundChanges = Array.isArray(language.soundChanges)
@@ -623,23 +649,44 @@ export function ensureProject(raw) {
       if (rule.parentId && !topLevelRuleIds.has(rule.parentId)) rule.parentId = null;
     }
     language.soundChanges = normalizeRuleOrder(language.soundChanges);
+    stressNotation ||= language.soundChanges.some((rule) => /[ˈˌ]/u.test(rule.notation));
     language.allophony = ensureAllophony(language.allophony);
     language.featureOverrides = normalizeFeatureOverrides(language.featureOverrides);
     const wordIds = new Set();
     language.vocabulary = Array.isArray(language.vocabulary)
       ? language.vocabulary
           .filter((entry) => entry && typeof entry === "object")
-          .map((entry) => ({
-            ...entry,
-            id: normalizeId(entry.id, wordIds, "word"),
-            gloss: typeof entry.gloss === "string" ? entry.gloss : "",
-            // A form pasted as /kasa/ or [kʰasa] is still one lexical form.
-            // Keep the stored value bare so tokenizing and comparison stay
-            // level-agnostic; the UI adds the marks back for display.
-            form: typeof entry.form === "string" ? stripLevelMarks(entry.form) : "",
-            note: typeof entry.note === "string" ? entry.note : "",
-          }))
+          .map((entry) => {
+            const rawForm = typeof entry.form === "string" ? entry.form : "";
+            const inlineStress = stressMarksFromForm(rawForm, stressVowels);
+            const fieldStress = normalizeWordStress(entry.stress);
+            const stress = fieldStress || inlineStress;
+            if (stress) stressNotation = true;
+            const word = {
+              ...entry,
+              id: normalizeId(entry.id, wordIds, "word"),
+              gloss: typeof entry.gloss === "string" ? entry.gloss : "",
+              // A form pasted as /kasa/ or [kʰasa] is still one lexical form.
+              // Keep the stored value bare so tokenizing and comparison stay
+              // level-agnostic; the UI adds the marks back for display. Legacy
+              // inline stress marks move into the stress field below.
+              form: stripStressMarks(stripLevelMarks(rawForm)),
+              note: typeof entry.note === "string" ? entry.note : "",
+            };
+            if (stress) {
+              word.stress = {
+                ...(entry.stress && typeof entry.stress === "object" && !Array.isArray(entry.stress)
+                  ? entry.stress
+                  : {}),
+                ...stress,
+              };
+            } else {
+              delete word.stress;
+            }
+            return word;
+          })
       : [];
+    if (!hadStressScope && stressNotation) language.phonotactics.stressScope = "phonemic";
   }
 
   // A parent link must point to a real, different language, and cycles are

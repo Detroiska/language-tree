@@ -23,7 +23,7 @@ import {
   contextForAllophony,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, stripLevelMarks } from "../notation.js";
+import { formatPhonemic, formatPhonetic, sameForm, stripLevelMarks } from "../notation.js";
 import { optionalRulesPickerMarkup } from "../derivation.js";
 import { languageHref } from "../routes.js";
 import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
@@ -488,9 +488,15 @@ export function renderAllophony(container, ctx, activeTool = "rules") {
   const runTest = () => {
     if (!testPanel || !testInput) return;
     alloTesterMemory.set(language.id, { form: testInput.value, gloss: testGloss });
+    const testWord = testGloss
+      ? language.vocabulary.find(
+          (word) => word.gloss === testGloss && sameForm(word.form, testInput.value)
+        )
+      : null;
     const result = surfaceForForm(stripLevelMarks(testInput.value), ctx.project, language.id, {
       gloss: testGloss,
       optionalRuleIds: [...testOptional],
+      wordStress: testWord?.stress || null,
     });
     const phonemic = testPanel.querySelector("[data-allo-phonemic]");
     const surface = testPanel.querySelector("[data-allo-surface]");

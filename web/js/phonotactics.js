@@ -812,7 +812,7 @@ export function compilePhonotactics(phonotactics, context) {
   return result;
 }
 
-export function validateWord(form, compiled, context) {
+export function validateWord(form, compiled, context, wordStress = null) {
   const normalized = normalizeForm(form);
   const text = normalized.trim();
   const result = {
@@ -866,11 +866,14 @@ export function validateWord(form, compiled, context) {
       tokens,
       parse.syllables,
       context.stressSystem || "none",
-      parsed.junctures
+      parsed.junctures,
+      wordStress
     );
     result.stressIndex = prosody.stressIndex;
+    result.secondaryIndices = prosody.secondaryIndices;
     result.stress = prosody.stress;
     result.displayText = prosody.display;
+    result.marked = prosody.marked;
   } else {
     result.partialText = parse.partialText || "";
     result.issues.push({ type: "syllable", message: parse.error });

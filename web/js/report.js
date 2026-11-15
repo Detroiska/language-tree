@@ -11,9 +11,10 @@ import {
   ruleNumberMap,
 } from "./model.js";
 import { allophoneTable, hasSurfaceDisplay, surfaceForForm } from "./phonology.js";
-import { stressLabel } from "./prosody.js";
+import { normalizeStressScope, stressLabel } from "./prosody.js";
 import { describeBundle } from "./features.js";
 import { formatPhonemic, formatPhonetic } from "./notation.js";
+import { createPhonotacticsChecker, phonemicFormForWord } from "./phonotacticsCheck.js";
 import { esc } from "./escape.js";
 import { normalizeGloss } from "./gloss.js";
 
@@ -82,13 +83,16 @@ function cognateData(project) {
   const order = languagesInTreeOrder(project);
   const sets = new Map();
   for (const language of order) {
+    const checker = createPhonotacticsChecker(language);
     for (const word of language.vocabulary) {
       const glossKey = normalizeGloss(word.gloss);
       const form = String(word.form || "").trim();
       if (!glossKey || !form) continue;
       if (!sets.has(glossKey)) sets.set(glossKey, { gloss: word.gloss.trim(), byLang: new Map() });
       const set = sets.get(glossKey);
-      if (!set.byLang.has(language.id)) set.byLang.set(language.id, form);
+      if (!set.byLang.has(language.id)) {
+        set.byLang.set(language.id, phonemicFormForWord(word, checker));
+      }
     }
   }
   const shared = [...sets.values()].filter((set) => set.byLang.size >= 2);
@@ -107,7 +111,10 @@ function phonotacticsRows(language) {
   };
   const p = language.phonotactics || {};
   push("Syllable template", p.template);
-  if (p.stress && p.stress !== "none") push("Stress", stressLabel(p.stress));
+  if (p.stress && p.stress !== "none") {
+    push("Stress", stressLabel(p.stress));
+    if (normalizeStressScope(p.stressScope) === "phonemic") push("Stress scope", "Phonemic");
+  }
   for (const category of Array.isArray(p.classes) ? p.classes : []) {
     const name = typeof category?.name === "string" ? category.name.trim() : "";
     const sounds = typeof category?.sounds === "string" ? category.sounds.trim() : "";
@@ -128,8 +135,8 @@ function featureOverrideRows(language) {
     .map(([sound, bundle]) => [sound, describeBundle(bundle, { full: true }).join(" ")]);
 }
 
-function surfaceOf(project, language, form, gloss = "") {
-  const result = surfaceForForm(form, project, language.id, { gloss });
+function surfaceOf(project, language, form, gloss = "", wordStress = null) {
+  const result = surfaceForForm(form, project, language.id, { gloss, wordStress });
   return result.errors.length ? "" : result.display;
 }
 
@@ -144,11 +151,14 @@ function allophonyRows(project, language) {
 
 function vocabularyTable(project, language) {
   const hasSurface = hasSurfaceDisplay(language);
+  const checker = createPhonotacticsChecker(language);
   return {
     headers: hasSurface ? ["Gloss", "Form", "Surface", "Note"] : ["Gloss", "Form", "Note"],
     rows: language.vocabulary.map((word) => {
-      const row = [word.gloss, formatPhonemic(word.form)];
-      if (hasSurface) row.push(formatPhonetic(surfaceOf(project, language, word.form, word.gloss)));
+      const row = [word.gloss, formatPhonemic(phonemicFormForWord(word, checker))];
+      if (hasSurface) {
+        row.push(formatPhonetic(surfaceOf(project, language, word.form, word.gloss, word.stress)));
+      }
       row.push(word.note);
       return row;
     }),

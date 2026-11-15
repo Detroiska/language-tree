@@ -7,8 +7,9 @@ import {
   hasSurfaceDisplay,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, normalizeSearchText, sameForm, stripLevelMarks } from "../notation.js";
-import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
+import { formatPhonemic, formatPhonetic, normalizeSearchText, samePhonemicForm, stripLevelMarks, stripStressMarks } from "../notation.js";
+import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
+import { normalizeWordStress, stressMarksFromForm } from "../prosody.js";
 // ASCII form for notes and external tools; conversion lives in web/js/xsampa.js.
 import { ipaToXSampa } from "../xsampa.js";
 import { esc, icon, openModal, toast } from "../ui.js";
@@ -37,17 +38,17 @@ async function copyToClipboard(text) {
   }
 }
 
-async function copyWords(words, format = "tsv") {
-  const content = format === "json" ? toJson(words) : toTsv(words);
+async function copyWords(words, format = "tsv", language = null) {
+  const content = format === "json" ? toJson(words) : toTsv(words, language);
   const done = await copyToClipboard(content);
   if (done) toast(`Copied ${words.length} word${words.length === 1 ? "" : "s"} as ${format.toUpperCase()}.`, { type: "success" });
   else toast("Copy failed — select the text and copy manually.", { type: "info" });
   return done;
 }
 
-function downloadWords(words, languageName, format) {
+function downloadWords(words, languageName, format, language = null) {
   const extension = format === "json" ? "json" : "tsv";
-  const content = format === "json" ? toJson(words) : toTsv(words);
+  const content = format === "json" ? toJson(words) : toTsv(words, language);
   const name = `${String(languageName || "vocabulary").replace(/[^\w-]+/g, "_").replace(/^_+|_+$/g, "")}-vocabulary.${extension}`;
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -78,6 +79,7 @@ function expectedFor(ctx, word, parent) {
   const derived = deriveForm(parentWord.form, ctx.project, ctx.language.id, {
     directOnly: true,
     gloss: word.gloss,
+    wordStress: parentWord.stress,
   });
   return {
     parentWord,
@@ -95,14 +97,14 @@ function exceptionNote(exceptions) {
   }`;
 }
 
-function checkCellMarkup(word, expected) {
+function checkCellMarkup(word, expected, scope = "phonetic") {
   if (!expected) return `<span class="muted">—</span>`;
   if (expected.error) {
     return `<span class="status-chip status-differs" title="${esc(expected.error)}">${icon("warning")}Rule error</span>`;
   }
   if (!word.form.trim()) return `<span class="status-chip status-missing">${icon("info")}No form</span>`;
   const exceptionSuffix = exceptionNote(expected.exceptions);
-  if (sameForm(word.form, expected.derived)) {
+  if (samePhonemicForm(word, { form: expected.derived }, { scope })) {
     return `<span class="status-chip status-match" title="Matches the derived phonemic form ${esc(formatPhonemic(expected.derived))}${esc(exceptionSuffix)}">${icon("check")}Matches</span>`;
   }
   return `<span class="status-chip status-differs" title="Expected ${esc(formatPhonemic(expected.derived))}${esc(exceptionSuffix)}">${icon("warning")}Expected ${esc(formatPhonemic(expected.derived)) || "∅"}</span>`;
@@ -111,17 +113,55 @@ function checkCellMarkup(word, expected) {
 function surfaceMarkup(word, ctx) {
   const form = word?.form;
   if (!hasSurfaceDisplay(ctx.language) || !String(form || "").trim()) return "";
-  const result = surfaceForForm(form, ctx.project, ctx.language.id, { gloss: word.gloss });
+  const result = surfaceForForm(form, ctx.project, ctx.language.id, {
+    gloss: word.gloss,
+    wordStress: word.stress,
+  });
   if (result.errors.length) {
     return `<span class="surface-preview surface-error" title="${esc(result.errors[0])}">${icon("warning")}surface error</span>`;
   }
   return `<span class="surface-preview" title="Surface form after allophony, with predicted stress and syllables">${esc(formatPhonetic(result.display))}</span>`;
 }
 
-function updateRowCheck(row, ctx, word, parent) {
+function phonemicPreviewMarkup(word, checker) {
+  if (checker.stressScope !== "phonemic") return "";
+  const display = phonemicFormForWord(word, checker);
+  if (!/[ˈˌ]/u.test(display)) return "";
+  return `<span class="phonemic-preview" title="Phonemic form with stored stress">${esc(formatPhonemic(display))}</span>`;
+}
+
+function stressSelectMarkup(word, result, checker) {
+  if (checker.stress === "none" && !word.stress) return "";
+  // Syllable positions come from the template when it parses. If checks are
+  // off or the template is broken, the same maximal-onset fallback used by the
+  // preview still lets a stored stress be edited instead of hiding the picker.
+  const syllableCount =
+    result.syllables?.length ||
+    (result.tokens?.length
+      ? checker.context.prosodyFor(result.tokens, result.junctures, word.stress).syllables.length
+      : 0);
+  const primary = word.stress?.primary;
+  const options = [
+    `<option value="" ${primary == null ? "selected" : ""}>${checker.stress === "none" ? "None" : "Auto"}</option>`,
+    ...Array.from({ length: syllableCount }, (_, index) => {
+      return `<option value="${index}" ${primary === index ? "selected" : ""}>Syllable ${index + 1}</option>`;
+    }),
+  ].join("");
+  return `
+    <label class="word-stress" title="Lexical primary stress; “Auto” follows the language’s stress system">
+      <span>Stress</span>
+      <select class="select select-small" data-word-stress ${syllableCount ? "" : "disabled"}>${options}</select>
+    </label>`;
+}
+
+function updateCheckCell(row, ctx, word, parent, checker) {
   const cell = row.querySelector("[data-word-check]");
   if (!cell) return;
-  cell.innerHTML = checkCellMarkup(word, expectedFor(ctx, word, parent));
+  cell.innerHTML = checkCellMarkup(word, expectedFor(ctx, word, parent), checker.stressScope);
+}
+
+function updateRowCheck(row, ctx, word, parent, checker) {
+  updateCheckCell(row, ctx, word, parent, checker);
 }
 
 function phonotacticStatus(result) {
@@ -162,7 +202,7 @@ function validitySummary(words, checker) {
   let valid = 0;
   let invalid = 0;
   for (const word of words) {
-    const result = checker.validate(word.form);
+    const result = checker.validate(word.form, word.stress);
     if (result.empty) continue;
     recorded += 1;
     const status = phonotacticStatus(result);
@@ -284,7 +324,7 @@ function openBulkDialog(ctx, language, words) {
       };
 
       const refreshExport = () => {
-        if (exportOpen) output.value = format === "json" ? toJson(words) : toTsv(words);
+        if (exportOpen) output.value = format === "json" ? toJson(words) : toTsv(words, language);
       };
 
       root.querySelectorAll("[data-bulk-tab]").forEach((tab) => {
@@ -305,11 +345,11 @@ function openBulkDialog(ctx, language, words) {
       });
 
       root.querySelector("[data-bulk-copy]").addEventListener("click", () => {
-        copyWords(words, format);
+        copyWords(words, format, language);
       });
 
       root.querySelector("[data-bulk-download]").addEventListener("click", () => {
-        downloadWords(words, language.name, format);
+        downloadWords(words, language.name, format, language);
       });
 
       const refreshImport = () => {
@@ -366,13 +406,18 @@ export function renderVocabulary(container, ctx) {
       const expected = expectedFor(ctx, word, parent);
       if (!expected || expected.error) continue;
       checks += 1;
-      if (word.form.trim() && sameForm(word.form, expected.derived)) matches += 1;
+      if (
+        word.form.trim() &&
+        samePhonemicForm(word, { form: expected.derived }, { scope: checker.stressScope })
+      ) {
+        matches += 1;
+      }
     }
   }
 
   const rows = words
     .map((word) => {
-      const result = checker.validate(word.form);
+      const result = checker.validate(word.form, word.stress);
       return `
         <tr data-word-id="${esc(word.id)}">
           <td class="word-gloss"><input class="table-input gloss-input" data-word-field="gloss" value="${esc(word.gloss)}" placeholder="meaning" autocomplete="off" aria-label="Gloss"></td>
@@ -382,11 +427,13 @@ export function renderVocabulary(container, ctx) {
               <input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form (phonemic)">
               <span class="level-mark" aria-hidden="true">/</span>
             </span>
+            <div class="word-stress-wrap" data-word-stress-wrap>${stressSelectMarkup(word, result, checker)}</div>
+            <div class="phonemic-preview-wrap" data-phonemic-preview>${phonemicPreviewMarkup(word, checker)}</div>
             <div class="surface-preview-wrap" data-surface-preview>${surfaceMarkup(word, ctx)}</div>
             <div class="word-issue-wrap" data-word-issue>${phonotacticIssueMarkup(result)}</div>
           </td>
           <td class="word-phonotactics" data-word-phonotactics>${phonotacticCellMarkup(result)}</td>
-          ${hasParent ? `<td class="word-check" data-word-check>${checkCellMarkup(word, expectedFor(ctx, word, parent))}</td>` : ""}
+          ${hasParent ? `<td class="word-check" data-word-check>${checkCellMarkup(word, expectedFor(ctx, word, parent), checker.stressScope)}</td>` : ""}
           <td class="word-note"><input class="table-input" data-word-field="note" value="${esc(word.note)}" placeholder="optional note" autocomplete="off" aria-label="Word note"></td>
           <td class="row-actions">
             <button class="icon-button icon-button-small" type="button" data-trace-word title="Trace in the cognate explorer" aria-label="Trace in the cognate explorer">${icon("language")}</button>
@@ -470,12 +517,17 @@ export function renderVocabulary(container, ctx) {
   // invalid, inherited-check differs, or rule error on the derivation.
   const wordStatus = (word) => {
     if (!word.form.trim()) return "draft";
-    const phono = phonotacticStatus(checker.validate(word.form));
+    const phono = phonotacticStatus(checker.validate(word.form, word.stress));
     if (phono === "invalid" || phono === "template-error") return "invalid";
     if (parent) {
       const expected = expectedFor(ctx, word, parent);
       if (expected?.error) return "error";
-      if (expected && !sameForm(word.form, expected.derived)) return "differs";
+      if (
+        expected &&
+        !samePhonemicForm(word, { form: expected.derived }, { scope: checker.stressScope })
+      ) {
+        return "differs";
+      }
     }
     return "ok";
   };
@@ -556,17 +608,38 @@ export function renderVocabulary(container, ctx) {
   container.querySelectorAll("[data-word-id]").forEach((row) => {
     const word = language.vocabulary.find((entry) => entry.id === row.dataset.wordId);
     if (!word) return;
+    row.addEventListener("change", (event) => {
+      const select = event.target.closest?.("[data-word-stress]");
+      if (!select || !row.contains(select)) return;
+      const value = select.value;
+      const secondary = word.stress?.secondary || [];
+      const stress =
+        value === ""
+          ? normalizeWordStress({ primary: null, secondary })
+          : normalizeWordStress({ primary: Number(value), secondary });
+      if (stress) word.stress = stress;
+      else delete word.stress;
+      // An explicit lexical mark is a phonemic claim; make the scope match so
+      // the mark shows in /…/ and sound-change rules can see it.
+      if (value !== "" && language.phonotactics) language.phonotactics.stressScope = "phonemic";
+      ctx.touch({ label: "Edit word stress" });
+      ctx.refresh();
+    });
     row.querySelectorAll("[data-word-field]").forEach((input) => {
       input.addEventListener("input", () => {
         const field = input.dataset.wordField;
         word[field] = field === "form" ? stripLevelMarks(input.value) : input.value;
         ctx.touch({ label: "Edit word", coalesceKey: word.id });
-        if (field === "gloss" || field === "form") updateRowCheck(row, ctx, word, parent);
+        if (field === "gloss" || field === "form") updateRowCheck(row, ctx, word, parent, checker);
         if (field === "form") {
-          const result = checker.validate(word.form);
+          const result = checker.validate(word.form, word.stress);
           updateRowPhonotactics(row, result);
+          const stress = row.querySelector("[data-word-stress-wrap]");
+          if (stress) stress.innerHTML = stressSelectMarkup(word, result, checker);
           const surface = row.querySelector("[data-surface-preview]");
           if (surface) surface.innerHTML = surfaceMarkup(word, ctx);
+          const phonemic = row.querySelector("[data-phonemic-preview]");
+          if (phonemic) phonemic.innerHTML = phonemicPreviewMarkup(word, checker);
           const summary = container.querySelector("[data-phonotactics-summary]");
           if (summary) summary.textContent = validitySummary(words, checker);
         }
@@ -579,8 +652,23 @@ export function renderVocabulary(container, ctx) {
       });
       if (input.dataset.wordField === "form") {
         input.addEventListener("blur", () => {
-          const clean = stripLevelMarks(input.value);
-          if (clean !== input.value) input.value = clean;
+          const inlineStress = stressMarksFromForm(word.form, [...checker.context.vowels]);
+          const clean = stripStressMarks(stripLevelMarks(input.value));
+          let changed = false;
+          if (inlineStress) {
+            word.stress = inlineStress;
+            if (language.phonotactics) language.phonotactics.stressScope = "phonemic";
+            changed = true;
+          }
+          if (clean !== input.value) {
+            input.value = clean;
+            word.form = clean;
+            changed = true;
+          }
+          if (changed) {
+            ctx.touch({ label: "Edit word", coalesceKey: word.id });
+            ctx.refresh();
+          }
         });
       }
       if (input.dataset.wordField === "gloss") {

@@ -43,6 +43,7 @@ import {
   compileChainFrom,
   createChainCompiler,
   deriveForm,
+  deriveInheritedWord,
   deriveStages,
   exceptionRulesFromSteps,
   explainRuleMiss,
@@ -58,6 +59,7 @@ import {
   normalizeSearchText,
   sameForm,
   sameJunctures,
+  samePhonemicForm,
   sameTokens,
   stripLevelMarks,
 } from "../web/js/notation.js";
@@ -77,9 +79,18 @@ import {
   resolveFeatureBundle,
 } from "../web/js/features.js";
 import { compilePhonotactics } from "../web/js/phonotactics.js";
-import { createPhonotacticsChecker, stressMarkedForm } from "../web/js/phonotacticsCheck.js";
+import { createPhonotacticsChecker, phonemicFormForWord, stressMarkedForm } from "../web/js/phonotacticsCheck.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
-import { isHeavySyllable, normalizeStressSystem, stressIndexOf, stressLabel } from "../web/js/prosody.js";
+import {
+  isHeavySyllable,
+  normalizeStressScope,
+  normalizeStressSystem,
+  normalizeWordStress,
+  resolveStress,
+  stressIndexOf,
+  stressLabel,
+  stressMarksFromForm,
+} from "../web/js/prosody.js";
 import { decodeHashPart, languageHref } from "../web/js/routes.js";
 import {
   LANGUAGE_TOOLS,
@@ -1872,6 +1883,376 @@ equal(
   "a stress mark glued to an environment chunk becomes its own atom",
   gluedStressRule.rule?.left.map((atom) => atom.type),
   ["literal", "stress"],
+);
+
+/* ---- lexical stress and stress scope ------------------------------------ */
+
+equal("a missing stress scope means phonetic", normalizeStressScope(undefined), "phonetic");
+equal("an unknown stress scope falls back to phonetic", normalizeStressScope("loud"), "phonetic");
+equal("a wired stress scope survives normalization", normalizeStressScope("phonemic"), "phonemic");
+equal("word stress normalizes a bare primary index", normalizeWordStress(2), { primary: 2, secondary: [] });
+equal(
+  "word stress drops invalid secondary indices and sorts the rest",
+  normalizeWordStress({ primary: 1, secondary: [3, -1, 1, 0, 2.5] }),
+  { primary: 1, secondary: [0, 3] }
+);
+equal("invalid word stress normalizes to null", normalizeWordStress({ primary: -4 }), null);
+equal("legacy marks migrate to zero-based syllable indices", stressMarksFromForm("ˌkaˈsa"), {
+  primary: 1,
+  secondary: [0],
+});
+equal("legacy marks keep a single primary", stressMarksFromForm("ˈkaˈsa"), {
+  primary: 0,
+  secondary: [],
+});
+equal("a form without marks has no stress field", stressMarksFromForm("kasa"), null);
+
+const twoSyllables = [
+  { start: 0, end: 2 },
+  { start: 2, end: 4 },
+];
+equal(
+  "a lexical primary overrides the language default",
+  resolveStress(twoSyllables, "initial", { primary: 1 }),
+  { primaryIndex: 1, secondaryIndices: [] }
+);
+equal(
+  "an out-of-range lexical primary falls back to the default",
+  resolveStress(twoSyllables, "initial", { primary: 9 }),
+  { primaryIndex: 0, secondaryIndices: [] }
+);
+equal(
+  "secondary indices survive alongside the primary",
+  resolveStress(twoSyllables, "initial", { primary: 1, secondary: [0] }),
+  { primaryIndex: 1, secondaryIndices: [0] }
+);
+
+const stressFixture = ensureProject({
+  title: "Stress fixtures",
+  languages: [
+    {
+      id: "french",
+      name: "French",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "final", stressScope: "phonetic" },
+      soundChanges: [],
+      vocabulary: [{ id: "fr_house", gloss: "house", form: "kasa", note: "" }],
+    },
+    {
+      id: "russian",
+      name: "Russian",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "penult", stressScope: "phonemic" },
+      soundChanges: [],
+      vocabulary: [
+        { id: "ru_flour", gloss: "flour", form: "muka", stress: { primary: 0, secondary: [] }, note: "" },
+        { id: "ru_torment", gloss: "torment", form: "muka", stress: { primary: 1, secondary: [] }, note: "" },
+      ],
+    },
+  ],
+});
+const french = stressFixture.languages[0];
+const russian = stressFixture.languages[1];
+const frenchChecker = createPhonotacticsChecker(french);
+const russianChecker = createPhonotacticsChecker(russian);
+equal(
+  "phonetic scope keeps stress out of the phonemic form",
+  phonemicFormForWord(french.vocabulary[0], frenchChecker),
+  "kasa"
+);
+equal("phonetic scope uses /kasa/", formatPhonemic(phonemicFormForWord(french.vocabulary[0], frenchChecker)), "/kasa/");
+equal(
+  "French final stress appears only in the surface form",
+  surfaceForForm("kasa", stressFixture, "french").display,
+  "ka.ˈsa"
+);
+equal(
+  "the French surface form is bracketed",
+  formatPhonetic(surfaceForForm("kasa", stressFixture, "french").display),
+  "[ka.ˈsa]"
+);
+equal(
+  "phonemic scope shows the stored initial stress",
+  phonemicFormForWord(russian.vocabulary[0], russianChecker),
+  "ˈmu.ka"
+);
+equal(
+  "phonemic scope shows the stored final stress",
+  phonemicFormForWord(russian.vocabulary[1], russianChecker),
+  "mu.ˈka"
+);
+equal(
+  "two segmentally identical words stay distinct in phonemic scope",
+  samePhonemicForm(russian.vocabulary[0], russian.vocabulary[1], { scope: "phonemic" }),
+  false
+);
+equal(
+  "phonetic scope compares segments only",
+  samePhonemicForm(russian.vocabulary[0], russian.vocabulary[1], { scope: "phonetic" }),
+  true
+);
+equal(
+  "a derived form without stress still compares by segments",
+  samePhonemicForm(russian.vocabulary[0], { form: "mu.ka" }, { scope: "phonemic" }),
+  true
+);
+equal(
+  "stress-aware comparison still ignores syllable dots",
+  samePhonemicForm(
+    russian.vocabulary[0],
+    { form: "mu.ka", stress: { primary: 0, secondary: [] } },
+    { scope: "phonemic" }
+  ),
+  true
+);
+equal(
+  "stressMarkedForm honors a lexical primary",
+  stressMarkedForm("muka", russianChecker, { primary: 1 }),
+  "muˈka"
+);
+equal(
+  "stressMarkedForm keeps a secondary mark",
+  stressMarkedForm("kasa", initialChecker, { primary: 1, secondary: [0] }),
+  "ˌkaˈsa"
+);
+equal(
+  "the mark helper still honors a word with no default stress system",
+  stressMarkedForm("muka", createPhonotacticsChecker({ ...russian, phonotactics: { ...russian.phonotactics, stress: "none" } }), {
+    primary: 1,
+  }),
+  "muˈka"
+);
+
+const migratedStress = ensureProject({
+  title: "Legacy stress",
+  languages: [
+    {
+      id: "legacy",
+      name: "Legacy",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial" },
+      soundChanges: [],
+      vocabulary: [
+        { id: "legacy_word", gloss: "house", form: "ˈkasa", note: "" },
+        { id: "legacy_word2", gloss: "flour", form: "/muˌka/", note: "" },
+      ],
+    },
+  ],
+});
+equal("legacy inline primary marks leave the stored form", migratedStress.languages[0].vocabulary[0].form, "kasa");
+equal(
+  "legacy inline primary marks become a word stress field",
+  migratedStress.languages[0].vocabulary[0].stress,
+  { primary: 0, secondary: [] }
+);
+equal(
+  "legacy level and secondary marks migrate together",
+  migratedStress.languages[0].vocabulary[1],
+  {
+    id: "legacy_word2",
+    gloss: "flour",
+    form: "muka",
+    note: "",
+    stress: { primary: null, secondary: [1] },
+  }
+);
+equal(
+  "word stress opts a legacy file into phonemic scope",
+  migratedStress.languages[0].phonotactics.stressScope,
+  "phonemic"
+);
+
+const stressConditioned = ensureProject({
+  title: "Existing stress rule",
+  languages: [
+    {
+      id: "old",
+      name: "Old",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial" },
+      soundChanges: [{ id: "old_rule", notation: "a > ə / ˈ _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "an existing rule that tests stress migrates to phonemic scope",
+  stressConditioned.languages[0].phonotactics.stressScope,
+  "phonemic"
+);
+truthy(
+  "an existing file with no stress notation keeps no scope field",
+  !("stressScope" in project.languages[1].phonotactics)
+);
+equal("new languages default to phonetic scope", createLanguage("New").phonotactics.stressScope, "phonetic");
+
+const phoneticRuleProject = ensureProject({
+  title: "Phonetic scope rule",
+  languages: [
+    {
+      id: "phonetic",
+      name: "Phonetic",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonetic" },
+      soundChanges: [{ id: "hidden", notation: "a > ə / ˈ _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "phonetic scope hides stress from sound-change environments",
+  deriveForm("kasa", phoneticRuleProject, "phonetic", { directOnly: true }).text,
+  "kasa"
+);
+const phonemicRuleProject = ensureProject({
+  title: "Phonemic scope rule",
+  languages: [
+    {
+      id: "phonemic",
+      name: "Phonemic",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [{ id: "visible", notation: "a > ə / ˈ _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "phonemic scope lets sound-change environments see stress",
+  deriveForm("kasa", phonemicRuleProject, "phonemic", { directOnly: true }).text,
+  "kəsa"
+);
+const phoneticAllophonyProject = ensureProject({
+  title: "Phonetic scope allophony",
+  languages: [
+    {
+      id: "surface",
+      name: "Surface",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonetic" },
+      soundChanges: [],
+      allophony: [{ id: "allo", notation: "a > ə / ˈ _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "allophony sees stress even in phonetic scope",
+  surfaceForForm("kasa", phoneticAllophonyProject, "surface").text,
+  "kəsa"
+);
+const phoneticAllophonyContext = contextForAllophony(phoneticAllophonyProject, "surface");
+const allophonyStressWarnings =
+  compileAllophonyRules(phoneticAllophonyProject.languages[0].allophony, phoneticAllophonyContext)[0]
+    ?.warnings || [];
+truthy(
+  "allophony stress rules do not warn about phonetic scope",
+  !allophonyStressWarnings.some((warning) => warning.includes("phonemic scope"))
+);
+const phoneticChangeWarnings =
+  compileRule("a > ə / ˈ _", contextForLanguage(phoneticRuleProject, "phonetic")).warnings || [];
+truthy(
+  "sound-change stress rules warn about phonetic scope",
+  phoneticChangeWarnings.some((warning) => warning.includes("phonemic scope"))
+);
+
+const lexicalRuleProject = ensureProject({
+  title: "Lexical stress in rules",
+  languages: [
+    {
+      id: "lexical",
+      name: "Lexical",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "penult", stressScope: "phonemic" },
+      soundChanges: [{ id: "stress_a", notation: "a > u / ˈ _", note: "", enabled: true }],
+      allophony: [{ id: "stress_surface_a", notation: "a > u / ˈ _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "sound-change rules see a lexical primary from the source word",
+  deriveForm("muka", lexicalRuleProject, "lexical", {
+    directOnly: true,
+    wordStress: { primary: 1 },
+  }).text,
+  "muku"
+);
+equal(
+  "the language default applies when the lexical primary is on another syllable",
+  deriveForm("muka", lexicalRuleProject, "lexical", {
+    directOnly: true,
+    wordStress: { primary: 0 },
+  }).text,
+  "muka"
+);
+equal(
+  "allophony sees the lexical primary from the surface word",
+  surfaceForForm("muka", lexicalRuleProject, "lexical", { wordStress: { primary: 1 } }).text,
+  "muku"
+);
+equal(
+  "allophony uses the language default when no lexical primary applies",
+  surfaceForForm("muka", lexicalRuleProject, "lexical", { wordStress: { primary: 0 } }).text,
+  "muka"
+);
+equal(
+  "the inherited-record path applies the parent word's lexical stress",
+  deriveInheritedWord(
+    { gloss: "torment", form: "muka", stress: { primary: 1 } },
+    lexicalRuleProject,
+    "lexical"
+  ).text,
+  "muku"
+);
+equal(
+  "the inherited-record path falls back to the language default without word stress",
+  deriveInheritedWord({ gloss: "torment", form: "muka" }, lexicalRuleProject, "lexical").text,
+  "muka"
+);
+
+const emptyTemplateLanguage = {
+  inventory,
+  phonotactics: { template: "", stress: "initial", stressScope: "phonemic" },
+  vocabulary: [],
+};
+const emptyTemplateChecker = createPhonotacticsChecker(emptyTemplateLanguage);
+equal(
+  "stored stress stays in /…/ when phonotactics checking is off",
+  phonemicFormForWord({ form: "muka", stress: { primary: 1 } }, emptyTemplateChecker),
+  "mu.ˈka"
+);
+equal(
+  "stored stress stays in exports when phonotactics checking is off",
+  stressMarkedForm("muka", emptyTemplateChecker, { primary: 1 }),
+  "muˈka"
+);
+const brokenTemplateLanguage = {
+  ...emptyTemplateLanguage,
+  phonotactics: { ...emptyTemplateLanguage.phonotactics, template: "(" },
+};
+const brokenTemplateChecker = createPhonotacticsChecker(brokenTemplateLanguage);
+truthy(
+  "the broken template really fails to compile",
+  Boolean(brokenTemplateChecker.compiled.error)
+);
+equal(
+  "stored stress stays in /…/ when the template is invalid",
+  phonemicFormForWord({ form: "muka", stress: { primary: 1 } }, brokenTemplateChecker),
+  "mu.ˈka"
+);
+equal(
+  "a secondary-only stress record exports without a predicted primary",
+  stressMarkedForm("muka", initialChecker, { primary: null, secondary: [1] }),
+  "muˌka"
 );
 
 const stressProject = ensureProject({
@@ -3818,6 +4199,20 @@ truthy(
   stressMarkdown.includes("Stress") && stressMarkdown.includes("Initial")
 );
 truthy("report surface forms include stress and syllable dots", stressMarkdown.includes("ˈka.sa"));
+
+const phonemicStressMarkdown = buildMarkdown(stressFixture);
+truthy(
+  "report shows stored primary stress in phonemic-scope forms",
+  phonemicStressMarkdown.includes("/ˈmu.ka/") && phonemicStressMarkdown.includes("/mu.ˈka/")
+);
+truthy(
+  "report names the phonemic stress scope",
+  phonemicStressMarkdown.includes("Stress scope") && phonemicStressMarkdown.includes("Phonemic")
+);
+truthy(
+  "phonetic scope keeps stress out of the report's phonemic forms",
+  phonemicStressMarkdown.includes("/kasa/")
+);
 
 const overrideMarkdown = buildMarkdown(featureProject);truthy(
   "Markdown report includes feature overrides",

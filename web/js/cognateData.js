@@ -1,6 +1,6 @@
 import { indexWordsByGloss, normalizeGloss } from "./gloss.js";
 import { getLineage, languagesInTreeOrder } from "./model.js";
-import { formatPhonemic, joinSegments, sameForm } from "./notation.js";
+import { formatPhonemic, joinSegments, samePhonemicForm } from "./notation.js";
 import {
   createChainCompiler,
   deriveStages,
@@ -102,8 +102,8 @@ function recordedFor(row, sourceWord) {
   return row.recordedByGloss?.get(key) || null;
 }
 
-function surfaceOf(form, project, languageId, gloss) {
-  const surface = surfaceForForm(form, project, languageId, { gloss });
+function surfaceOf(form, project, languageId, gloss, wordStress = null) {
+  const surface = surfaceForForm(form, project, languageId, { gloss, wordStress });
   return surface?.errors.length ? "" : surface?.display || "";
 }
 
@@ -118,7 +118,16 @@ export function deriveCognateCell(
     const sourceForm = row.isSource ? sourceWord.form : recorded?.form || "";
     return {
       derived: row.isSource ? sourceWord.form : "",
-      surface: surface && sourceForm ? surfaceOf(sourceForm, project, row.language.id, sourceWord.gloss) : "",
+      surface:
+        surface && sourceForm
+          ? surfaceOf(
+              sourceForm,
+              project,
+              row.language.id,
+              sourceWord.gloss,
+              row.isSource ? sourceWord.stress : recorded?.stress
+            )
+          : "",
       steps: [],
       exceptions: [],
       skippedOptional: [],
@@ -132,13 +141,14 @@ export function deriveCognateCell(
     junctures: parsed.junctures,
     optionalRuleIds,
     diagnostics,
+    wordStress: sourceWord.stress,
   });
   const derived = joinSegments(result.tokens, result.junctures);
   return {
     derived,
     surface:
       surface && !result.errors.length
-        ? surfaceOf(derived, project, row.language.id, sourceWord.gloss)
+        ? surfaceOf(derived, project, row.language.id, sourceWord.gloss, recorded?.stress)
         : "",
     steps: result.steps,
     exceptions: exceptionRulesFromSteps(result.steps),
@@ -172,7 +182,11 @@ export function statusForCognate(sourceWord, row, cell) {
       detail: `No word with the gloss “${sourceWord.gloss}” recorded in ${row.language.name}.`,
     };
   }
-  if (sameForm(cell.recorded.form, cell.derived)) {
+  if (
+    samePhonemicForm(cell.recorded, { form: cell.derived }, {
+      scope: row.language.phonotactics?.stressScope,
+    })
+  ) {
     return {
       kind: "match",
       label: "Matches",

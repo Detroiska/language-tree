@@ -53,6 +53,37 @@ export function sameTokens(left, right) {
   return left.length === right.length && left.every((token, index) => token === right[index]);
 }
 
+function stressValue(value) {
+  const stress = value && typeof value === "object" && !Array.isArray(value) ? value.stress : null;
+  if (!stress || typeof stress !== "object") return null;
+  const primary = Number.isInteger(stress.primary) && stress.primary >= 0 ? stress.primary : null;
+  const secondary = Array.isArray(stress.secondary)
+    ? [...new Set(stress.secondary.filter((index) => Number.isInteger(index) && index >= 0))].sort((a, b) => a - b)
+    : [];
+  return primary === null && !secondary.length ? null : { primary, secondary };
+}
+
+// Stress-aware identity for phonemic forms. The arguments may be stored word
+// objects (form + stress field) or bare strings. In phonetic scope, or when
+// either side has no recorded stress, this is exactly sameForm; only two
+// explicit phonemic stress records can disagree about stress. Sound-change
+// output can therefore keep comparing segments until a later level carries
+// stress across generations.
+export function samePhonemicForm(left, right, { scope = "phonetic" } = {}) {
+  const leftForm = typeof left === "string" ? left : left?.form;
+  const rightForm = typeof right === "string" ? right : right?.form;
+  if (!sameForm(leftForm, rightForm)) return false;
+  if (scope !== "phonemic") return true;
+  const leftStress = stressValue(left);
+  const rightStress = stressValue(right);
+  if (!leftStress || !rightStress) return true;
+  return (
+    leftStress.primary === rightStress.primary &&
+    leftStress.secondary.length === rightStress.secondary.length &&
+    leftStress.secondary.every((index, position) => index === rightStress.secondary[position])
+  );
+}
+
 export function sameJunctures(left, right) {
   const leftCuts = left instanceof Set ? left : new Set(left || []);
   const rightCuts = right instanceof Set ? right : new Set(right || []);
