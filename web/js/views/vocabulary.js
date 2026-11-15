@@ -420,7 +420,7 @@ export function renderVocabulary(container, ctx) {
               <input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form (phonemic)">
               <span class="level-mark" aria-hidden="true">/</span>
             </span>
-            ${stressSelectMarkup(word, result, checker)}
+            <div class="word-stress-wrap" data-word-stress-wrap>${stressSelectMarkup(word, result, checker)}</div>
             <div class="phonemic-preview-wrap" data-phonemic-preview>${phonemicPreviewMarkup(word, checker)}</div>
             <div class="surface-preview-wrap" data-surface-preview>${surfaceMarkup(word, ctx)}</div>
             <div class="word-issue-wrap" data-word-issue>${phonotacticIssueMarkup(result)}</div>
@@ -601,8 +601,10 @@ export function renderVocabulary(container, ctx) {
   container.querySelectorAll("[data-word-id]").forEach((row) => {
     const word = language.vocabulary.find((entry) => entry.id === row.dataset.wordId);
     if (!word) return;
-    row.querySelector("[data-word-stress]")?.addEventListener("change", (event) => {
-      const value = event.target.value;
+    row.addEventListener("change", (event) => {
+      const select = event.target.closest?.("[data-word-stress]");
+      if (!select || !row.contains(select)) return;
+      const value = select.value;
       const secondary = word.stress?.secondary || [];
       const stress =
         value === ""
@@ -625,6 +627,8 @@ export function renderVocabulary(container, ctx) {
         if (field === "form") {
           const result = checker.validate(word.form, word.stress);
           updateRowPhonotactics(row, result);
+          const stress = row.querySelector("[data-word-stress-wrap]");
+          if (stress) stress.innerHTML = stressSelectMarkup(word, result, checker);
           const surface = row.querySelector("[data-surface-preview]");
           if (surface) surface.innerHTML = surfaceMarkup(word, ctx);
           const phonemic = row.querySelector("[data-phonemic-preview]");

@@ -312,8 +312,9 @@ export function applyWordList(language, rows, mode) {
     const existing = byGloss.get(normalizeGloss(row.gloss));
     if (existing) {
       if (row.form) existing.form = row.form;
-      existing.stress = stress;
-      if (!stress) delete existing.stress;
+      // An update that does not mention stress leaves the stored distinction
+      // alone. A bulk edit of forms and notes must not silently erase it.
+      if (stress) existing.stress = stress;
       if (row.note) existing.note = row.note;
       existing.gloss = row.gloss;
       summary.updated += 1;

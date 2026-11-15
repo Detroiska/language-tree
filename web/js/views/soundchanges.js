@@ -14,7 +14,7 @@ import {
   compileRule,
   compileRuleStages,
   contextForLanguage,
-  deriveForm,
+  deriveInheritedWord,
   deriveStages,
   exceptionRulesFromSteps,
   hasSurfaceDisplay,
@@ -622,11 +622,8 @@ function checkRows(ctx, context = null, optionalRuleIds = [], { status = "all", 
   const parentChecker = createPhonotacticsChecker(parent);
   const checker = createPhonotacticsChecker(ctx.language);
   const rows = parentWords.map((word, index) => {
-    const derived = deriveForm(word.form, ctx.project, ctx.language.id, {
-      directOnly: true,
-      gloss: word.gloss,
+    const derived = deriveInheritedWord(word, ctx.project, ctx.language.id, {
       optionalRuleIds,
-      wordStress: word.stress,
     });
     const recorded = byGloss.get(word.gloss.trim().toLowerCase()) || null;
     const status = derived.error
@@ -1293,9 +1290,7 @@ export function renderChanges(container, ctx, activeTool = "rules") {
       const words = parentLanguage.vocabulary.filter((word) => word.form.trim() && word.gloss.trim());
       const word = words[Number(recordButton.dataset.recordWord)];
       if (!word) return;
-      const derivation = deriveForm(word.form, ctx.project, language.id, {
-        directOnly: true,
-        gloss: word.gloss,
+      const derivation = deriveInheritedWord(word, ctx.project, language.id, {
         optionalRuleIds: optionalIdsForCheck(),
       });
       if (derivation.error) {

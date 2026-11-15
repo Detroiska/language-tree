@@ -4754,6 +4754,10 @@ th:hover > .axis-menu,
   line-height: 1.45;
 }
 
+.word-stress-wrap:empty {
+  display: none;
+}
+
 .word-stress {
   display: flex;
   align-items: center;

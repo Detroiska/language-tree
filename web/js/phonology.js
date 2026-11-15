@@ -2630,6 +2630,19 @@ export function deriveForm(form, project, languageId, options = {}) {
   };
 }
 
+// The inherited-form preview and the Record action both derive one parent word
+// through this language's direct changes. Keeping the call in one place means
+// the source word's lexical stress can never be passed to one and forgotten in
+// the other, which would make the preview and the recorded form disagree.
+export function deriveInheritedWord(parentWord, project, languageId, options = {}) {
+  return deriveForm(parentWord?.form || "", project, languageId, {
+    directOnly: true,
+    gloss: parentWord?.gloss || "",
+    optionalRuleIds: options.optionalRuleIds,
+    wordStress: parentWord?.stress || null,
+  });
+}
+
 export function ruleCompileErrors(stages) {
   const errors = [];
   for (const stage of stages || []) {

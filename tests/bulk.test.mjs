@@ -320,6 +320,34 @@ equal(
     "phonetic"
   );
 }
+{
+  const lang = stressLanguage();
+  applyWordList(
+    lang,
+    [{ gloss: "flour", form: "muka", stress: { primary: 1, secondary: [0] }, note: "" }],
+    "update"
+  );
+  applyWordList(lang, [{ gloss: "flour", form: "muka", note: "updated" }], "update");
+  equal(
+    "a bulk update without stress preserves the stored stress",
+    lang.vocabulary[0].stress,
+    { primary: 1, secondary: [0] }
+  );
+}
+{
+  const words = [{ gloss: "flour", form: "muka", note: "", stress: { primary: null, secondary: [1] } }];
+  const tsv = toTsv(words, stressLanguage());
+  equal(
+    "a TSV export keeps a secondary-only stress record from gaining a primary",
+    tsv.split("\n")[1],
+    "flour\tmuˌka\t"
+  );
+  equal(
+    "a secondary-only TSV round-trip keeps the original stress",
+    parseWordList(tsv).rows[0].stress,
+    { primary: null, secondary: [1] }
+  );
+}
 equal(
   "toJson writes stress only when the word has it",
   JSON.parse(toJson([

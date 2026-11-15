@@ -43,6 +43,7 @@ import {
   compileChainFrom,
   createChainCompiler,
   deriveForm,
+  deriveInheritedWord,
   deriveStages,
   exceptionRulesFromSteps,
   explainRuleMiss,
@@ -2202,6 +2203,56 @@ equal(
   "allophony uses the language default when no lexical primary applies",
   surfaceForForm("muka", lexicalRuleProject, "lexical", { wordStress: { primary: 0 } }).text,
   "muka"
+);
+equal(
+  "the inherited-record path applies the parent word's lexical stress",
+  deriveInheritedWord(
+    { gloss: "torment", form: "muka", stress: { primary: 1 } },
+    lexicalRuleProject,
+    "lexical"
+  ).text,
+  "muku"
+);
+equal(
+  "the inherited-record path falls back to the language default without word stress",
+  deriveInheritedWord({ gloss: "torment", form: "muka" }, lexicalRuleProject, "lexical").text,
+  "muka"
+);
+
+const emptyTemplateLanguage = {
+  inventory,
+  phonotactics: { template: "", stress: "initial", stressScope: "phonemic" },
+  vocabulary: [],
+};
+const emptyTemplateChecker = createPhonotacticsChecker(emptyTemplateLanguage);
+equal(
+  "stored stress stays in /…/ when phonotactics checking is off",
+  phonemicFormForWord({ form: "muka", stress: { primary: 1 } }, emptyTemplateChecker),
+  "mu.ˈka"
+);
+equal(
+  "stored stress stays in exports when phonotactics checking is off",
+  stressMarkedForm("muka", emptyTemplateChecker, { primary: 1 }),
+  "muˈka"
+);
+const brokenTemplateLanguage = {
+  ...emptyTemplateLanguage,
+  phonotactics: { ...emptyTemplateLanguage.phonotactics, template: "(" },
+};
+const brokenTemplateChecker = createPhonotacticsChecker(brokenTemplateLanguage);
+truthy(
+  "the broken template really fails to compile",
+  Boolean(brokenTemplateChecker.compiled.error)
+);
+equal(
+  "stored stress stays in /…/ when the template is invalid",
+  phonemicFormForWord({ form: "muka", stress: { primary: 1 } }, brokenTemplateChecker),
+  "mu.ˈka"
+);
+equal(
+  "a secondary-only stress record exports without a predicted primary",
+  stressMarkedForm("muka", initialChecker, { primary: null, secondary: [1] }),
+  "muˌka"
 );
 
 const stressProject = ensureProject({
