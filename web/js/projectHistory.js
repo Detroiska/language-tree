@@ -18,8 +18,8 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function downloadName(snapshot) {
-  const stem = String(store.projectFile || "project")
+function downloadName(snapshot, file) {
+  const stem = String(file || "project")
     .replace(/\.json$/i, "")
     .replace(/[^\w-]+/g, "_")
     .replace(/^_+|_+$/g, "") || "project";
@@ -64,10 +64,10 @@ function emptyMarkup() {
     </div>`;
 }
 
-async function downloadSnapshot(snapshot) {
+async function downloadSnapshot(snapshot, file) {
   try {
-    const snapshotDocument = await store.loadSnapshot(snapshot.name);
-    const name = downloadName(snapshot);
+    const snapshotDocument = await store.loadSnapshot(snapshot.name, file);
+    const name = downloadName(snapshot, file);
     const blob = new Blob([`${JSON.stringify(snapshotDocument, null, 2)}\n`], {
       type: "application/json;charset=utf-8",
     });
@@ -86,12 +86,23 @@ async function downloadSnapshot(snapshot) {
 }
 
 export async function openProjectHistory({ onRestored = null } = {}) {
-  if (!store.projectFile) return;
+  // Pin the dialog to the file that was open when the menu item was chosen:
+  // the listing, downloads, and restore all target this file even if another
+  // tab or this tab switches projects while a request is in flight.
+  const file = store.projectFile;
+  if (!file) return;
   let listing;
   try {
-    listing = await store.listSnapshots();
+    listing = await store.listSnapshots(file);
   } catch (error) {
     toast(error.message || "Could not load the project history.", { type: "error", duration: 6000 });
+    return;
+  }
+  if (store.projectFile !== file) {
+    toast("The project changed while its history was loading. Open Project history again.", {
+      type: "info",
+      duration: 5000,
+    });
     return;
   }
   const snapshots = Array.isArray(listing?.snapshots) ? listing.snapshots : [];
@@ -105,6 +116,9 @@ export async function openProjectHistory({ onRestored = null } = {}) {
   ]
     .filter(Boolean)
     .join("; ");
+  // A restore is not cancellable once sent, so keep the dialog open until it
+  // finishes rather than closing over work that is still in flight.
+  let busy = false;
 
   openModal({
     title: "Project history",
@@ -112,17 +126,24 @@ export async function openProjectHistory({ onRestored = null } = {}) {
     body: `
       <div class="history-modal">
         <p class="modal-copy">
-          Snapshots of <strong>${esc(store.projectFile)}</strong> are taken automatically before a save replaces the file${policy ? ` — ${esc(policy)}` : ""}.
+          Snapshots of <strong>${esc(file)}</strong> are taken automatically before a save replaces the file${policy ? ` — ${esc(policy)}` : ""}.
         </p>
         <div class="history-body" data-history-body></div>
       </div>
     `,
     footer: `<button type="button" class="button button-quiet" data-close>Close</button>`,
+    beforeClose: () => busy,
     onMount({ root, close }) {
       const body = root.querySelector("[data-history-body]");
+      const closeButton = root.querySelector("[data-close]");
+      const modalClose = root.querySelector(".modal-close");
+      const setBusy = (value) => {
+        busy = value;
+        closeButton.disabled = value;
+        modalClose.disabled = value;
+      };
       let pendingName = null;
       let pendingError = "";
-      let busy = false;
 
       const findSnapshot = (name) => snapshots.find((snapshot) => snapshot.name === name);
 
@@ -141,7 +162,7 @@ export async function openProjectHistory({ onRestored = null } = {}) {
       const restore = async () => {
         const snapshot = pendingName ? findSnapshot(pendingName) : null;
         if (!snapshot || busy) return;
-        busy = true;
+        setBusy(true);
         pendingError = "";
         const confirm = body.querySelector("[data-history-confirm]");
         if (confirm) {
@@ -149,7 +170,8 @@ export async function openProjectHistory({ onRestored = null } = {}) {
           confirm.textContent = "Restoring…";
         }
         try {
-          const result = await store.restoreSnapshot(snapshot.name);
+          const result = await store.restoreSnapshot(snapshot.name, file);
+          setBusy(false);
           close();
           onRestored?.(result);
           toast(
@@ -157,9 +179,13 @@ export async function openProjectHistory({ onRestored = null } = {}) {
             { type: "success", duration: 6000 }
           );
         } catch (error) {
-          busy = false;
+          setBusy(false);
           pendingError = error.message || String(error);
-          render();
+          if (body.isConnected) {
+            render();
+          } else {
+            toast(pendingError, { type: "error", duration: 8000 });
+          }
         }
       };
 
@@ -168,7 +194,7 @@ export async function openProjectHistory({ onRestored = null } = {}) {
         if (!button || busy) return;
         if (button.hasAttribute("data-history-download")) {
           const snapshot = findSnapshot(button.dataset.historyDownload);
-          if (snapshot) void downloadSnapshot(snapshot);
+          if (snapshot) void downloadSnapshot(snapshot, file);
           return;
         }
         if (button.hasAttribute("data-history-restore")) {
@@ -188,7 +214,7 @@ export async function openProjectHistory({ onRestored = null } = {}) {
         if (button.hasAttribute("data-history-confirm")) void restore();
       });
 
-      root.querySelector("[data-close]").addEventListener("click", close);
+      closeButton.addEventListener("click", close);
       render();
     },
   });

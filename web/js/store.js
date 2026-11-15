@@ -95,24 +95,54 @@ class ProjectStore {
     return api.createProject(title, file);
   }
 
-  // Snapshot history is scoped to the file this tab has open.
-  listSnapshots() {
-    return api.listSnapshots(this.projectFile);
+  // Snapshot history is scoped to the file this tab has open. Callers that
+  // opened a dialog for one project pass that file explicitly so a project
+  // switch while a request is in flight cannot retarget the action.
+  listSnapshots(file = this.projectFile) {
+    return api.listSnapshots(file);
   }
 
-  loadSnapshot(name) {
-    return api.loadSnapshot(this.projectFile, name);
+  loadSnapshot(name, file = this.projectFile) {
+    return api.loadSnapshot(file, name);
   }
 
   // Restoring is a normal document replacement: settle pending edits first,
   // then adopt the returned document so undo history and the revision stamp
-  // start fresh, exactly as if the file had been reopened.
-  async restoreSnapshot(name) {
-    if (!this.projectFile) throw new Error("No project is open.");
+  // start fresh, exactly as if the file had been reopened. The restore targets
+  // the captured file. If this tab switches projects or changes during the
+  // request, the restored document is not applied: the server has rewritten
+  // the file, but loading it here could discard newer edits or write project
+  // A's content into project B.
+  async restoreSnapshot(name, file = this.projectFile) {
+    if (!file) throw new Error("No project is open.");
+    if (file !== this.projectFile) throw new Error("That project is no longer open in this tab.");
     await this.#settleSaves("Could not save the current project before restoring a snapshot.");
-    const result = await api.restoreSnapshot(this.projectFile, name, this.baseRevision);
-    const restored = result?.project ?? (await api.loadProject(this.projectFile));
-    await this.load(restored);
+    if (file !== this.projectFile) throw new Error("The project changed before the snapshot could be restored.");
+    const revisionAtStart = this.revision;
+    const baseRevision = this.baseRevision;
+    const result = await api.restoreSnapshot(file, name, baseRevision);
+    if (this.projectFile !== file) {
+      const error = new Error(
+        `The snapshot was restored in ${file}, but this tab is now working on ${this.projectFile || "another document"}. Switch back to ${file} to see the restored version.`
+      );
+      error.restored = true;
+      throw error;
+    }
+    if (this.revision !== revisionAtStart || this.dirty || this.#inFlight) {
+      const error = new Error(
+        "The snapshot was restored on disk, but this tab changed while it was restoring. Reload the project to see the restored version."
+      );
+      error.restored = true;
+      throw error;
+    }
+    if (!result?.project) {
+      const error = new Error(
+        "The snapshot was restored, but the server did not return the restored project. Reload the project to see it."
+      );
+      error.restored = true;
+      throw error;
+    }
+    await this.load(result.project);
     return result;
   }
 
@@ -174,6 +204,10 @@ class ProjectStore {
       if (document.body.classList.contains("has-modal")) return false;
     }
     this.baseRevision = typeof remote?.updatedAt === "string" ? remote.updatedAt : null;
+    // The save indicator follows the document, not the previous save in this
+    // tab: after a project switch or a snapshot restore it must show the
+    // loaded document's stamp instead of another file's last save time.
+    this.lastSavedAt = this.baseRevision;
     const before = JSON.stringify(remote);
     this.project = ensureProject(remote);
     const after = JSON.stringify(this.project);
