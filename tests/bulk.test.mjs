@@ -263,6 +263,86 @@ equal(
   [{ gloss: "a b", form: "x\ny", note: "" }]
 );
 
+/* ---- stress ------------------------------------------------------------- */
+
+const stressLanguage = () => ({
+  inventory: {
+    consonants: { cells: { place: ["k", "m", "s"] } },
+    vowels: { cells: { height: ["a", "u"] } },
+  },
+  phonotactics: { template: "(C)V(C)", stress: "initial", stressScope: "phonetic" },
+  vocabulary: [],
+});
+
+equal(
+  "a JSON word imports its stress field",
+  parseWordList('[{"gloss":"flour","form":"muka","stress":{"primary":1,"secondary":[]}}]').rows[0].stress,
+  { primary: 1, secondary: [] }
+);
+equal(
+  "a JSON word imports secondary stress too",
+  parseWordList('[{"gloss":"flour","form":"muka","stress":{"primary":1,"secondary":[0]}}]').rows[0].stress,
+  { primary: 1, secondary: [0] }
+);
+{
+  const row = parseWordList("flour\tmuˈka").rows[0];
+  equal("an inline primary mark imports as word stress and leaves the form bare", [row.form, row.stress], [
+    "muka",
+    { primary: 1, secondary: [] },
+  ]);
+}
+{
+  const row = parseWordList("flour\tˌmuˈka").rows[0];
+  equal("an inline secondary mark imports alongside the primary", row.stress, {
+    primary: 1,
+    secondary: [0],
+  });
+}
+{
+  const lang = stressLanguage();
+  applyWordList(
+    lang,
+    [{ gloss: "flour", form: "muka", stress: { primary: 1, secondary: [] }, note: "" }],
+    "update"
+  );
+  equal(
+    "importing stress stores it on the word and opts into phonemic scope",
+    [lang.vocabulary[0].stress, lang.phonotactics.stressScope],
+    [{ primary: 1, secondary: [] }, "phonemic"]
+  );
+}
+{
+  const lang = stressLanguage();
+  applyWordList(lang, [{ gloss: "plain", form: "kasa", note: "" }], "update");
+  equal(
+    "an import without stress leaves the scope alone",
+    lang.phonotactics.stressScope,
+    "phonetic"
+  );
+}
+equal(
+  "toJson writes stress only when the word has it",
+  JSON.parse(toJson([
+    { gloss: "flour", form: "muka", note: "", stress: { primary: 1, secondary: [] } },
+    { gloss: "plain", form: "kasa", note: "" },
+  ])),
+  [
+    { gloss: "flour", form: "muka", note: "", stress: { primary: 1, secondary: [] } },
+    { gloss: "plain", form: "kasa", note: "" },
+  ]
+);
+{
+  const words = [{ gloss: "flour", form: "muka", note: "", stress: { primary: 1, secondary: [0] } }];
+  const lang = stressLanguage();
+  const tsv = toTsv(words, lang);
+  const row = parseWordList(tsv).rows[0];
+  equal("a TSV export writes stress as inline marks", tsv.split("\n")[1], "flour\tˌmuˈka\t");
+  equal("a TSV stress round-trip keeps the form and both marks", [row.form, row.stress], [
+    "muka",
+    { primary: 1, secondary: [0] },
+  ]);
+}
+
 /* ---- summary ------------------------------------------------------------- */
 
 console.log(`${passed} passed, ${failures.length} failed`);

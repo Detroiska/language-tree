@@ -1,6 +1,8 @@
 import { normalizeGloss } from "./gloss.js";
 import { uid } from "./model.js";
-import { stripLevelMarks } from "./notation.js";
+import { stripLevelMarks, stripStressMarks } from "./notation.js";
+import { createPhonotacticsChecker, stressMarkedForm } from "./phonotacticsCheck.js";
+import { normalizeWordStress, stressMarksFromForm } from "./prosody.js";
 
 // Bulk word import/export: the paste-and-go side door for spreadsheets and
 // word lists. Text is parsed as JSON when it looks like JSON, otherwise as a
@@ -137,11 +139,28 @@ function splitQuotedRows(text, delimiter) {
   return { rows, unterminated: inQuotes };
 }
 
+function formAndStress(value) {
+  const raw = String(value ?? "");
+  return {
+    form: stripStressMarks(stripLevelMarks(raw)),
+    // Inline marks in an exported or hand-typed form import as the same
+    // per-word stress field the vocabulary picker writes.
+    stress: stressMarksFromForm(raw),
+  };
+}
+
 function rowFromJsonEntry(entry, index) {
   const gloss = String(entry.gloss ?? entry.meaning ?? "").trim();
-  const form = stripLevelMarks(entry.form ?? entry.ipa ?? "");
+  const parsed = formAndStress(entry.form ?? entry.ipa ?? "");
   const note = String(entry.note ?? "").trim();
-  return { gloss, form, note, index, warning: "" };
+  return {
+    gloss,
+    form: parsed.form,
+    stress: normalizeWordStress(entry.stress) || parsed.stress,
+    note,
+    index,
+    warning: "",
+  };
 }
 
 // Returns { delimiter, headerSkipped, rows, warnings, parseError }.
@@ -231,7 +250,7 @@ export function parseWordList(text) {
   for (const row of tableRows) {
     const [firstCell = "", secondCell = "", ...rest] = row.cells;
     let gloss = formFirst ? secondCell : firstCell;
-    let form = stripLevelMarks(formFirst ? firstCell : secondCell);
+    let parsed = formAndStress(formFirst ? firstCell : secondCell);
     // A paste of bracketed transcriptions ("[apa] father") is a form-first
     // two-column list without a header. Keep both fields and put the phonetic
     // form in the form column instead of importing the brackets as a gloss.
@@ -244,11 +263,11 @@ export function parseWordList(text) {
       secondCell
     ) {
       gloss = secondCell;
-      form = stripLevelMarks(firstCell);
+      parsed = formAndStress(firstCell);
     }
     const note = rest.join(" ");
-    if (!gloss && !form) continue; // stray separators
-    rows.push({ gloss, form, note, index: row.line, warning: "" });
+    if (!gloss && !parsed.form) continue; // stray separators
+    rows.push({ gloss, form: parsed.form, stress: parsed.stress, note, index: row.line, warning: "" });
   }
 
   if (!rows.length && (headerSkipped || tableRows.length)) {
@@ -281,26 +300,35 @@ export function applyWordList(language, rows, mode) {
   // previews and reports as the update target.
   const byGloss = new Map(language.vocabulary.map((word) => [normalizeGloss(word.gloss), word]));
   const summary = { added: 0, updated: 0, skipped: 0, drafts: 0 };
+  let usesStress = false;
   for (const row of rows) {
     const verdict = rowStatus(row, language, mode);
     if (verdict.status === "invalid" || verdict.status === "skip") {
       if (verdict.status === "skip") summary.skipped += 1;
       continue;
     }
+    const stress = normalizeWordStress(row.stress);
+    if (stress) usesStress = true;
     const existing = byGloss.get(normalizeGloss(row.gloss));
     if (existing) {
       if (row.form) existing.form = row.form;
+      existing.stress = stress;
+      if (!stress) delete existing.stress;
       if (row.note) existing.note = row.note;
       existing.gloss = row.gloss;
       summary.updated += 1;
       continue;
     }
     const word = { id: uid("word"), gloss: row.gloss, form: row.form, note: row.note };
+    if (stress) word.stress = stress;
     language.vocabulary.push(word);
     byGloss.set(normalizeGloss(row.gloss), word);
     summary.added += 1;
     if (!row.form) summary.drafts += 1;
   }
+  // A list that carries word stress is making a phonemic claim; switch the
+  // language so the imported stress is visible and usable in rules.
+  if (usesStress && language.phonotactics) language.phonotactics.stressScope = "phonemic";
   return summary;
 }
 
@@ -317,18 +345,27 @@ function tsvField(value) {
 }
 
 // TSV with a header row. Tabs and line breaks inside fields are collapsed to
-// spaces so the sheet stays readable; JSON keeps the exact strings.
-export function toTsv(words) {
+// spaces so the sheet stays readable; JSON keeps the exact strings. A word's
+// stored stress is written back as inline marks, the same notation the parser
+// reads, so a TSV round-trip keeps stress without adding a fourth column.
+export function toTsv(words, language = null) {
+  const checker = language ? createPhonotacticsChecker(language) : null;
   const lines = ["gloss\tform\tnote"];
   for (const word of words) {
-    lines.push([tsvField(word.gloss), tsvField(word.form), tsvField(word.note)].join("\t"));
+    const form = checker && word.stress ? stressMarkedForm(word.form, checker, word.stress) || word.form : word.form;
+    lines.push([tsvField(word.gloss), tsvField(form), tsvField(word.note)].join("\t"));
   }
   return lines.join("\n");
 }
 
 export function toJson(words) {
   return JSON.stringify(
-    words.map((word) => ({ gloss: word.gloss, form: word.form, note: word.note })),
+    words.map((word) => {
+      const entry = { gloss: word.gloss, form: word.form, note: word.note };
+      const stress = normalizeWordStress(word.stress);
+      if (stress) entry.stress = stress;
+      return entry;
+    }),
     null,
     2
   );

@@ -22,7 +22,8 @@ import {
   optionalSkippedRulesFromSteps,
   surfaceForForm,
 } from "../phonology.js";
-import { formatPhonemic, formatPhonetic, joinSegments, sameForm } from "../notation.js";
+import { formatPhonemic, formatPhonetic, joinSegments, samePhonemicForm } from "../notation.js";
+import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { reconstructForm, reconstructionAlternatives } from "../reconstruction.js";
@@ -61,7 +62,7 @@ function compileDirect(ctx) {
   return { context, groups: compileRuleStages(ctx.language.soundChanges, context) };
 }
 
-function directDerivation(ctx, form, gloss = "", optionalRuleIds = []) {
+function directDerivation(ctx, form, gloss = "", optionalRuleIds = [], wordStress = null) {
   const { context, groups } = compileDirect(ctx);
   const parsed = context.tokenizeWithStress(form);
   const tokens = parsed.tokens;
@@ -69,16 +70,24 @@ function directDerivation(ctx, form, gloss = "", optionalRuleIds = []) {
     gloss,
     junctures: parsed.junctures,
     optionalRuleIds,
+    wordStress,
   });
   const phonemic = joinSegments(result.tokens, result.junctures);
   const surface = result.errors.length
     ? null
     : surfaceForForm(phonemic, ctx.project, ctx.language.id, { gloss });
+  const checker = createPhonotacticsChecker(ctx.language);
   return {
     inputTokens: tokens,
     outputTokens: result.tokens,
     steps: result.steps,
     text: phonemic,
+    // The tester's /…/ row follows the language's scope: a phonemic language
+    // shows its predicted stress and syllable dots.
+    display:
+      checker.stressScope === "phonemic"
+        ? phonemicFormForWord({ form: phonemic }, checker) || phonemic
+        : phonemic,
     surface: surface?.errors.length ? null : surface?.display || "",
     surfaceError: surface?.errors[0] || "",
     errors: result.errors,
@@ -610,28 +619,41 @@ function checkRows(ctx, context = null, optionalRuleIds = [], { status = "all", 
   for (const word of ctx.language.vocabulary) {
     if (word.gloss.trim()) byGloss.set(word.gloss.trim().toLowerCase(), word);
   }
+  const parentChecker = createPhonotacticsChecker(parent);
+  const checker = createPhonotacticsChecker(ctx.language);
   const rows = parentWords.map((word, index) => {
     const derived = deriveForm(word.form, ctx.project, ctx.language.id, {
       directOnly: true,
       gloss: word.gloss,
       optionalRuleIds,
+      wordStress: word.stress,
     });
     const recorded = byGloss.get(word.gloss.trim().toLowerCase()) || null;
     const status = derived.error
       ? "error"
       : !recorded?.form.trim()
         ? "missing"
-        : sameForm(recorded.form, derived.text)
+        : samePhonemicForm(recorded, { form: derived.text }, { scope: checker.stressScope })
           ? "match"
           : "differs";
     const surface = derived.error
       ? null
-      : surfaceForForm(derived.text, ctx.project, ctx.language.id, { gloss: word.gloss });
+      : surfaceForForm(derived.text, ctx.project, ctx.language.id, {
+          gloss: word.gloss,
+          wordStress: recorded?.stress,
+        });
     return {
       word,
+      // The parent form shows that language's own phonemic stress; the
+      // derived and recorded forms show this language's.
+      parentDisplay: phonemicFormForWord(word, parentChecker),
       derived: derived.error ? "" : derived.text,
+      derivedDisplay: derived.error
+        ? ""
+        : phonemicFormForWord({ form: derived.text }, checker),
       surface: surface?.errors.length ? "" : surface?.display || "",
       recorded,
+      recordedDisplay: recorded ? phonemicFormForWord(recorded, checker) : "",
       status,
       error: derived.error,
       exceptions: exceptionRulesFromSteps(derived.steps),
@@ -675,10 +697,10 @@ function checkRows(ctx, context = null, optionalRuleIds = [], { status = "all", 
                     return `
                       <tr>
                         <td class="gloss-cell">${esc(row.word.gloss)}</td>
-                        <td><code class="ipa">${esc(formatPhonemic(row.word.form))}</code></td>
-                        <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(row.derived)) || "—"}</code></td>
+                        <td><code class="ipa">${esc(formatPhonemic(row.parentDisplay))}</code></td>
+                        <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(row.derivedDisplay)) || "—"}</code></td>
                         ${showSurface ? `<td><code class="ipa surface-form">${esc(formatPhonetic(row.surface)) || "—"}</code></td>` : ""}
-                        <td>${diff ? `<code class="ipa">${diff.right}</code>` : row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recorded.form)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
+                        <td>${diff ? `<code class="ipa">${diff.right}</code>` : row.recorded ? `<code class="ipa">${esc(formatPhonemic(row.recordedDisplay)) || "—"}</code>` : `<span class="muted">not recorded</span>`}</td>
                         <td class="status-cell">
                           <span class="status-chip status-${row.status}" ${row.error ? `title="${esc(row.error)}"` : ""}>
                             ${row.status === "match" ? icon("check") : row.status === "differs" || row.status === "error" ? icon("warning") : icon("info")}
@@ -876,14 +898,20 @@ export function renderChanges(container, ctx, activeTool = "rules") {
 
   const runTest = () => {
     if (!testPanel || !testInput) return;
-    const result = directDerivation(ctx, testInput.value, testGloss, [...testOptional]);
+    const parent = ancestorsOf(ctx.project, ctx.language.id).at(-1);
+    const parentWord = testGloss
+      ? parent?.vocabulary.find(
+          (word) => word.gloss.trim().toLowerCase() === testGloss.trim().toLowerCase()
+        )
+      : null;
+    const result = directDerivation(ctx, testInput.value, testGloss, [...testOptional], parentWord?.stress || null);
     testerMemory.set(language.id, { form: testInput.value, gloss: testGloss });
     const output = testPanel.querySelector("[data-test-output]");
     const surface = testPanel.querySelector("[data-test-surface]");
     const surfaceRow = testPanel.querySelector("[data-test-surface-row]");
     const parsed = testPanel.querySelector("[data-test-parsed]");
     const steps = testPanel.querySelector("[data-test-steps]");
-    output.textContent = result.fatal ? "—" : formatPhonemic(result.text) || "—";
+    output.textContent = result.fatal ? "—" : formatPhonemic(result.display ?? result.text) || "—";
     if (surface && surfaceRow) {
       const showSurface = hasSurfaceDisplay(language);
       surfaceRow.hidden = !showSurface;

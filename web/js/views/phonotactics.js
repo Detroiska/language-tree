@@ -1,5 +1,12 @@
-import { createPhonotacticsChecker, stressMarkedForm } from "../phonotacticsCheck.js";
-import { STRESS_SYSTEMS, normalizeStressSystem, stressLabel } from "../prosody.js";
+import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
+import {
+  STRESS_SCOPES,
+  STRESS_SYSTEMS,
+  normalizeStressScope,
+  normalizeStressSystem,
+  normalizeWordStress,
+  stressLabel,
+} from "../prosody.js";
 import { suggestClassRefs } from "../naturalclasses.js";
 import { cellKey, chartLeaves, nodeLeafIds } from "../model.js";
 import { esc, icon, toast } from "../ui.js";
@@ -514,7 +521,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
               <p>Choose where primary stress falls. Surface forms mark the stressed syllable with <code>ˈ</code> and separate syllables with a dot, as in <code>ˈka.sa</code>.</p>
             </div>
             <div class="panel-actions">
-              <button class="button button-quiet button-small" type="button" data-mark-stress ${normalizeStressSystem(phonotactics.stress) === "none" ? "disabled" : ""}>Mark stress in vocabulary</button>
+              <button class="button button-quiet button-small" type="button" data-mark-stress ${normalizeStressSystem(phonotactics.stress) === "none" ? "disabled" : ""}>Apply predicted stress</button>
             </div>
           </header>
           <div class="panel-body form-stack">
@@ -528,7 +535,17 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
               </select>
               <span class="field-help">Weight-sensitive stress stresses a heavy penult — one with a coda or long nucleus — and otherwise falls back to the antepenult. Rule environments can test stress with <code>ˈ</code>/<code>ˌ</code> and syllable edges with <code>.</code> or <code>σ</code>.</span>
             </label>
-            <p class="field-help">Stress and dots are presentation only: they are computed from the template and never stored as segments. “Mark stress in vocabulary” writes the predicted mark into recorded forms so exports keep it.</p>
+            <label class="field">
+              <span class="field-label">Stress scope</span>
+              <select class="select" data-phonotactics-field="stressScope" aria-label="Stress scope">
+                ${STRESS_SCOPES.map(
+                  (item) =>
+                    `<option value="${esc(item.value)}" ${normalizeStressScope(phonotactics.stressScope) === item.value ? "selected" : ""}>${esc(item.label)}</option>`
+                ).join("")}
+              </select>
+              <span class="field-help">Phonetic scope keeps stress in the surface form: the lexicon shows <code>/kasa/</code> and <code>[ka.ˈsa]</code>. Phonemic scope stores each word’s stress in the lexicon and shows it in <code>/…/</code>; sound-change rules can then test <code>ˈ</code> and <code>ˌ</code>. Picking a stress in the Vocabulary view switches the language to phonemic scope automatically.</span>
+            </label>
+            <p class="field-help">Dots and marks are presentation only: they never become segments. “Apply predicted stress” fills each word’s stress field from the chosen system so exports and sound-change rules keep it.</p>
           </div>
         </section>
       </section>
@@ -574,7 +591,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
 
   const refresh = () => {
     checker = createPhonotacticsChecker(language);
-    const results = language.vocabulary.map((word) => checker.validate(word.form));
+    const results = language.vocabulary.map((word) => checker.validate(word.form, word.stress));
     summaryElement.innerHTML = summaryMarkup(results, checker.compiled);
     wordSummaryElement.textContent = summaryText(results, checker.compiled);
     const wordCheck = wordCheckMarkup(language, checker, results, {
@@ -785,19 +802,23 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
       }
       let changed = 0;
       for (const word of language.vocabulary) {
-        const marked = stressMarkedForm(word.form, checker);
-        if (marked && marked !== word.form) {
-          word.form = marked;
-          changed += 1;
-        }
+        if (word.stress?.primary != null) continue;
+        const result = checker.validate(word.form, null);
+        if (!result.checked || result.stressIndex < 0) continue;
+        word.stress = normalizeWordStress({
+          primary: result.stressIndex,
+          secondary: word.stress?.secondary || [],
+        });
+        if (word.stress) changed += 1;
       }
       if (!changed) {
         toast("Every recorded form already carries its predicted stress.");
         return;
       }
-      ctx.touch({ label: "Mark stress in vocabulary" });
+      language.phonotactics.stressScope = "phonemic";
+      ctx.touch({ label: "Apply predicted stress" });
       refresh();
-      toast(`Marked stress on ${changed} ${changed === 1 ? "word" : "words"}.`);
+      toast(`Applied predicted stress to ${changed} ${changed === 1 ? "word" : "words"}.`);
       return;
     }
     if (event.target.closest("[data-open-vocabulary]")) {

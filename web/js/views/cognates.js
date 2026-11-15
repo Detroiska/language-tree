@@ -1,6 +1,7 @@
 import { normalizeGloss } from "../gloss.js";
 import { findLanguage, getLineage, languagesInTreeOrder, uid } from "../model.js";
 import { formatPhonemic, formatPhonetic } from "../notation.js";
+import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { buildCorrespondences } from "../correspondences.js";
@@ -54,9 +55,14 @@ function languageOptionsMarkup(project, ordered, selectedId) {
     .join("");
 }
 
-function wordOptionsMarkup(words, selectedId) {
+function wordOptionsMarkup(words, selectedId, checker = null) {
   return words
-    .map((word) => `<option value="${esc(word.id)}" ${word.id === selectedId ? "selected" : ""}>${esc(word.gloss)} — ${esc(formatPhonemic(word.form))}</option>`)
+    .map(
+      (word) =>
+        `<option value="${esc(word.id)}" ${word.id === selectedId ? "selected" : ""}>${esc(word.gloss)} — ${esc(
+          formatPhonemic(checker ? phonemicFormForWord(word, checker) : word.form)
+        )}</option>`
+    )
     .join("");
 }
 
@@ -139,6 +145,7 @@ function matrixFilterOptions(counts, status) {
 
 function matrixMarkup(source, data, { status = "all", page = 1 } = {}) {
   const { words, targetRows, cellsByWord, flagsByWord, counts } = data;
+  const sourceChecker = createPhonotacticsChecker(source);
   const columnTitles = targetRows.map((row) => {
     const via = row.path.length ? ` via ${row.path.map((item) => item.name).join(" › ")}` : " (direct daughter)";
     const broken = row.errors.length ? ` — rule error: ${row.errors[0]}` : "";
@@ -159,7 +166,7 @@ function matrixMarkup(source, data, { status = "all", page = 1 } = {}) {
           return `
             <tr data-matrix-word="${esc(word.id)}">
               <td class="cognate-sticky matrix-gloss">${esc(word.gloss)}</td>
-              <td class="matrix-form-cell"><code class="ipa">${esc(formatPhonemic(word.form))}</code></td>
+              <td class="matrix-form-cell"><code class="ipa">${esc(formatPhonemic(phonemicFormForWord(word, sourceChecker)))}</code></td>
               ${cellStatuses
                 .map(
                   (item) =>
@@ -415,10 +422,16 @@ function correspondencePanelMarkup(source) {
 
 function traceMarkup(source, word, traceData) {
   const { rows, cellsByLanguage, showSurface, sourceDepth, outside } = traceData;
+  const checkers = new Map();
+  const checkerFor = (language) => {
+    if (!checkers.has(language.id)) checkers.set(language.id, createPhonotacticsChecker(language));
+    return checkers.get(language.id);
+  };
 
   const rowsMarkup = rows
     .map((row) => {
       const cell = cellsByLanguage.get(row.language.id);
+      const checker = checkerFor(row.language);
       const status = statusForCognate(word, row, cell);
       // A differing reflex colors the segments that diverged: minimal
       // alignment over the language's own tokenizer, so the user sees which
@@ -427,6 +440,10 @@ function traceMarkup(source, word, traceData) {
         status.kind === "differs" && row.chain.ok
           ? diffPairMarkup(cell.derived, cell.recorded?.form || "", row.chain.context)
           : null;
+      const derivedDisplay = row.isSource
+        ? phonemicFormForWord(word, checker)
+        : phonemicFormForWord({ form: cell.derived }, checker);
+      const recordedDisplay = cell.recorded ? phonemicFormForWord(cell.recorded, checker) : "";
       const disabled =
         row.isSource || status.kind === "match" || status.kind === "source" || status.kind === "error"
           ? "disabled"
@@ -436,9 +453,9 @@ function traceMarkup(source, word, traceData) {
         <tr${row.isSource ? ' class="is-source-row"' : ""}>
           <td class="cognate-lang"><span class="cognate-lang-name" style="--cognate-depth:${row.depth - sourceDepth}">${esc(row.language.name)}</span></td>
           <td>${pathMarkup(row)}</td>
-          <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(cell.derived)) || "—"}</code></td>
+          <td><code class="ipa derived-form">${diff ? diff.left : esc(formatPhonemic(derivedDisplay)) || "—"}</code></td>
           ${showSurface ? `<td><code class="ipa surface-form">${esc(formatPhonetic(cell.surface)) || "—"}</code></td>` : ""}
-          <td>${diff ? `<code class="ipa">${diff.right}</code>` : cell.recorded && cell.recorded.form.trim() ? `<code class="ipa">${esc(formatPhonemic(cell.recorded.form))}</code>` : `<span class="muted">not recorded</span>`}</td>
+          <td>${diff ? `<code class="ipa">${diff.right}</code>` : cell.recorded && cell.recorded.form.trim() ? `<code class="ipa">${esc(formatPhonemic(recordedDisplay))}</code>` : `<span class="muted">not recorded</span>`}</td>
           <td>
             ${chipMarkup(status)}
             ${
@@ -531,6 +548,7 @@ export function renderCognates(container, ctx) {
   // all-glosses view. Build them after the first paint; until then the panel
   // shows a placeholder below the fold.
   const showCorrespondences = !singleMode && targetRows.length && words.length;
+  const sourceChecker = createPhonotacticsChecker(source);
 
   const rememberedMatrix = matrixViewMemory.get(source.id) || {};
   let matrixStatus = rememberedMatrix.status || "all";
@@ -568,7 +586,7 @@ export function renderCognates(container, ctx) {
             <select class="select" data-source-select aria-label="Source language" title="Source language">
               ${languageOptionsMarkup(project, ordered, source.id)}
             </select>
-            ${singleMode ? `<select class="select" data-word-select aria-label="Gloss to trace" title="Gloss to trace">${wordOptionsMarkup(words, word.id)}</select>` : ""}
+            ${singleMode ? `<select class="select" data-word-select aria-label="Gloss to trace" title="Gloss to trace">${wordOptionsMarkup(words, word.id, sourceChecker)}</select>` : ""}
           </div>
           <span class="panel-icon">${icon("language")}</span>
         </header>

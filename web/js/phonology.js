@@ -14,7 +14,13 @@ import { compileClasses } from "./categories.js";
 import { buildClassIndex, classForText } from "./naturalclasses.js";
 import { joinSegments, normalizeForm, sameJunctures, sameTokens, stripLevelMarks } from "./notation.js";
 import { compilePhonotactics, syllabifyTokens } from "./phonotactics.js";
-import { prosodyFallback, prosodyFromSyllables, normalizeStressSystem } from "./prosody.js";
+import {
+  normalizeStressScope,
+  normalizeStressSystem,
+  normalizeWordStress,
+  prosodyFallback,
+  prosodyFromSyllables,
+} from "./prosody.js";
 import {
   applyFeatureTerms,
   classifyFeatureWords,
@@ -109,6 +115,8 @@ class SegmentContext {
     featureOverrides = null,
     allowSyntheticOutputs = false,
     stressSystem = "none",
+    stressScope = "phonetic",
+    stressVisible = true,
     phonotactics = null,
   } = {}) {
     this.vowels = new Set(vowels);
@@ -117,6 +125,11 @@ class SegmentContext {
     // segment. `phonotactics` supplies the syllable template used to place it;
     // the compiled forms are cached on first use.
     this.stressSystem = normalizeStressSystem(stressSystem);
+    this.stressScope = normalizeStressScope(stressScope);
+    // Sound-change rules see stress only in phonemic scope. Allophony and the
+    // vocabulary checker always need it for the surface display, so they leave
+    // this on even when the language stores stress phonetically.
+    this.stressVisible = stressVisible !== false;
     this.phonotactics = phonotactics;
     this._compiledPhonotactics = undefined;
     this._prosodyCache = new Map();
@@ -262,10 +275,14 @@ class SegmentContext {
   // template is used when it parses the word; otherwise a maximal-onset
   // fallback still gives a useful preview. Results are cached because the
   // same form is often tested by several rules in a row.
-  prosodyFor(tokens, junctures = null) {
+  prosodyFor(tokens, junctures = null, wordStress = null) {
     const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
     const cutKey = [...cuts].sort((a, b) => a - b).join(",");
-    const key = `${tokens.join("\u0000")}\u0000${cutKey}`;
+    const storedStress = normalizeWordStress(wordStress);
+    const stressKey = storedStress
+      ? `${storedStress.primary ?? ""}:${storedStress.secondary.join(",")}`
+      : "";
+    const key = `${tokens.join("\u0000")}\u0000${cutKey}\u0000${stressKey}`;
     const cached = this._prosodyCache.get(key);
     if (cached) return cached;
 
@@ -274,18 +291,32 @@ class SegmentContext {
     if (compiled?.ok) {
       const parse = syllabifyTokens(tokens, compiled.shapes, this);
       if (parse.ok) {
-        prosody = prosodyFromSyllables(tokens, parse.syllables, this.stressSystem, cuts);
+        prosody = prosodyFromSyllables(tokens, parse.syllables, this.stressSystem, cuts, storedStress);
       }
     }
     if (!prosody) {
-      prosody = prosodyFallback(tokens, (token) => this.isVowel(token), this.stressSystem, cuts);
+      prosody = prosodyFallback(
+        tokens,
+        (token) => this.isVowel(token),
+        this.stressSystem,
+        cuts,
+        storedStress
+      );
+    }
+    if (!this.stressVisible) {
+      prosody = {
+        ...prosody,
+        stressIndex: -1,
+        secondaryIndices: [],
+        stress: new Array(tokens.length).fill(""),
+      };
     }
     this._prosodyCache.set(key, prosody);
     return prosody;
   }
 }
 
-export function contextForInventory(inventory, featureOverrides = null, { stress = "none" } = {}) {
+export function contextForInventory(inventory, featureOverrides = null, { stress = "none", stressScope = "phonemic" } = {}) {
   const known = new Set();
   const vowels = new Set();
   const consonants = new Set();
@@ -315,6 +346,10 @@ export function contextForInventory(inventory, featureOverrides = null, { stress
     featurePhonemes: chart,
     featureOverrides,
     stressSystem: stress,
+    stressScope,
+    // The inventory context backs the vocabulary checker, which needs stress
+    // for display even when the language keeps it out of the phonemic form.
+    stressVisible: true,
   });
 }
 
@@ -404,6 +439,10 @@ function buildLanguageContext(
     featureOverrides,
     allowSyntheticOutputs,
     stressSystem: language?.phonotactics?.stress,
+    stressScope: language?.phonotactics?.stressScope,
+    // Sound-change contexts hide stress in phonetic scope. Allophony opts in
+    // again below, since the surface form always shows predicted stress.
+    stressVisible: language?.phonotactics?.stressScope === "phonemic",
     phonotactics: language?.phonotactics || null,
   });
 }
@@ -503,7 +542,11 @@ export function contextForAllophony(project, languageId) {
   const surface = allophoneCandidates(allophonyRules(language?.allophony || []));
   // Surface symbols join the tokenizer before categories are compiled, so a
   // category that names an uncharted allophone still reads it as one segment.
-  return buildLanguageContext(project, languageId, surface, { allowSyntheticOutputs: true });
+  const context = buildLanguageContext(project, languageId, surface, { allowSyntheticOutputs: true });
+  // Allophony is surface grammar: it always sees stress, even when the
+  // language treats stress as phonetic-only.
+  context.stressVisible = true;
+  return context;
 }
 
 export function compileAllophonyRule(notation, context) {
@@ -570,6 +613,7 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
   const errors = [];
   const warnings = [];
   const optionalRuleIds = forcedRuleIds(options.optionalRuleIds);
+  const wordStress = options.wordStress || null;
   for (const [index, compiled] of (compiledRules || []).entries()) {
     if (compiled.rule?.enabled === false || compiled.groupDisabled) continue;
     const label = compiled.number || String(index + 1);
@@ -644,7 +688,7 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
     let failure = "";
 
     for (let pass = 0; pass < maxPasses; pass += 1) {
-      const result = applyRule(after, compiled.rule, context, afterJunctures);
+      const result = applyRule(after, compiled.rule, context, afterJunctures, wordStress);
       if (result.error) {
         failure = result.error;
         break;
@@ -680,7 +724,7 @@ export function applyAllophony(tokens, compiledRules, context, options = {}) {
     // runaway instead of looking finished.
     let runaway = false;
     if (iterative && changed) {
-      const probe = applyRule(after, compiled.rule, context, afterJunctures);
+      const probe = applyRule(after, compiled.rule, context, afterJunctures, wordStress);
       runaway = !probe.error && probe.changed;
     }
     let warning = "";
@@ -814,7 +858,8 @@ export function exceptionRulesFromSteps(steps) {
 export function hasSurfaceDisplay(language) {
   return (
     allophonyRules(language?.allophony || []).length > 0 ||
-    normalizeStressSystem(language?.phonotactics?.stress) !== "none"
+    normalizeStressSystem(language?.phonotactics?.stress) !== "none" ||
+    (language?.vocabulary || []).some((word) => normalizeWordStress(word.stress))
   );
 }
 
@@ -831,11 +876,12 @@ export function surfaceForForm(form, project, languageId, options = {}) {
     gloss: options.gloss,
     junctures: parsed.junctures,
     optionalRuleIds: options.optionalRuleIds,
+    wordStress: options.wordStress,
   });
   // Surface display adds the language's predicted stress and syllable dots.
   // Keeping it separate from `text` means every existing comparison and export
   // still sees the plain token string.
-  const prosody = context.prosodyFor(result.tokens, result.junctures);
+  const prosody = context.prosodyFor(result.tokens, result.junctures, options.wordStress);
   return {
     ...result,
     input,
@@ -844,9 +890,11 @@ export function surfaceForForm(form, project, languageId, options = {}) {
     compiled,
     language,
     display: prosody.display,
+    marked: prosody.marked,
     syllables: prosody.syllables,
     stress: prosody.stress,
     stressIndex: prosody.stressIndex,
+    secondaryIndices: prosody.secondaryIndices,
     boundaries: prosody.boundaries,
   };
 }
@@ -1711,6 +1759,12 @@ export function compileRule(notation, context) {
       warnings.push(
         "This language has no stress system, so stress marks (ˈ, ˌ) cannot match. Choose one in Phonotactics → Stress."
       );
+    } else if (!context.stressVisible) {
+      // Allophony contexts keep stress visible even in phonetic scope, so this
+      // warning belongs to sound changes only: there the mark is truly inert.
+      warnings.push(
+        "Stress marks only match in phonemic scope. Set the scope to “Phonemic” in Phonotactics → Stress, or this rule will never see stress."
+      );
     }
   }
 
@@ -1804,7 +1858,7 @@ function syllableBoundsAt(start, end, prosody) {
   return record ? { start: record.start, end: record.end } : null;
 }
 
-function findRuleMatches(tokens, compiled, context, junctures = null) {
+function findRuleMatches(tokens, compiled, context, junctures = null, wordStress = null) {
   const matches = [];
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const domain =
@@ -1813,7 +1867,9 @@ function findRuleMatches(tokens, compiled, context, junctures = null) {
   // once per call and reused at every candidate position. A widened domain
   // also needs it, because "syllable" is defined by these records.
   const prosody =
-    compiled.needsProsody || domain !== "adjacent" ? context.prosodyFor(tokens, cuts) : null;
+    compiled.needsProsody || domain !== "adjacent"
+      ? context.prosodyFor(tokens, cuts, wordStress)
+      : null;
   const boundsFor = (start, end) => {
     if (domain === "word") return null;
     if (domain === "syllable") return syllableBoundsAt(start, end, prosody);
@@ -1946,14 +2002,14 @@ function describePattern(pattern) {
 // that never holds — so a rule with zero matches is debuggable instead of
 // silent. Returns "" whenever the rule actually matches somewhere, or when no
 // diagnosis is possible, so callers can attach it only to inert rules.
-export function explainRuleMiss(tokens, compiled, context, junctures = null) {
+export function explainRuleMiss(tokens, compiled, context, junctures = null, wordStress = null) {
   if (!compiled || !Array.isArray(compiled.target)) return "";
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const left = compiled.left || [];
   const right = compiled.right || [];
   const hasLeft = left.length > 0;
   const hasRight = right.length > 0;
-  const prosody = compiled.needsProsody ? context.prosodyFor(tokens, cuts) : null;
+  const prosody = compiled.needsProsody ? context.prosodyFor(tokens, cuts, wordStress) : null;
   const unit = (count) => `${count} ${count === 1 ? "place" : "places"}`;
 
   // Insertions are zero-width: both environment sides must hold at one point.
@@ -2102,9 +2158,9 @@ function dropEdgeJunctures(junctures, length) {
   return junctures;
 }
 
-export function applyRule(tokens, compiled, context, junctures = null) {
+export function applyRule(tokens, compiled, context, junctures = null, wordStress = null) {
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
-  const matches = findRuleMatches(tokens, compiled, context, cuts);
+  const matches = findRuleMatches(tokens, compiled, context, cuts, wordStress);
   if (!matches.length) {
     return {
       tokens: [...tokens],
@@ -2222,14 +2278,18 @@ function applyParallel(
   gloss = "",
   junctures = null,
   optionalRuleIds = new Set(),
-  diagnostics = true
+  diagnostics = true,
+  wordStress = null
 ) {
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const entries = [];
   for (const group of groups) {
     const optionalSkipped = group.rule.optional === true && !optionalRuleIds.has(group.rule.id);
     const excepted = !optionalSkipped && ruleExceptsGloss(group.rule, gloss);
-    const matches = optionalSkipped || excepted ? [] : findRuleMatches(tokens, group.compiled.rule, context, cuts);
+    const matches =
+      optionalSkipped || excepted
+        ? []
+        : findRuleMatches(tokens, group.compiled.rule, context, cuts, wordStress);
     const entry = { group, matches, excepted, optionalSkipped };
     // A rule that matched nothing gets a diagnosis instead of a bare
     // "0 matches" — the tester shows this under its entry in the step list.
@@ -2237,7 +2297,7 @@ function applyParallel(
     // diagnosis. Data-only passes turn diagnostics off: they still need the
     // match counts, but not the prose explaining a miss.
     if (diagnostics && !optionalSkipped && !excepted && !matches.length) {
-      entry.debug = explainRuleMiss(tokens, group.compiled.rule, context, cuts) || "";
+      entry.debug = explainRuleMiss(tokens, group.compiled.rule, context, cuts, wordStress) || "";
     }
     entries.push(entry);
   }
@@ -2310,6 +2370,10 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
   const gloss = options.gloss || "";
   const diagnostics = options.diagnostics !== false;
   const optionalRuleIds = forcedRuleIds(options.optionalRuleIds);
+  // The source word's lexical stress travels with the derivation so rules in
+  // phonemic scope can condition on it. Stress is not yet projected through
+  // the output at each stage; a later level will carry it across generations.
+  const wordStress = options.wordStress || null;
 
   for (const stage of stages) {
     const languageName = stage.language?.name || "";
@@ -2357,7 +2421,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
       gloss,
       currentJunctures,
       optionalRuleIds,
-      diagnostics
+      diagnostics,
+      wordStress
     );
     if (!parallel.ok) {
       steps.push({
@@ -2469,7 +2534,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           });
           continue;
         }
-        const result = applyRule(current, child.compiled.rule, stageContext, currentJunctures);
+        const result = applyRule(current, child.compiled.rule, stageContext, currentJunctures, wordStress);
         if (result.error) {
           steps.push({
             kind: "error",
@@ -2504,7 +2569,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           debug: result.changed
             ? ""
             : diagnostics
-              ? explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures) || ""
+              ? explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures, wordStress) || ""
               : "",
           optional: child.rule.optional === true,
           rate: normalizeRuleRate(child.rule.rate),
@@ -2530,7 +2595,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
 }
 
 export function deriveForm(form, project, languageId, options = {}) {
-  const { directOnly = false, gloss = "", optionalRuleIds } = options;
+  const { directOnly = false, gloss = "", optionalRuleIds, wordStress = null } = options;
   const context = contextForLanguage(project, languageId);
   const lineage = getLineage(project, languageId);
   const languages = directOnly ? lineage.slice(-1) : lineage;
@@ -2548,6 +2613,7 @@ export function deriveForm(form, project, languageId, options = {}) {
     gloss,
     junctures: parsed.junctures,
     optionalRuleIds,
+    wordStress,
   });
   return {
     input: tokens,
