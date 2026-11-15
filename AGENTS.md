@@ -17,14 +17,14 @@ Local-first web tool for documenting a constructed language family: vanilla-JS S
 - Run:       python server.py --no-browser  # Windows; use python3 on macOS/Linux; http://127.0.0.1:8765/ ; Python 3.10+; flags: --port 9000, --host 0.0.0.0 (trusted network only). ./start.sh / start.bat pass flags through
 
 ## Layout
-- server.py            # local HTTP server + five API paths: GET /api/health, GET/POST /api/projects, GET/PUT /api/project (?file=), PUT /api/projects/active; atomic 2-space JSON saves through a unique .<name>.<random>.tmp, gzip request bodies, X-Base-Revision concurrency, loopback Host check
+- server.py            # local HTTP server + API: GET /api/health, GET/POST /api/projects, GET/PUT /api/project (?file=), PUT /api/projects/active, GET /api/snapshots (?file=&name=), POST /api/snapshots/restore; atomic 2-space JSON saves through a unique .<name>.<random>.tmp, pre-save snapshots under data/.backups/ (10-minute interval, newest 20), gzip request bodies, X-Base-Revision concurrency, loopback Host check
 - web/index.html, web/css/styles.css   # app shell and the single stylesheet
 - web/js/              # DOM-free engine modules importable from Node plus UI modules; keep new engine logic DOM-free. README "Project layout" lists every module
 - web/js/views/        # render modules for language tabs and family-level views; views/language.js owns the tab bar
 - tests/               # plain-assertion Node suites that print "N passed, M failed"; engine.test.mjs covers the engine modules — not one test file per source module; demo.test.mjs runs the tracked example project through the engine; fuzz.test.mjs adds seeded parser properties; server.test.mjs spawns server.py against a temp data directory
 - package.json, eslint.config.mjs, pyproject.toml   # dev-only tooling: npm scripts, ESLint, Ruff
 - .github/workflows/tests.yml   # CI: linters and every suite on Ubuntu and Windows (Node 24, Python 3.12) for every pull request and on main after merge
-- data/example_project.json   # tracked demo family; every other data/*.json is a local, gitignored project. `data/.active-project` remembers the last opened file; the app rewrites project JSON on every save
+- data/example_project.json   # tracked demo family; every other data/*.json is a local, gitignored project. `data/.active-project` remembers the last opened file; `data/.backups/<project>/` holds gitignored pre-save snapshots (10-minute interval, newest 20); the app rewrites project JSON on every save
 
 ## Rules
 

@@ -11,6 +11,7 @@ data/*.bak
 data/*.json
 !data/example_project.json
 data/.active-project
+data/.backups/
 .codex/
 .opencode/
 BACKLOG.md

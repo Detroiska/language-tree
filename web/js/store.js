@@ -47,6 +47,8 @@ class ProjectStore {
   #statusListeners = new Set();
   #historyListeners = new Set();
   #resyncListeners = new Set();
+  #snapshotWarningListeners = new Set();
+  #lastSnapshotWarning = "";
 
   // Fetch data/ listing; the active file is only the startup default. This
   // tab keeps its own filename so two tabs may work on different projects
@@ -91,6 +93,27 @@ class ProjectStore {
   async createProject(title, file) {
     await this.#settleSaves("Could not save the current project before creating another.");
     return api.createProject(title, file);
+  }
+
+  // Snapshot history is scoped to the file this tab has open.
+  listSnapshots() {
+    return api.listSnapshots(this.projectFile);
+  }
+
+  loadSnapshot(name) {
+    return api.loadSnapshot(this.projectFile, name);
+  }
+
+  // Restoring is a normal document replacement: settle pending edits first,
+  // then adopt the returned document so undo history and the revision stamp
+  // start fresh, exactly as if the file had been reopened.
+  async restoreSnapshot(name) {
+    if (!this.projectFile) throw new Error("No project is open.");
+    await this.#settleSaves("Could not save the current project before restoring a snapshot.");
+    const result = await api.restoreSnapshot(this.projectFile, name, this.baseRevision);
+    const restored = result?.project ?? (await api.loadProject(this.projectFile));
+    await this.load(restored);
+    return result;
   }
 
   // Open another project file. Unsaved work is flushed first; a failed save
@@ -300,6 +323,17 @@ class ProjectStore {
       // the store so the save indicator can show when the last save happened.
       this.lastSavedAt = result?.savedAt || null;
       if (result?.savedAt) this.project.updatedAt = result.savedAt;
+      const snapshotWarning =
+        typeof result?.snapshotWarning === "string" ? result.snapshotWarning : "";
+      if (snapshotWarning) {
+        // Warn once per failing backup, not on every autosave in the streak.
+        if (snapshotWarning !== this.#lastSnapshotWarning) {
+          this.#lastSnapshotWarning = snapshotWarning;
+          this.#notifySnapshotWarning(snapshotWarning);
+        }
+      } else {
+        this.#lastSnapshotWarning = "";
+      }
       this.saveError = "";
       if (this.revision === revisionAtStart) this.setSaveState("saved");
       else this.setSaveState("pending");
@@ -416,6 +450,15 @@ class ProjectStore {
 
   #notifyResync() {
     for (const listener of this.#resyncListeners) listener();
+  }
+
+  onSnapshotWarning(listener) {
+    this.#snapshotWarningListeners.add(listener);
+    return () => this.#snapshotWarningListeners.delete(listener);
+  }
+
+  #notifySnapshotWarning(message) {
+    for (const listener of this.#snapshotWarningListeners) listener(message);
   }
 
   setSaveState(state) {
