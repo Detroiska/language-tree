@@ -112,7 +112,7 @@ function closeModal() {
   }, 140);
 }
 
-export function openModal({ title, body, footer = "", width = "medium", onMount = null }) {
+export function openModal({ title, body, footer = "", width = "medium", onMount = null, beforeClose = null }) {
   const root = document.getElementById("modal-root");
   // Replacing a dialog without closing it first must not strand its listener.
   if (activeModalKeyHandler) {
@@ -133,7 +133,12 @@ export function openModal({ title, body, footer = "", width = "medium", onMount 
   `;
   document.body.classList.add("has-modal");
   const backdrop = root.querySelector("[data-modal-backdrop]");
-  const close = closeModal;
+  // A dialog can refuse to close while work is in flight (for example, a
+  // restore request); every close path goes through the same gate.
+  const close = () => {
+    if (beforeClose && beforeClose()) return;
+    closeModal();
+  };
   backdrop.addEventListener("pointerdown", (event) => {
     if (event.target === backdrop) close();
   });

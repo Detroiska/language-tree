@@ -14,9 +14,11 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
@@ -736,6 +738,373 @@ try {
     (await call(server, "/api/projects")).json?.active,
     "second_family.json"
   );
+
+  /* ---- snapshot history -------------------------------------------------- */
+
+  const historyFile = "history.json";
+  const historyProject = {
+    ...project,
+    title: "History base",
+    futureField: { keep: true },
+  };
+  writeFileSync(
+    join(server.root, "data", historyFile),
+    `${JSON.stringify(historyProject, null, 2)}\n`
+  );
+  const historyDir = () => join(server.root, "data", ".backups", historyFile);
+  const historyNames = () => {
+    try {
+      return readdirSync(historyDir())
+        .filter((name) => name.endsWith(".json"))
+        .sort();
+    } catch {
+      return [];
+    }
+  };
+  const backdateHistory = () => {
+    const old = new Date(Date.now() - 11 * 60 * 1000);
+    for (const name of historyNames()) utimesSync(join(historyDir(), name), old, old);
+  };
+  const readHistorySnapshot = (name) =>
+    JSON.parse(readFileSync(join(historyDir(), name), "utf8"));
+  const saveHistory = (title) =>
+    call(server, `/api/project?file=${historyFile}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...historyProject, title }),
+    });
+
+  const firstSnapshotSave = await saveHistory("History one");
+  equal("saving creates a snapshot of the previous document", firstSnapshotSave.status, 200);
+  equal("a successful snapshot does not warn", firstSnapshotSave.json?.snapshotWarning, undefined);
+  equal("the first snapshot is written", historyNames().length, 1);
+  equal("the first snapshot holds the pre-save document", readHistorySnapshot(historyNames()[0]).title, "History base");
+
+  await saveHistory("History two");
+  equal("a second save inside the interval does not add a snapshot", historyNames().length, 1);
+
+  backdateHistory();
+  const thirdSnapshotSave = await saveHistory("History three");
+  equal("a save after the interval snapshots again", thirdSnapshotSave.status, 200);
+  equal("the second snapshot is written", historyNames().length, 2);
+  equal("the new snapshot holds the previous save", readHistorySnapshot(historyNames()[1]).title, "History two");
+
+  const historyListing = await call(server, `/api/snapshots?file=${historyFile}`);
+  equal("GET /api/snapshots returns 200", historyListing.status, 200);
+  equal("the listing names the project file", historyListing.json?.file, historyFile);
+  equal("the listing reports the retention cap", historyListing.json?.keep, 20);
+  equal("the listing reports the snapshot interval", historyListing.json?.intervalSeconds, 600);
+  equal(
+    "snapshots are listed newest first",
+    historyListing.json?.snapshots?.map((snapshot) => snapshot.name),
+    [...historyNames()].reverse()
+  );
+  truthy(
+    "snapshot metadata carries size and time",
+    historyListing.json?.snapshots?.every(
+      (snapshot) => snapshot.size > 0 && /^\d{4}-\d{2}-\d{2}T/.test(snapshot.savedAt)
+    )
+  );
+
+  const oldSnapshot = historyNames()[0];
+  const readOldSnapshot = await call(
+    server,
+    `/api/snapshots?file=${historyFile}&name=${encodeURIComponent(oldSnapshot)}`
+  );
+  equal("GET /api/snapshots?name= returns a snapshot", readOldSnapshot.status, 200);
+  equal("the snapshot document round-trips", readOldSnapshot.json?.title, "History base");
+  equal("unknown fields survive a snapshot", readOldSnapshot.json?.futureField, { keep: true });
+
+  const snapshotTraversal = await call(
+    server,
+    `/api/snapshots?file=${historyFile}&name=..%2Fhistory.json`
+  );
+  equal("snapshot names cannot traverse", snapshotTraversal.status, 400);
+  const snapshotBackslash = await call(
+    server,
+    `/api/snapshots?file=${historyFile}&name=..%5Chistory.json`
+  );
+  equal("snapshot names cannot use backslashes", snapshotBackslash.status, 400);
+  const missingSnapshot = await call(
+    server,
+    `/api/snapshots?file=${historyFile}&name=20000101T000000000000Z.json`
+  );
+  equal("a missing snapshot is 404", missingSnapshot.status, 404);
+  const blankSnapshot = await call(server, `/api/snapshots?file=${historyFile}&name=`);
+  equal("an empty snapshot selector is 400", blankSnapshot.status, 400);
+  const missingSnapshotProject = await call(server, "/api/snapshots?file=missing.json");
+  equal("snapshots of a missing project are 404", missingSnapshotProject.status, 404);
+  const badSnapshotProject = await call(server, "/api/snapshots?file=..%2Fserver.py");
+  equal("snapshots refuse project paths outside data/", badSnapshotProject.status, 400);
+
+  const projectsWithSnapshots = await call(server, "/api/projects");
+  equal(
+    "snapshot files are never listed as projects",
+    projectsWithSnapshots.json?.projects?.some((entry) => entry.file.includes(".backups")),
+    false
+  );
+  equal(
+    "the snapshotted project is still listed once",
+    projectsWithSnapshots.json?.projects?.filter((entry) => entry.file === historyFile).length,
+    1
+  );
+
+  const beforeRestore = await call(server, `/api/project?file=${historyFile}`);
+  equal("the project holds the newest save before restoring", beforeRestore.json?.title, "History three");
+  const restore = await call(server, "/api/snapshots/restore", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Base-Revision": beforeRestore.json?.updatedAt,
+    },
+    body: JSON.stringify({ file: historyFile, name: oldSnapshot }),
+  });
+  equal("POST /api/snapshots/restore restores a snapshot", restore.status, 200);
+  equal("restore returns the restored document", restore.json?.project?.title, "History base");
+  equal("restore preserves unknown fields", restore.json?.project?.futureField, { keep: true });
+  truthy("restore reports the pre-restore backup", typeof restore.json?.snapshot === "string");
+  truthy(
+    "restore refreshes the revision stamp",
+    restore.json?.savedAt &&
+      restore.json.savedAt !== beforeRestore.json?.updatedAt &&
+      restore.json.project?.updatedAt === restore.json.savedAt
+  );
+  equal(
+    "the restored document is written to the project file",
+    (await call(server, `/api/project?file=${historyFile}`)).json?.title,
+    "History base"
+  );
+  equal("restoring forces a pre-restore snapshot", historyNames().length, 3);
+  equal(
+    "the pre-restore snapshot holds the replaced state",
+    readHistorySnapshot(historyNames()[2]).title,
+    "History three"
+  );
+
+  const staleRestore = await call(server, "/api/snapshots/restore", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Base-Revision": beforeRestore.json?.updatedAt,
+    },
+    body: JSON.stringify({ file: historyFile, name: historyNames()[1] }),
+  });
+  equal("restore with a stale revision is 409", staleRestore.status, 409);
+  equal(
+    "a refused restore leaves the project alone",
+    (await call(server, `/api/project?file=${historyFile}`)).json?.title,
+    "History base"
+  );
+  const restoreTraversal = await call(server, "/api/snapshots/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: historyFile, name: "../history.json" }),
+  });
+  equal("restore refuses a traversal name", restoreTraversal.status, 400);
+  const restoreMissing = await call(server, "/api/snapshots/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: historyFile, name: "20000101T000000000000Z.json" }),
+  });
+  equal("restore of a missing snapshot is 404", restoreMissing.status, 404);
+
+  const retentionFile = "retention.json";
+  writeFileSync(
+    join(server.root, "data", retentionFile),
+    `${JSON.stringify({ ...project, title: "Retention base" }, null, 2)}\n`
+  );
+  const retentionDir = () => join(server.root, "data", ".backups", retentionFile);
+  const retentionNames = () => readdirSync(retentionDir()).filter((name) => name.endsWith(".json")).sort();
+  const saveRetention = (title) =>
+    call(server, `/api/project?file=${retentionFile}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...project, title }),
+    });
+  for (let index = 0; index < 21; index += 1) {
+    if (index > 0) {
+      const old = new Date(Date.now() - 11 * 60 * 1000);
+      for (const name of retentionNames()) utimesSync(join(retentionDir(), name), old, old);
+    }
+    await saveRetention(`Retention ${index}`);
+  }
+  equal("retention keeps the configured number of snapshots", retentionNames().length, 20);
+  const retentionNewest = retentionNames()[19];
+  equal(
+    "retention drops the oldest snapshot first",
+    JSON.parse(readFileSync(join(retentionDir(), retentionNewest), "utf8")).title,
+    "Retention 19"
+  );
+  equal(
+    "retention never keeps the dropped base snapshot",
+    retentionNames().some(
+      (name) => JSON.parse(readFileSync(join(retentionDir(), name), "utf8")).title === "Retention base"
+    ),
+    false
+  );
+
+  const blockedFile = "blocked_backup.json";
+  writeFileSync(
+    join(server.root, "data", blockedFile),
+    `${JSON.stringify({ ...project, title: "Blocked base" }, null, 2)}\n`
+  );
+  // A file where the snapshot directory should be makes every snapshot fail.
+  writeFileSync(join(server.root, "data", ".backups", blockedFile), "not a directory\n");
+  const blockedSave = await call(server, `/api/project?file=${blockedFile}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...project, title: "Blocked save" }),
+  });
+  equal("a failed snapshot does not block the save", blockedSave.status, 200);
+  truthy(
+    "a failed snapshot is reported as a warning",
+    typeof blockedSave.json?.snapshotWarning === "string" &&
+      blockedSave.json.snapshotWarning.includes("backup snapshot")
+  );
+  equal(
+    "the save lands even when its snapshot fails",
+    (await call(server, `/api/project?file=${blockedFile}`)).json?.title,
+    "Blocked save"
+  );
+
+  const quietFile = "quiet.json";
+  writeFileSync(
+    join(server.root, "data", quietFile),
+    `${JSON.stringify({ ...project, title: "Quiet" }, null, 2)}\n`
+  );
+  const quietListing = await call(server, `/api/snapshots?file=${quietFile}`);
+  equal(
+    "a project without snapshots lists an empty history",
+    [quietListing.status, quietListing.json?.snapshots],
+    [200, []]
+  );
+  equal(
+    "an empty history still reports the retention policy",
+    [quietListing.json?.keep, quietListing.json?.intervalSeconds],
+    [20, 600]
+  );
+
+  const corruptFile = "corrupt.json";
+  writeFileSync(
+    join(server.root, "data", corruptFile),
+    `${JSON.stringify({ ...project, title: "Corrupt" }, null, 2)}\n`
+  );
+  mkdirSync(join(server.root, "data", ".backups", corruptFile), { recursive: true });
+  const corruptName = "20260101T000000000000Z.json";
+  writeFileSync(join(server.root, "data", ".backups", corruptFile, corruptName), "{ not json\n");
+  const corruptRead = await call(server, `/api/snapshots?file=${corruptFile}&name=${corruptName}`);
+  equal("a corrupt snapshot is a server error", corruptRead.status, 500);
+  truthy(
+    "a corrupt snapshot is reported as invalid",
+    corruptRead.json?.error?.startsWith("Snapshot is not a valid project:")
+  );
+  const badRestoreBody = await call(server, "/api/snapshots/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: corruptFile }),
+  });
+  equal("restore requires a snapshot name", badRestoreBody.status, 400);
+  const corruptRestore = await call(server, "/api/snapshots/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: corruptFile, name: corruptName }),
+  });
+  equal("restoring a corrupt snapshot fails", corruptRestore.status, 500);
+  equal(
+    "a failed restore leaves the project alone",
+    (await call(server, `/api/project?file=${corruptFile}`)).json?.title,
+    "Corrupt"
+  );
+
+  /* ---- snapshot hygiene and restore safety -------------------------------- */
+
+  const hygieneFile = "hygiene.json";
+  const hygieneProject = { ...project, title: "Hygiene base" };
+  const hygieneText = `${JSON.stringify(hygieneProject, null, 2)}\n`;
+  writeFileSync(join(server.root, "data", hygieneFile), hygieneText);
+  const hygieneDir = join(server.root, "data", ".backups", hygieneFile);
+  mkdirSync(hygieneDir, { recursive: true });
+  const hygieneValid = "20260101T000000000000Z.json";
+  const hygieneEmpty = "20260102T000000000000Z.json";
+  const hygieneFolder = "20260103T000000000000Z.json";
+  const hygieneSymlink = "20260104T000000000000Z.json";
+  writeFileSync(join(hygieneDir, hygieneValid), hygieneText);
+  writeFileSync(join(hygieneDir, hygieneEmpty), "");
+  writeFileSync(join(hygieneDir, "notes.json"), hygieneText);
+  mkdirSync(join(hygieneDir, hygieneFolder));
+  if (symlinkCreated) {
+    symlinkSync(join(hygieneDir, hygieneValid), join(hygieneDir, hygieneSymlink), "file");
+  }
+  const hygieneListing = await call(server, `/api/snapshots?file=${hygieneFile}`);
+  equal(
+    "only restorable snapshot files are listed",
+    hygieneListing.json?.snapshots?.map((snapshot) => snapshot.name),
+    [hygieneValid]
+  );
+  const emptyRead = await call(server, `/api/snapshots?file=${hygieneFile}&name=${hygieneEmpty}`);
+  equal("an empty snapshot cannot be read", emptyRead.status, 404);
+  const folderRead = await call(server, `/api/snapshots?file=${hygieneFile}&name=${hygieneFolder}`);
+  equal("a folder named like a snapshot cannot be read", folderRead.status, 404);
+  if (symlinkCreated) {
+    const symlinkRead = await call(server, `/api/snapshots?file=${hygieneFile}&name=${hygieneSymlink}`);
+    equal("a symlinked snapshot cannot be read", symlinkRead.status, 404);
+  }
+  const junkRead = await call(server, `/api/snapshots?file=${hygieneFile}&name=notes.json`);
+  equal("a junk-named snapshot is refused", junkRead.status, 400);
+
+  // Only the valid snapshot is old enough, but the empty file is fresh. A
+  // zero-byte leftover must not suppress the next backup for a full interval.
+  const hygieneOld = new Date(Date.now() - 11 * 60 * 1000);
+  utimesSync(join(hygieneDir, hygieneValid), hygieneOld, hygieneOld);
+  const hygieneSave = await call(server, `/api/project?file=${hygieneFile}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...hygieneProject, title: "Hygiene saved" }),
+  });
+  equal("the project with leftover snapshot files still saves", hygieneSave.status, 200);
+  const hygieneAfter = await call(server, `/api/snapshots?file=${hygieneFile}`);
+  equal("an empty snapshot does not suppress the next snapshot", hygieneAfter.json?.snapshots?.length, 2);
+  equal(
+    "the new snapshot holds the pre-save document",
+    (await call(server, `/api/snapshots?file=${hygieneFile}&name=${hygieneAfter.json?.snapshots?.[0]?.name}`)).json
+      ?.title,
+    "Hygiene base"
+  );
+
+  // A restore must not proceed if the pre-restore backup fails: the live file
+  // would otherwise be the only copy. Root can read a mode-000 file, so this
+  // check only runs as a normal POSIX user; Windows ACLs do not map onto chmod.
+  if (process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() !== 0) {
+    const guardFile = "restore_guard.json";
+    const guardPath = join(server.root, "data", guardFile);
+    const guardDir = join(server.root, "data", ".backups", guardFile);
+    const guardSnapshot = "20260101T000000000000Z.json";
+    const guardProject = { ...project, title: "Restore guard" };
+    const guardText = `${JSON.stringify(guardProject, null, 2)}\n`;
+    mkdirSync(guardDir, { recursive: true });
+    writeFileSync(guardPath, guardText);
+    writeFileSync(
+      join(guardDir, guardSnapshot),
+      `${JSON.stringify({ ...guardProject, title: "Restore guard snapshot" }, null, 2)}\n`
+    );
+    chmodSync(guardPath, 0o000);
+    try {
+      const refused = await call(server, "/api/snapshots/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: guardFile, name: guardSnapshot }),
+      });
+      equal("restore refuses when its pre-restore snapshot fails", refused.status, 500);
+      truthy(
+        "a refused restore says the project was not changed",
+        refused.json?.error?.includes("was not changed")
+      );
+    } finally {
+      chmodSync(guardPath, 0o600);
+    }
+    equal("a refused restore leaves the project document alone", readFileSync(guardPath, "utf8"), guardText);
+    equal("a refused restore leaves no partial snapshot", readdirSync(guardDir).sort(), [guardSnapshot]);
+  }
 
   const badProjectQuery = await call(server, "/api/project?file=../server.py");
   equal("GET /api/project refuses paths outside data/", badProjectQuery.status, 400);

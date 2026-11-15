@@ -5,6 +5,14 @@ function projectQuery(file) {
   return file ? `?file=${encodeURIComponent(file)}` : "";
 }
 
+function snapshotQuery(file, name = null) {
+  const params = new URLSearchParams();
+  if (file) params.set("file", file);
+  if (name) params.set("name", name);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 async function gzipBody(text) {
   const stream = new Blob([text])
     .stream()
@@ -53,6 +61,24 @@ export const api = {
   },
   loadProject(file = null) {
     return request(`/api/project${projectQuery(file)}`);
+  },
+  listSnapshots(file = null) {
+    return request(`/api/snapshots${snapshotQuery(file)}`);
+  },
+  loadSnapshot(file, name) {
+    return request(`/api/snapshots${snapshotQuery(file, name)}`);
+  },
+  // Restores a snapshot and returns the rewritten project document. The server
+  // snapshots the current state first and bumps updatedAt, so other tabs get a
+  // conflict instead of silently saving stale work over the restored file.
+  restoreSnapshot(file, name, baseRevision = null) {
+    const headers = { ...jsonHeaders };
+    if (baseRevision) headers["X-Base-Revision"] = baseRevision;
+    return request("/api/snapshots/restore", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ file, name }),
+    });
   },
   // baseRevision is the updatedAt stamp of the document this client last
   // saw. The server answers 409 when the file has been saved by someone else

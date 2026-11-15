@@ -21,6 +21,7 @@ import { initPhonemeKeyboard } from "./keyboard.js";
 import { initClassAutocomplete } from "./autocomplete.js";
 import { addRootLanguage } from "./languageActions.js";
 import { normalizeTool } from "./languageTools.js";
+import { openProjectHistory } from "./projectHistory.js";
 import { decodeHashPart, languageHref } from "./routes.js";
 import { renderCognates } from "./views/cognates.js";
 import { renderLanguage, TABS } from "./views/language.js";
@@ -352,9 +353,19 @@ async function openProjectMenu() {
   }
   items.push(
     { separator: true },
+    { label: "Project history…", icon: "refresh", onClick: () => void projectHistoryFlow() },
     { label: "New project…", icon: "plus", onClick: () => void newProjectFlow() }
   );
   openMenu(projectSwitch, items);
+}
+
+function projectHistoryFlow() {
+  return openProjectHistory({
+    onRestored: () => {
+      updateProjectSwitcher();
+      render();
+    },
+  });
 }
 
 function renderSidebar(route) {
@@ -686,6 +697,9 @@ async function init() {
     if (!booted || !store.project) return;
     render({ preserveScroll: true });
     toast("Reloaded the newer project — another tab or window saved changes.", { type: "info", duration: 3200 });
+  });
+  store.onSnapshotWarning((message) => {
+    toast(message, { type: "info", duration: 8000 });
   });
   projectSwitch.addEventListener("click", () => void openProjectMenu());
   projectName.addEventListener("click", async () => {
