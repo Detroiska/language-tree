@@ -238,8 +238,12 @@ def snapshot_path(name: str, snapshot: object) -> Path:
     if not isinstance(snapshot, str) or not SNAPSHOT_NAME_PATTERN.fullmatch(snapshot):
         raise InvalidProjectRequest("Invalid snapshot name.")
     directory = snapshot_directory(name)
-    path = (directory / snapshot).resolve()
-    if path.parent != directory:
+    path = directory / snapshot
+    # Check the directory entry before resolving: Path.resolve() follows
+    # symlinks, so a same-directory link would otherwise be read as its target.
+    if path.is_symlink():
+        raise FileNotFoundError("Snapshot not found.")
+    if path.resolve().parent != directory:
         raise InvalidProjectRequest("Invalid snapshot name.")
     return path
 
@@ -276,7 +280,7 @@ def list_snapshots(name: str) -> list[dict]:
 
 def read_snapshot(name: str, snapshot: str) -> dict:
     path = snapshot_path(name, snapshot)
-    if path.is_symlink() or not path.is_file():
+    if not path.is_file() or path.stat().st_size == 0:
         raise FileNotFoundError("Snapshot not found.")
     with path.open("r", encoding="utf-8") as handle:
         project = json.load(handle)
@@ -326,9 +330,14 @@ def create_snapshot(name: str, force: bool = False) -> str:
             if entry.is_symlink() or not entry.is_file():
                 continue
             try:
-                newest = max(newest, entry.stat().st_mtime)
+                stat = entry.stat()
             except OSError:
                 continue
+            # A zero-byte file from an interrupted write is not a snapshot and
+            # must not suppress the next backup for a whole interval.
+            if stat.st_size == 0:
+                continue
+            newest = max(newest, stat.st_mtime)
         if newest and time.time() - newest < SNAPSHOT_INTERVAL_SECONDS:
             return ""
 
