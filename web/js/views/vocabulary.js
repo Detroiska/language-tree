@@ -132,7 +132,14 @@ function phonemicPreviewMarkup(word, checker) {
 
 function stressSelectMarkup(word, result, checker) {
   if (checker.stress === "none" && !word.stress) return "";
-  const syllableCount = result.syllables?.length || 0;
+  // Syllable positions come from the template when it parses. If checks are
+  // off or the template is broken, the same maximal-onset fallback used by the
+  // preview still lets a stored stress be edited instead of hiding the picker.
+  const syllableCount =
+    result.syllables?.length ||
+    (result.tokens?.length
+      ? checker.context.prosodyFor(result.tokens, result.junctures, word.stress).syllables.length
+      : 0);
   const primary = word.stress?.primary;
   const options = [
     `<option value="" ${primary == null ? "selected" : ""}>${checker.stress === "none" ? "None" : "Auto"}</option>`,
