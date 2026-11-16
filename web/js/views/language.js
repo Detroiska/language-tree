@@ -25,6 +25,7 @@ import {
 import { renderAllophony } from "./allophony.js";
 import { renderAnalytics } from "./analytics.js";
 import { renderInventory } from "./inventory.js";
+import { renderOrthography } from "./orthography.js";
 import { renderPhonotactics } from "./phonotactics.js";
 import { renderChanges } from "./soundchanges.js";
 import { renderVocabulary } from "./vocabulary.js";
@@ -35,6 +36,7 @@ export const TABS = [
   { id: "allophony", label: "Allophony" },
   { id: "phonotactics", label: "Phonotactics" },
   { id: "changes", label: "Sound changes" },
+  { id: "orthography", label: "Orthography" },
   { id: "vocabulary", label: "Vocabulary" },
   { id: "analytics", label: "Analytics" },
 ];
@@ -164,6 +166,8 @@ function languageHeader(ctx, activeTab) {
                     ? `<span class="tab-count">${stats.allophony}</span>`
                     : tab.id === "vocabulary"
                     ? `<span class="tab-count">${stats.words}</span>`
+                    : tab.id === "orthography"
+                    ? `<span class="tab-count">${language.orthography?.pairs?.length || 0}</span>`
                     : ""
             }
           </a>`
@@ -368,6 +372,7 @@ export function renderLanguage(container, ctx, tabValue, toolValue) {
   else if (activeTab === "phonotactics") renderPhonotactics(content, ctx, activeTool);
   else if (activeTab === "changes") renderChanges(content, ctx, activeTool);
   else if (activeTab === "allophony") renderAllophony(content, ctx, activeTool);
+  else if (activeTab === "orthography") renderOrthography(content, ctx);
   else if (activeTab === "vocabulary") renderVocabulary(content, ctx);
   else if (activeTab === "analytics") renderAnalytics(content, ctx);
   else renderOverview(content, ctx);
