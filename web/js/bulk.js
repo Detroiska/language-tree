@@ -312,22 +312,32 @@ export function applyWordList(language, rows, mode) {
       if (verdict.status === "skip") summary.skipped += 1;
       continue;
     }
+    const existing = byGloss.get(normalizeGloss(row.gloss));
     const rawStress = normalizeWordStress(row.stress);
     // Reject marks that the form cannot display, so an import never creates a
-    // stress field the picker and phonemic view silently ignore. Languages
-    // without stress rows never need to compile a checker.
-    if (rawStress && !checker) checker = createPhonotacticsChecker(language);
-    const stress = rawStress ? pruneWordStressForForm(row.form, checker, rawStress) : null;
+    // stress field the picker and phonemic view silently ignore. A stress-only
+    // update has no form of its own, so prune against the stored form instead.
+    // Languages without stress rows never need to compile a checker.
+    const effectiveForm = row.form || existing?.form || "";
+    if ((rawStress || (row.form && existing?.stress)) && !checker) {
+      checker = createPhonotacticsChecker(language);
+    }
+    const stress = rawStress ? pruneWordStressForForm(effectiveForm, checker, rawStress) : null;
     if (stress) usesStress = true;
-    const existing = byGloss.get(normalizeGloss(row.gloss));
     if (existing) {
-      if (row.form) existing.form = row.form;
-      // An update that does not mention stress leaves the stored distinction
-      // alone. A bulk edit of forms and notes must not silently erase it.
       if (rawStress) {
         if (stress) existing.stress = stress;
         else delete existing.stress;
+      } else if (row.form && existing.stress) {
+        // Prune a previously hidden mark against the old form first, then
+        // against the new one, so a form change cannot revive a stale mark
+        // once the default primary moves away from it.
+        const before = pruneWordStressForForm(existing.form, checker, existing.stress);
+        const after = before ? pruneWordStressForForm(row.form, checker, before) : null;
+        if (after) existing.stress = after;
+        else delete existing.stress;
       }
+      if (row.form) existing.form = row.form;
       if (row.note) existing.note = row.note;
       existing.gloss = row.gloss;
       summary.updated += 1;

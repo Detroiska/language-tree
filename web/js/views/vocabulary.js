@@ -162,6 +162,18 @@ function sameStoredStress(left, right) {
   );
 }
 
+// A project saved before secondary pruning may still hold a mark hidden by the
+// current default primary. Drop it before applying an edit, otherwise changing
+// the form or switching to Auto could move the primary away and silently revive
+// a mark the user never saw.
+function pruneStoredStress(word, checker) {
+  if (!word.stress) return;
+  const pruned = pruneWordStressForForm(word.form, checker, word.stress);
+  if (sameStoredStress(pruned, word.stress)) return;
+  if (pruned) word.stress = pruned;
+  else delete word.stress;
+}
+
 function stressSelectMarkup(word, result, checker) {
   if (checker.stress === "none" && !word.stress) return "";
   // Syllable positions come from the template when it parses. If checks are
@@ -662,6 +674,7 @@ export function renderVocabulary(container, ctx) {
     row.addEventListener("change", (event) => {
       const select = event.target.closest?.("[data-word-stress]");
       if (!select || !row.contains(select)) return;
+      pruneStoredStress(word, checker);
       const value = select.value;
       const secondary = word.stress?.secondary || [];
       const candidate =
@@ -711,6 +724,7 @@ export function renderVocabulary(container, ctx) {
     row.querySelectorAll("[data-word-field]").forEach((input) => {
       input.addEventListener("input", () => {
         const field = input.dataset.wordField;
+        if (field === "form") pruneStoredStress(word, checker);
         word[field] = field === "form" ? stripLevelMarks(input.value) : input.value;
         let result = null;
         if (field === "form") {

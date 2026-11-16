@@ -274,6 +274,11 @@ const stressLanguage = () => ({
   vocabulary: [],
 });
 
+const penultLanguage = () => ({
+  ...stressLanguage(),
+  phonotactics: { ...stressLanguage().phonotactics, stress: "penult" },
+});
+
 equal(
   "a JSON word imports its stress field",
   parseWordList('[{"gloss":"flour","form":"muka","stress":{"primary":1,"secondary":[]}}]').rows[0].stress,
@@ -375,6 +380,50 @@ equal(
     "update"
   );
   equal("a bulk import prunes a colliding secondary", Object.hasOwn(lang.vocabulary[0], "stress"), false);
+}
+{
+  const lang = stressLanguage();
+  lang.vocabulary.push({ id: "w1", gloss: "flour", form: "muka", note: "", stress: { primary: 1, secondary: [] } });
+  applyWordList(
+    lang,
+    [{ gloss: "flour", form: "muka", note: "", stress: { primary: null, secondary: [0] } }],
+    "update"
+  );
+  equal(
+    "an update whose stress prunes away clears the stored field",
+    Object.hasOwn(lang.vocabulary[0], "stress"),
+    false
+  );
+}
+{
+  const lang = stressLanguage();
+  lang.vocabulary.push({ id: "w1", gloss: "flour", form: "muka", note: "", stress: { primary: 1, secondary: [] } });
+  applyWordList(
+    lang,
+    [{ gloss: "flour", form: "", note: "", stress: { primary: null, secondary: [0] } }],
+    "update"
+  );
+  equal(
+    "a stress-only update prunes against the stored form",
+    Object.hasOwn(lang.vocabulary[0], "stress"),
+    false
+  );
+}
+{
+  const lang = penultLanguage();
+  lang.vocabulary.push({
+    id: "w1",
+    gloss: "flour",
+    form: "kasa",
+    note: "",
+    stress: { primary: null, secondary: [0] },
+  });
+  applyWordList(lang, [{ gloss: "flour", form: "kasaka", note: "" }], "update");
+  equal(
+    "a form-only update prunes a hidden mark instead of reviving it",
+    Object.hasOwn(lang.vocabulary[0], "stress"),
+    false
+  );
 }
 {
   const words = [{ gloss: "flour", form: "muka", note: "", stress: { primary: 1, secondary: [0] } }];
