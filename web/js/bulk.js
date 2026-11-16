@@ -294,6 +294,20 @@ export function parseWordList(text) {
   const hasMetaHeader = columnMap
     ? ["pos", "status", "source", "etymology"].some((field) => columnMap[field] >= 0)
     : false;
+  // A header may name only some columns ("gloss" alone, or "gloss,meaning").
+  // Keep the old positional reading for unnamed columns so a partial header
+  // never silently imports a form-less draft.
+  let resolvedGlossIndex = null;
+  let resolvedFormIndex = null;
+  if (columnMap) {
+    const namedIndices = new Set(Object.values(columnMap).filter((index) => index >= 0));
+    const width = tableRows.reduce((max, row) => Math.max(max, row.cells.length), 0);
+    resolvedFormIndex =
+      columnMap.form >= 0
+        ? columnMap.form
+        : Array.from({ length: width }, (_, index) => index).find((index) => !namedIndices.has(index)) ?? -1;
+    resolvedGlossIndex = columnMap.gloss >= 0 ? columnMap.gloss : resolvedFormIndex === 0 ? 1 : 0;
+  }
 
   const rows = [];
   for (const row of tableRows) {
@@ -304,11 +318,11 @@ export function parseWordList(text) {
     let meta = {};
     if (columnMap) {
       const cellAt = (index) => (index >= 0 ? row.cells[index] ?? "" : "");
-      gloss = cellAt(columnMap.gloss);
-      parsed = formAndStress(cellAt(columnMap.form));
+      gloss = cellAt(resolvedGlossIndex);
+      parsed = formAndStress(cellAt(resolvedFormIndex));
       note = hasMetaHeader
         ? cellAt(columnMap.note)
-        : row.cells.slice(Math.max(columnMap.gloss, columnMap.form) + 1).join(" ");
+        : row.cells.slice(Math.max(resolvedGlossIndex, resolvedFormIndex) + 1).join(" ");
       meta = {
         pos: cellAt(columnMap.pos),
         status: cellAt(columnMap.status),

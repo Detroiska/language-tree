@@ -492,7 +492,7 @@ language-tree/
       ├─ paging.js         # shared page math, pager markup, and focus restoration
       ├─ gloss.js          # gloss normalization shared by lexicon and reports
       ├─ lexicon.js        # word metadata defaults, normalization, report columns
-       ├─ bulk.js           # vocabulary import/export parsing and writers
+      ├─ bulk.js           # vocabulary import/export parsing and writers
       ├─ xsampa.js         # X-SAMPA <-> IPA conversion for stored forms
       ├─ report.js         # Markdown/HTML family report builders
       ├─ reportUi.js       # browser-only report downloads and menu

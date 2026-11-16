@@ -115,6 +115,18 @@ truthy(
   "a data row whose gloss is literally a header word is not eaten",
   !parseWordList("form,house\nkasa,water").headerSkipped
 );
+// A header need not name every column. Unnamed columns keep the old positional
+// reading, so a bare "gloss" header cannot turn a form into a note.
+equal(
+  "a bare gloss header still reads the form positionally",
+  rowOf(parseWordList("gloss\nhouse\tkasa\tdwelling")),
+  { gloss: "house", form: "kasa", note: "dwelling", index: 2 }
+);
+equal(
+  "a gloss header with a synonym but no form column keeps the form",
+  rowOf(parseWordList("gloss\tmeaning\nhouse\tkasa")),
+  { gloss: "house", form: "kasa", note: "", index: 2 }
+);
 
 /* ---- delimiters ---------------------------------------------------------- */
 
