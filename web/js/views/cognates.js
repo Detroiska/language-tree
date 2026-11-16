@@ -1,7 +1,11 @@
 import { normalizeGloss } from "../gloss.js";
 import { findLanguage, getLineage, languagesInTreeOrder, uid } from "../model.js";
 import { formatPhonemic, formatPhonetic } from "../notation.js";
-import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
+import {
+  createPhonotacticsChecker,
+  phonemicFormForWord,
+  pruneWordStressForForm,
+} from "../phonotacticsCheck.js";
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { buildCorrespondences } from "../correspondences.js";
@@ -442,7 +446,7 @@ function traceMarkup(source, word, traceData) {
           : null;
       const derivedDisplay = row.isSource
         ? phonemicFormForWord(word, checker)
-        : phonemicFormForWord({ form: cell.derived }, checker);
+        : phonemicFormForWord({ form: cell.derived, stress: cell.stress }, checker);
       const recordedDisplay = cell.recorded ? phonemicFormForWord(cell.recorded, checker) : "";
       const disabled =
         row.isSource || status.kind === "match" || status.kind === "source" || status.kind === "error"
@@ -694,18 +698,27 @@ export function renderCognates(container, ctx) {
       const cell = traceData?.cellsByLanguage.get(button.dataset.recordFor);
       if (!row || !cell) return;
       const target = row.language;
+      const checker = createPhonotacticsChecker(target);
+      const stress =
+        cell.stress && checker.stressScope === "phonemic"
+          ? pruneWordStressForForm(cell.derived, checker, cell.stress)
+          : null;
       const normalizedGloss = word.gloss.trim().toLowerCase();
       const existing = target.vocabulary.find((entry) => entry.gloss.trim().toLowerCase() === normalizedGloss);
       if (existing) {
         existing.form = cell.derived;
+        if (stress) existing.stress = stress;
+        else delete existing.stress;
         if (!existing.note) existing.note = `Derived from ${source.name}.`;
       } else {
-        target.vocabulary.push({
+        const recorded = {
           id: uid("word"),
           gloss: word.gloss,
           form: cell.derived,
           note: `Derived from ${source.name}.`,
-        });
+        };
+        if (stress) recorded.stress = stress;
+        target.vocabulary.push(recorded);
       }
       ctx.touch({ label: "Record word" });
       ctx.refresh();

@@ -232,6 +232,58 @@ export function resolveStress(syllables, system, wordStress = null) {
   return { primaryIndex, secondaryIndices };
 }
 
+// Label each token with the syllable it came from. Derivations carry these
+// labels alongside the segments; when a rule rewrites a segment its label
+// follows the input segment it descended from, so stress can be remapped onto
+// the daughter's own syllables instead of keeping a stale parent index.
+export function syllableOrigins(syllables, tokenCount) {
+  const origins = new Array(tokenCount).fill(null);
+  for (const [index, syllable] of (syllables || []).entries()) {
+    for (let position = syllable.start; position < syllable.end && position < tokenCount; position += 1) {
+      origins[position] = index;
+    }
+  }
+  return origins;
+}
+
+// Project a parent word's stress onto the syllables of a derived form. A mark
+// is kept only if some segment of its original syllable survived; when the
+// stressed syllable is lost, the primary is left unset so the daughter's
+// default placement takes over. The result is pruned against the effective
+// primary, so a surviving secondary cannot hide behind a new default.
+export function remapStressToSyllables(syllables, origins, wordStress, system) {
+  const stored = normalizeWordStress(wordStress);
+  if (!stored || !syllables?.length || !origins?.length) return null;
+
+  const project = (sourceIndex) => {
+    let best = -1;
+    let bestCount = 0;
+    for (const [index, syllable] of syllables.entries()) {
+      let count = 0;
+      for (let position = 0; position < origins.length; position += 1) {
+        if (origins[position] === sourceIndex && position >= syllable.start && position < syllable.end) {
+          count += 1;
+        }
+      }
+      if (count > bestCount || (count === bestCount && best === -1 && count > 0)) {
+        best = index;
+        bestCount = count;
+      }
+    }
+    return best;
+  };
+
+  const primary = stored.primary == null ? -1 : project(stored.primary);
+  const secondary = stored.secondary.map(project).filter((index) => index >= 0);
+  const candidate = normalizeWordStress({
+    primary: primary >= 0 ? primary : null,
+    secondary,
+  });
+  if (!candidate) return null;
+  const effective = resolveStress(syllables, system, candidate);
+  return pruneSecondaryStress(candidate, effective.primaryIndex, syllables.length);
+}
+
 // Stress marks before syllables, without the dots used by the surface display.
 // This is the phonemic presentation: `ˈkasa` rather than `ˈka.sa`.
 export function stressMarkedText(tokens, syllables, stressIndex, junctures = null, secondaryIndices = []) {

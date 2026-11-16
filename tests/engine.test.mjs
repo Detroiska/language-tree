@@ -121,6 +121,8 @@ import {
   buildCognateMatrix,
   buildCognateRows,
   buildCognateTrace,
+  deriveCognateCell,
+  statusForCognate,
   wordsWithForms,
 } from "../web/js/cognateData.js";
 import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } from "../web/js/reconstruction.js";
@@ -2323,6 +2325,101 @@ equal(
   "the inherited-record path falls back to the language default without word stress",
   deriveInheritedWord({ gloss: "torment", form: "muka" }, lexicalRuleProject, "lexical").text,
   "muka"
+);
+
+const inheritedStressProject = ensureProject({
+  title: "Inherited stress",
+  languages: [
+    {
+      id: "stress_root",
+      name: "Root",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [],
+      vocabulary: [],
+    },
+    {
+      id: "stress_insert",
+      name: "Insert",
+      parentId: "stress_root",
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [{ id: "insert_a", notation: "∅ > a / # _", note: "", enabled: true }],
+      vocabulary: [
+        {
+          id: "insert_house",
+          gloss: "house",
+          form: "akasa",
+          stress: { primary: 0, secondary: [2] },
+          note: "",
+        },
+      ],
+    },
+    {
+      id: "stress_delete",
+      name: "Delete",
+      parentId: "stress_root",
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [{ id: "delete_stressed", notation: "ka > ∅ / # _", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+const insertedStress = deriveInheritedWord(
+  { gloss: "house", form: "kasa", stress: { primary: 0, secondary: [1] } },
+  inheritedStressProject,
+  "stress_insert"
+);
+equal("an inherited form can insert a syllable", insertedStress.text, "akasa");
+equal(
+  "an inserted syllable shifts inherited primary and secondary stress",
+  insertedStress.stress,
+  { primary: 1, secondary: [2] }
+);
+equal(
+  "derived stress takes part in phonemic comparison",
+  samePhonemicForm(
+    { form: insertedStress.text, stress: insertedStress.stress },
+    { form: insertedStress.text, stress: { primary: 0, secondary: [2] } },
+    { scope: "phonemic" }
+  ),
+  false
+);
+const deletedStress = deriveInheritedWord(
+  { gloss: "flour", form: "kasa", stress: { primary: 0, secondary: [1] } },
+  inheritedStressProject,
+  "stress_delete"
+);
+equal("an inherited form can delete a whole syllable", deletedStress.text, "sa");
+equal(
+  "deleting the stressed syllable drops inherited stress",
+  deletedStress.stress,
+  null
+);
+equal(
+  "a full-chain derivation remaps stress from the root's syllabifier",
+  deriveForm("kasa", inheritedStressProject, "stress_insert", {
+    wordStress: { primary: 0, secondary: [1] },
+  }).stress,
+  { primary: 1, secondary: [2] }
+);
+const cognateStressSource = { gloss: "house", form: "kasa", stress: { primary: 0, secondary: [1] } };
+const cognateStressRows = buildCognateRows(
+  inheritedStressProject,
+  inheritedStressProject.languages[0]
+);
+const cognateStressRow = cognateStressRows.rows.find((row) => row.language.id === "stress_insert");
+const cognateStressCell = deriveCognateCell(cognateStressRow, cognateStressSource, inheritedStressProject, {
+  surface: false,
+  diagnostics: false,
+});
+equal("cognate cells carry remapped stress", cognateStressCell.stress, { primary: 1, secondary: [2] });
+equal(
+  "a recorded stress difference makes a cognate cell differ",
+  statusForCognate(cognateStressSource, cognateStressRow, cognateStressCell).kind,
+  "differs"
 );
 
 const emptyTemplateLanguage = {
