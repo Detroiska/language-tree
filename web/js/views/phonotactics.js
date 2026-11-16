@@ -351,6 +351,8 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   const { language } = ctx;
   const phonotactics = language.phonotactics;
   const checkState = rememberCheck(language.id);
+  let wordCheckStatus = checkState.status;
+  let wordCheckPage = checkState.page;
   let checker = createPhonotacticsChecker(language);
   const chartClasses = suggestClassRefs(checker.context.classIndex);
 
@@ -601,12 +603,12 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
             </div>
             <div class="panel-actions">
               <select class="select check-status-filter" data-phonotactics-word-status aria-label="Filter vocabulary forms by status">
-                <option value="all">All forms</option>
-                <option value="attention">Needs attention</option>
-                <option value="invalid">Invalid</option>
-                <option value="template-error">Template errors</option>
-                <option value="off">Checks off</option>
-                <option value="valid">Valid</option>
+                <option value="all" ${wordCheckStatus === "all" ? "selected" : ""}>All forms</option>
+                <option value="attention" ${wordCheckStatus === "attention" ? "selected" : ""}>Needs attention</option>
+                <option value="invalid" ${wordCheckStatus === "invalid" ? "selected" : ""}>Invalid</option>
+                <option value="template-error" ${wordCheckStatus === "template-error" ? "selected" : ""}>Template errors</option>
+                <option value="off" ${wordCheckStatus === "off" ? "selected" : ""}>Checks off</option>
+                <option value="valid" ${wordCheckStatus === "valid" ? "selected" : ""}>Valid</option>
               </select>
               <span class="check-summary" data-phonotactics-word-summary></span>
               <button class="button button-quiet button-small" type="button" data-open-vocabulary>${icon("book")}Open vocabulary</button>
@@ -627,9 +629,6 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   const testInput = container.querySelector("[data-phonotactics-test]");
   const testResultElement = container.querySelector("[data-phonotactics-test-result]");
   const markStressButton = container.querySelector("[data-mark-stress]");
-
-  let wordCheckStatus = checkState.status;
-  let wordCheckPage = checkState.page;
 
   const refresh = () => {
     checker = createPhonotacticsChecker(language);
