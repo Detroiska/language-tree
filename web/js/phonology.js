@@ -2136,7 +2136,7 @@ export function explainRuleMiss(tokens, compiled, context, junctures = null, wor
     return `The input (${describePattern(compiled.target)}) matches no part of “${form}”.`;
   }
   if (stressMisses === targetHits) {
-    return `The input matches at ${unit(targetHits)}, but its stress marks do not (input stress requires phonemic scope).`;
+    return `The input matches at ${unit(targetHits)}, but its stress marks do not (check the mark and that phonemic scope is enabled).`;
   }
   if (hasLeft && !leftOk) {
     return `The input matches at ${unit(targetHits)}, but the left environment (${describePattern(left)}) always fails there.`;
