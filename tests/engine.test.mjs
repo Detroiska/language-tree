@@ -5623,6 +5623,33 @@ equal("a chart-class name is a valid echo on both sides", apply("plosive.velar V
 equal("a glide tail glues onto the echoed vowel", apply("V > Vʷ / _ u", "katau"), {
   out: "kataʷu",
 });
+// Echo suffixes share the engine's segment-modifier set: velarization and
+// pharyngealization are as valid as aspiration or length.
+truthy("a velarization tail glues onto an echoed vowel", compileRule("V > Vˠ", ctx).ok);
+truthy("a pharyngealization tail glues onto an echoed vowel", compileRule("V > Vˤ", ctx).ok);
+// A category or chart-class word can begin with V or C; it is a named echo,
+// not a class echo with a stray letter suffix.
+const namedEchoCtx = contextForLanguage(
+  ensureProject({
+    title: "Named echoes",
+    languages: [
+      {
+        id: "a",
+        name: "A",
+        inventory,
+        phonotactics: { classes: [{ name: "COR", sounds: "t k" }] },
+      },
+    ],
+  }),
+  "a"
+);
+const namedEchoCompile = compileRule("COR V > V COR", namedEchoCtx);
+truthy("a category name beginning with C is a valid echo", namedEchoCompile.ok);
+truthy(
+  "a named C-class echo swaps with a vowel",
+  namedEchoCompile.ok &&
+    applyRule(namedEchoCtx.tokenize("ta"), namedEchoCompile.rule, namedEchoCtx).tokens.join("") === "at"
+);
 
 equal("echoing a class more often than it matches is rejected", !compileRule("C > C C", ctx).ok, true);
 truthy(

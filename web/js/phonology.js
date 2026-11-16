@@ -1119,7 +1119,8 @@ function literalWordWarning(chunk, segments, context) {
 // output emits the matched vowel with the length mark as ONE token. Only
 // diacritic endings glue; letters end the echo, so no ordinary word of
 // segment names turns into one by accident.
-const ECHO_SUFFIX = /^[\p{M}\u02B0-\u02B8\u02BC\u02BE\u02BF\u02C0\u02C1\u02D0\u02D1]+$/u;
+const isEchoSuffix = (suffix) =>
+  [...suffix].every((char) => /\p{M}/u.test(char) || isSegmentModifier(char));
 
 function echoKindLabel(atom) {
   return atom.kind === "set"
@@ -1133,16 +1134,8 @@ function parseEchoChunk(chunk, context) {
   if (chunk === "V" || chunk === "C") {
     return { ok: true, atom: { type: "echo", kind: chunk, name: "", suffix: "" } };
   }
-  if (/^[VC]/u.test(chunk)) {
-    const suffix = chunk.slice(1);
-    if (!ECHO_SUFFIX.test(suffix)) {
-      return {
-        ok: false,
-        hard: true,
-        error: `“${chunk}” would echo the matched ${chunk[0] === "V" ? "vowel" : "consonant"}, but an echo may only carry diacritics (as in V > Vː). Write the other sounds as their own chunk, for example V > V ${suffix}.`,
-      };
-    }
-    return { ok: true, atom: { type: "echo", kind: chunk[0], name: "", suffix } };
+  if (/^[VC]/u.test(chunk) && isEchoSuffix(chunk.slice(1))) {
+    return { ok: true, atom: { type: "echo", kind: chunk[0], name: "", suffix: chunk.slice(1) } };
   }
   // Named echoes are category or chart-class words (letters and dots). Feature
   // syntax ([+voice], [-back], αplace) and short literals like ɑ are handled
@@ -1158,6 +1151,15 @@ function parseEchoChunk(chunk, context) {
   if (classRef) {
     if (!classRef.ok) return { ok: false, hard: true, error: classRef.error };
     return { ok: true, atom: { type: "echo", kind: "set", name: chunk, suffix: "" } };
+  }
+  // A chunk that starts with V or C but is neither a diacritic echo nor a
+  // named class is a confused echo; keep the explanatory error for it.
+  if (/^[VC]/u.test(chunk)) {
+    return {
+      ok: false,
+      hard: true,
+      error: `“${chunk}” would echo the matched ${chunk[0] === "V" ? "vowel" : "consonant"}, but an echo may only carry diacritics (as in V > Vː). Write the other sounds as their own chunk, for example V > V ${chunk.slice(1)}.`,
+    };
   }
   return { ok: false, hard: false };
 }
