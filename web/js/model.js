@@ -1,6 +1,7 @@
 import { stripLevelMarks, stripStressMarks } from "./notation.js";
 import { normalizeFeatureOverrides } from "./features.js";
 import { normalizeWordMeta } from "./lexicon.js";
+import { normalizeOrthography } from "./orthography.js";
 import {
   normalizeStressScope,
   normalizeStressSystem,
@@ -139,13 +140,15 @@ export function createLanguage(
   template = null,
   phonotactics = null,
   allophony = null,
-  featureOverrides = null
+  featureOverrides = null,
+  orthography = null
 ) {
   return {
     id: uid("lang"),
     name: name.trim() || "Untitled language",
     parentId,
     notes: "",
+    orthography: orthography ? normalizeOrthography(deepClone(orthography)) : { pairs: [] },
     inventory: template ? deepClone(template) : defaultInventory(),
     phonotactics: phonotactics ? ensurePhonotactics(deepClone(phonotactics)) : defaultPhonotactics(),
     soundChanges: [],
@@ -692,6 +695,11 @@ export function ensureProject(raw) {
     stressNotation ||= language.soundChanges.some((rule) => /[ˈˌ]/u.test(rule.notation));
     language.allophony = ensureAllophony(language.allophony);
     language.featureOverrides = normalizeFeatureOverrides(language.featureOverrides);
+    // Like lexicon metadata, only rewrite a field the document already has so
+    // older files (including the tracked demo) stay byte-identical.
+    if (Object.prototype.hasOwnProperty.call(language, "orthography")) {
+      language.orthography = normalizeOrthography(language.orthography);
+    }
     const wordIds = new Set();
     language.vocabulary = Array.isArray(language.vocabulary)
       ? language.vocabulary
@@ -863,7 +871,8 @@ export function createAncestor(project, languageId, name) {
     language.inventory,
     language.phonotactics,
     language.allophony,
-    language.featureOverrides
+    language.featureOverrides,
+    language.orthography
   );
   const index = project.languages.indexOf(language);
   project.languages.splice(index, 0, ancestor);
@@ -882,7 +891,8 @@ export function createSibling(project, languageId, name) {
     language.inventory,
     language.phonotactics,
     language.allophony,
-    language.featureOverrides
+    language.featureOverrides,
+    language.orthography
   );
   const index = project.languages.indexOf(language);
   project.languages.splice(index + 1, 0, sibling);
