@@ -4302,6 +4302,32 @@ truthy(
 
 const unboundAlpha = compileRule("n > [αplace]", featureCtx);
 truthy("an unbound alpha variable is rejected", !unboundAlpha.ok && /not bound/.test(unboundAlpha.error));
+// A widened domain may skip segments, but the greedy nearest-first choice can
+// bind an alpha variable to a segment that leaves a later atom unsatisfied.
+// The matcher must backtrack to an assignment that satisfies the whole side.
+const widenedProject = ensureProject({
+  title: "Widened alpha",
+  languages: [
+    {
+      id: "a",
+      name: "A",
+      inventory: defaultInventory(),
+      allophony: [
+        { id: "r1", notation: "p > f / [αplace] [αplace] _", domain: "word", enabled: true },
+      ],
+    },
+  ],
+});
+const widenedCtx = contextForAllophony(widenedProject, "a");
+const widenedRules = compileAllophonyRules(widenedProject.languages[0].allophony, widenedCtx);
+const widenedApply = (form) =>
+  applyAllophony(widenedCtx.tokenize(form), widenedRules, widenedCtx).tokens.join("");
+equal("a widened domain still applies an adjacent alpha match", widenedApply("ttp"), "ttf");
+equal(
+  "a widened domain backtracks when the nearest alpha binding cannot satisfy the pattern",
+  widenedApply("ttkp"),
+  "ttkf"
+);
 const mixedFeature = compileRule("[+nasal p] > a", featureCtx);
 truthy(
   "a bracket cannot mix sounds and features",

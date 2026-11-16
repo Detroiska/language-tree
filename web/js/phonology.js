@@ -1399,49 +1399,40 @@ function matchesLeft(
   limit = null,
   junctures = null
 ) {
-  let cursor = index;
-  let next = { ...bindings };
   const floor = limit === null ? 0 : Math.max(0, limit);
-  for (let offset = pattern.length - 1; offset >= 0; offset -= 1) {
+  const walk = (cursor, offset, next) => {
+    if (offset < 0) return next;
     const item = pattern[offset];
     if (item.type === "boundary") {
-      if (item.value === "+") {
-        if (!junctures?.has(cursor)) return null;
-      } else if (cursor !== 0) return null;
-      continue;
+      if (item.value === "+" ? !junctures?.has(cursor) : cursor !== 0) return null;
+      return walk(cursor, offset - 1, next);
     }
     if (item.type === "stress") {
       if (!prosody || prosody.stress[cursor] !== item.value) return null;
-      continue;
+      return walk(cursor, offset - 1, next);
     }
     if (item.type === "syllable") {
       if (!prosody || !prosody.boundaries.has(cursor)) return null;
-      continue;
+      return walk(cursor, offset - 1, next);
     }
     if (cursor <= floor) return null;
     if (domain === "adjacent") {
-      next = tokenMatcher(item, tokens[cursor - 1], context, next);
-      if (!next) return null;
-      cursor -= 1;
-      continue;
+      const matched = tokenMatcher(item, tokens[cursor - 1], context, next);
+      return matched ? walk(cursor - 1, offset - 1, matched) : null;
     }
-    // A widened domain lets the environment skip segments instead of
-    // requiring the very next one. Each atom still has to occur in order, so
-    // [αround] V _ requires a matching segment before the target, nearest
-    // first, and V then has to be further left again.
-    let found = -1;
+    // A widened domain lets the environment skip segments. Try matches nearest
+    // first, but on failure backtrack: the nearest token can bind an alpha
+    // variable to a value no later atom can share, while a further token can
+    // satisfy the whole side.
     for (let scan = cursor - 1; scan >= floor; scan -= 1) {
       const matched = tokenMatcher(item, tokens[scan], context, next);
-      if (matched) {
-        found = scan;
-        next = matched;
-        break;
-      }
+      if (!matched) continue;
+      const result = walk(scan, offset - 1, matched);
+      if (result) return result;
     }
-    if (found === -1) return null;
-    cursor = found;
-  }
-  return next;
+    return null;
+  };
+  return walk(index, pattern.length - 1, { ...bindings });
 }
 
 function matchesRight(
@@ -1455,44 +1446,36 @@ function matchesRight(
   limit = null,
   junctures = null
 ) {
-  let cursor = index;
-  let next = { ...bindings };
   const ceiling = limit === null ? tokens.length : Math.min(tokens.length, limit);
-  for (const item of pattern) {
+  const walk = (cursor, offset, next) => {
+    if (offset >= pattern.length) return next;
+    const item = pattern[offset];
     if (item.type === "boundary") {
-      if (item.value === "+") {
-        if (!junctures?.has(cursor)) return null;
-      } else if (cursor !== tokens.length) return null;
-      continue;
+      if (item.value === "+" ? !junctures?.has(cursor) : cursor !== tokens.length) return null;
+      return walk(cursor, offset + 1, next);
     }
     if (item.type === "stress") {
       if (!prosody || prosody.stress[cursor] !== item.value) return null;
-      continue;
+      return walk(cursor, offset + 1, next);
     }
     if (item.type === "syllable") {
       if (!prosody || !prosody.boundaries.has(cursor)) return null;
-      continue;
+      return walk(cursor, offset + 1, next);
     }
     if (cursor >= ceiling) return null;
     if (domain === "adjacent") {
-      next = tokenMatcher(item, tokens[cursor], context, next);
-      if (!next) return null;
-      cursor += 1;
-      continue;
+      const matched = tokenMatcher(item, tokens[cursor], context, next);
+      return matched ? walk(cursor + 1, offset + 1, matched) : null;
     }
-    let found = -1;
     for (let scan = cursor; scan < ceiling; scan += 1) {
       const matched = tokenMatcher(item, tokens[scan], context, next);
-      if (matched) {
-        found = scan;
-        next = matched;
-        break;
-      }
+      if (!matched) continue;
+      const result = walk(scan + 1, offset + 1, matched);
+      if (result) return result;
     }
-    if (found === -1) return null;
-    cursor = found + 1;
-  }
-  return next;
+    return null;
+  };
+  return walk(index, 0, { ...bindings });
 }
 
 function targetCandidates(atom, context) {
