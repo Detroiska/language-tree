@@ -1681,6 +1681,68 @@ equal(
   { keep: true }
 );
 
+/* ---- lexicon metadata ---------------------------------------------------- */
+
+const metaProject = ensureProject({
+  title: "Lexicon metadata",
+  languages: [
+    {
+      id: "meta",
+      name: "Meta",
+      vocabulary: [
+        {
+          id: "full",
+          gloss: "house",
+          form: "kasa",
+          pos: "  noun  ",
+          senses: ["dwelling", "household", "  dwelling  ", "", 7],
+          tags: ["  dwelling ", "architecture", "DWELLING"],
+          status: " attested ",
+          source: " Wiktionary ",
+          etymology: "  from *kas-  ",
+          futureWordMeta: { keep: true },
+        },
+        { id: "bare", gloss: "bare", form: "ba" },
+        {
+          id: "malformed",
+          gloss: "malformed",
+          form: "ma",
+          pos: 42,
+          senses: "not an array",
+          tags: null,
+        },
+      ],
+    },
+  ],
+});
+const metaWords = metaProject.languages[0].vocabulary;
+equal("a legacy word gains no metadata fields on load", Object.hasOwn(metaWords[1], "pos"), false);
+equal(
+  "a legacy word keeps only its original keys",
+  Object.keys(metaWords[1]).sort(),
+  ["form", "gloss", "id", "note"]
+);
+equal(
+  "metadata strings are trimmed",
+  [metaWords[0].pos, metaWords[0].status, metaWords[0].source, metaWords[0].etymology],
+  ["noun", "attested", "Wiktionary", "from *kas-"]
+);
+equal(
+  "senses drop blanks, non-strings and case-insensitive duplicates",
+  metaWords[0].senses,
+  ["dwelling", "household"]
+);
+equal("tags are de-duplicated case-insensitively", metaWords[0].tags, ["dwelling", "architecture"]);
+equal("unknown metadata-bearing keys survive normalization", metaWords[0].futureWordMeta, { keep: true });
+equal("malformed scalar metadata is coerced to a string", metaWords[2].pos, "42");
+equal("malformed list metadata becomes an empty array", [metaWords[2].senses, metaWords[2].tags], [[], []]);
+const metaAgain = ensureProject(JSON.parse(JSON.stringify(metaProject)));
+equal(
+  "metadata normalization is idempotent",
+  metaAgain.languages[0].vocabulary[0].senses,
+  ["dwelling", "household"]
+);
+
 /* ---- id normalization ---------------------------------------------------- */
 
 const hostileId = 'x" onmouseover="alert(1) t="';
@@ -4755,6 +4817,66 @@ truthy(
   "HTML report includes feature overrides",
   overrideHtml.includes("Feature overrides") && overrideHtml.includes(customSymbol)
 );
+
+const metaReportProject = {
+  title: "Meta report",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [
+        {
+          id: "m1",
+          gloss: "house",
+          form: "kasa",
+          note: "dwelling",
+          pos: "noun",
+          senses: ["dwelling", "household"],
+          tags: ["nature"],
+          status: "attested",
+          source: "Wiktionary",
+          etymology: "from *kas-",
+        },
+      ],
+    },
+  ],
+};
+const metaReportMarkdown = buildMarkdown(metaReportProject);
+truthy(
+  "report adds metadata columns when fields are used",
+  metaReportMarkdown.includes("| Gloss | Form | POS | Senses | Tags | Status | Source | Etymology | Note |")
+);
+truthy(
+  "report writes list metadata as readable cells",
+  metaReportMarkdown.includes("dwelling; household") && metaReportMarkdown.includes("nature")
+);
+truthy(
+  "a report without metadata keeps its original vocabulary columns",
+  allophonyMarkdown.includes("| Gloss | Form | Surface | Note |")
+);
+const metaReportHtml = buildHtml(metaReportProject);
+truthy(
+  "HTML report includes metadata columns and values",
+  metaReportHtml.includes("<th>POS</th>") && metaReportHtml.includes("from *kas-")
+);
+truthy(
+  "HTML report does not style metadata cells as IPA",
+  !metaReportHtml.includes('<td class="form">noun</td>')
+);
+const hostileMetaReport = buildHtml({
+  ...metaReportProject,
+  languages: [
+    {
+      ...metaReportProject.languages[0],
+      vocabulary: [{ ...metaReportProject.languages[0].vocabulary[0], source: '<img src=x onerror="alert(1)">' }],
+    },
+  ],
+});
+truthy("HTML report escapes metadata text", hostileMetaReport.includes("&lt;img src=x") && !hostileMetaReport.includes("<img src=x"));
 
 /* ---- segment diff -------------------------------------------------------- */
 

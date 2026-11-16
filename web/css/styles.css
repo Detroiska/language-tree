@@ -4695,6 +4695,112 @@ th:hover > .axis-menu,
   text-align: center;
 }
 
+/* Word metadata: compact badges in the gloss cell and an expandable detail row
+   beneath the word. The detail row only wraps inputs; it stores nothing. */
+.word-meta-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.word-meta-badge {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 8.5px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.word-pos-badge {
+  border-color: rgba(39, 103, 89, 0.3);
+  color: var(--accent);
+}
+
+[data-detail-toggle].is-active .icon {
+  transform: rotate(180deg);
+}
+
+.word-detail-row > td {
+  padding: 0 18px 14px;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.word-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.word-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+}
+
+.word-detail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.word-detail-field > span,
+.word-detail-list-title {
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.word-detail-textarea {
+  height: auto;
+  min-height: 42px;
+  padding: 5px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.word-detail-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.word-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.word-detail-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.word-detail-list-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.word-detail-list-item .table-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* The lexicon is the one table that grows without bound, so it scrolls
    inside the panel with its header pinned. The th background is already
    opaque (var(--surface-soft)); sticky just lifts it above the rows. */

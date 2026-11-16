@@ -1,4 +1,5 @@
 import { normalizeGloss } from "./gloss.js";
+import { normalizeWordMeta } from "./lexicon.js";
 import { uid } from "./model.js";
 import { stripLevelMarks, stripStressMarks } from "./notation.js";
 import {
@@ -16,6 +17,26 @@ import { normalizeWordStress, stressMarksFromForm } from "./prosody.js";
 
 const HEADER_WORDS = new Set(["gloss", "glosses", "meaning", "meanings"]);
 const FORM_HEADER_WORDS = new Set(["form", "forms", "ipa", "word", "words", "surface"]);
+const NOTE_HEADER_WORDS = new Set(["note", "notes"]);
+// Scalar metadata travels in TSV; list fields (senses, tags) round-trip only
+// in JSON, where their structure survives exactly.
+const SCALAR_META_FIELDS = ["pos", "status", "source", "etymology"];
+const META_FIELDS = [...SCALAR_META_FIELDS, "senses", "tags"];
+const META_HEADER_WORDS = {
+  pos: new Set(["pos", "part of speech"]),
+  status: new Set(["status"]),
+  source: new Set(["source"]),
+  etymology: new Set(["etymology", "etym"]),
+};
+
+function metaFrom(entry) {
+  const normalized = normalizeWordMeta(entry);
+  const meta = {};
+  for (const field of META_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(normalized, field)) meta[field] = normalized[field];
+  }
+  return meta;
+}
 
 // Duplicate glosses can exist in an older project. applyWordList builds its
 // map by assignment, so the last matching word is the one an update changes;
@@ -158,6 +179,7 @@ function rowFromJsonEntry(entry, index) {
   const parsed = formAndStress(entry.form ?? entry.ipa ?? "");
   const note = String(entry.note ?? "").trim();
   return {
+    ...metaFrom(entry),
     gloss,
     form: parsed.form,
     stress: normalizeWordStress(entry.stress) || parsed.stress,
@@ -238,16 +260,53 @@ export function parseWordList(text) {
   // row whose gloss happens to be "form" is not eaten as a header.
   let headerSkipped = false;
   let formFirst = false;
+  let headerColumns = null;
   if (tableRows.length) {
     const first = tableRows[0].cells.map((cell) => cell.trim().toLowerCase());
     if (HEADER_WORDS.has(first[0])) {
       headerSkipped = true;
+      headerColumns = first;
       tableRows.shift();
     } else if (first[0] && FORM_HEADER_WORDS.has(first[0]) && first[1] && HEADER_WORDS.has(first[1])) {
       headerSkipped = true;
       formFirst = true;
+      headerColumns = first;
       tableRows.shift();
     }
+  }
+
+  // With a named header, columns can be matched by name so the extended export
+  // (gloss, form, note, pos, status, source, etymology) imports correctly while
+  // a legacy three-column table keeps its old positional reading.
+  let columnMap = null;
+  if (headerColumns) {
+    const named = (words) => headerColumns.findIndex((column) => words.includes(column));
+    columnMap = {
+      gloss: named([...HEADER_WORDS]),
+      form: named([...FORM_HEADER_WORDS]),
+      note: named([...NOTE_HEADER_WORDS]),
+      pos: named([...META_HEADER_WORDS.pos]),
+      status: named([...META_HEADER_WORDS.status]),
+      source: named([...META_HEADER_WORDS.source]),
+      etymology: named([...META_HEADER_WORDS.etymology]),
+    };
+  }
+  const hasMetaHeader = columnMap
+    ? ["pos", "status", "source", "etymology"].some((field) => columnMap[field] >= 0)
+    : false;
+  // A header may name only some columns ("gloss" alone, or "gloss,meaning").
+  // Keep the old positional reading for unnamed columns so a partial header
+  // never silently imports a form-less draft.
+  let resolvedGlossIndex = null;
+  let resolvedFormIndex = null;
+  if (columnMap) {
+    const namedIndices = new Set(Object.values(columnMap).filter((index) => index >= 0));
+    const width = tableRows.reduce((max, row) => Math.max(max, row.cells.length), 0);
+    resolvedFormIndex =
+      columnMap.form >= 0
+        ? columnMap.form
+        : Array.from({ length: width }, (_, index) => index).find((index) => !namedIndices.has(index)) ?? -1;
+    resolvedGlossIndex = columnMap.gloss >= 0 ? columnMap.gloss : resolvedFormIndex === 0 ? 1 : 0;
   }
 
   const rows = [];
@@ -255,6 +314,22 @@ export function parseWordList(text) {
     const [firstCell = "", secondCell = "", ...rest] = row.cells;
     let gloss = formFirst ? secondCell : firstCell;
     let parsed = formAndStress(formFirst ? firstCell : secondCell);
+    let note = rest.join(" ");
+    let meta = {};
+    if (columnMap) {
+      const cellAt = (index) => (index >= 0 ? row.cells[index] ?? "" : "");
+      gloss = cellAt(resolvedGlossIndex);
+      parsed = formAndStress(cellAt(resolvedFormIndex));
+      note = hasMetaHeader
+        ? cellAt(columnMap.note)
+        : row.cells.slice(Math.max(resolvedGlossIndex, resolvedFormIndex) + 1).join(" ");
+      meta = {
+        pos: cellAt(columnMap.pos),
+        status: cellAt(columnMap.status),
+        source: cellAt(columnMap.source),
+        etymology: cellAt(columnMap.etymology),
+      };
+    }
     // A paste of bracketed transcriptions ("[apa] father") is a form-first
     // two-column list without a header. Keep both fields and put the phonetic
     // form in the form column instead of importing the brackets as a gloss.
@@ -269,9 +344,16 @@ export function parseWordList(text) {
       gloss = secondCell;
       parsed = formAndStress(firstCell);
     }
-    const note = rest.join(" ");
     if (!gloss && !parsed.form) continue; // stray separators
-    rows.push({ gloss, form: parsed.form, stress: parsed.stress, note, index: row.line, warning: "" });
+    rows.push({
+      ...meta,
+      gloss,
+      form: parsed.form,
+      stress: parsed.stress,
+      note,
+      index: row.line,
+      warning: "",
+    });
   }
 
   if (!rows.length && (headerSkipped || tableRows.length)) {
@@ -295,6 +377,18 @@ export function rowStatus(row, language, mode) {
     };
   }
   return { status: "skip", reason: "A word with this gloss already exists — it is kept as-is." };
+}
+
+// Metadata present in a row updates the word; metadata a row omits (or leaves
+// blank in a TSV cell) is left untouched, so importing a form list never
+// wipes senses or etymology already recorded in the lexicon.
+function applyMeta(target, row) {
+  for (const field of META_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(row, field)) continue;
+    const value = row[field];
+    if (Array.isArray(value)) target[field] = [...value];
+    else if (String(value ?? "").trim()) target[field] = String(value).trim();
+  }
 }
 
 // Applies the parsed rows and returns a summary. One touch() after this
@@ -339,11 +433,13 @@ export function applyWordList(language, rows, mode) {
       }
       if (row.form) existing.form = row.form;
       if (row.note) existing.note = row.note;
+      applyMeta(existing, row);
       existing.gloss = row.gloss;
       summary.updated += 1;
       continue;
     }
     const word = { id: uid("word"), gloss: row.gloss, form: row.form, note: row.note };
+    applyMeta(word, row);
     if (stress) word.stress = stress;
     language.vocabulary.push(word);
     byGloss.set(normalizeGloss(row.gloss), word);
@@ -374,10 +470,19 @@ function tsvField(value) {
 // reads, so a TSV round-trip keeps stress without adding a fourth column.
 export function toTsv(words, language = null) {
   const checker = language ? createPhonotacticsChecker(language) : null;
-  const lines = ["gloss\tform\tnote"];
+  // The extra columns appear only when the lexicon uses them, so a plain
+  // project's export stays byte-identical to the old three-column format.
+  const hasMeta = words.some((word) =>
+    SCALAR_META_FIELDS.some((field) => String(word?.[field] ?? "").trim())
+  );
+  const lines = [["gloss", "form", "note", ...(hasMeta ? SCALAR_META_FIELDS : [])].join("\t")];
   for (const word of words) {
     const form = checker && word.stress ? stressMarkedForm(word.form, checker, word.stress) || word.form : word.form;
-    lines.push([tsvField(word.gloss), tsvField(form), tsvField(word.note)].join("\t"));
+    const cells = [tsvField(word.gloss), tsvField(form), tsvField(word.note)];
+    if (hasMeta) {
+      for (const field of SCALAR_META_FIELDS) cells.push(tsvField(word[field]));
+    }
+    lines.push(cells.join("\t"));
   }
   return lines.join("\n");
 }
@@ -387,6 +492,12 @@ export function toJson(words, language = null) {
   return JSON.stringify(
     words.map((word) => {
       const entry = { gloss: word.gloss, form: word.form, note: word.note };
+      for (const field of META_FIELDS) {
+        if (!Object.prototype.hasOwnProperty.call(word, field)) continue;
+        const value = word[field];
+        if (Array.isArray(value)) entry[field] = value;
+        else if (String(value ?? "").trim()) entry[field] = String(value).trim();
+      }
       const stress = checker
         ? pruneWordStressForForm(word.form, checker, word.stress)
         : normalizeWordStress(word.stress);

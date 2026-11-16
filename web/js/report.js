@@ -14,6 +14,7 @@ import { allophoneTable, hasSurfaceDisplay, surfaceForForm } from "./phonology.j
 import { normalizeStressScope, stressLabel } from "./prosody.js";
 import { describeBundle } from "./features.js";
 import { formatPhonemic, formatPhonetic } from "./notation.js";
+import { formatMetaCell, lexiconColumns } from "./lexicon.js";
 import { createPhonotacticsChecker, phonemicFormForWord } from "./phonotacticsCheck.js";
 import { esc } from "./escape.js";
 import { normalizeGloss } from "./gloss.js";
@@ -152,13 +153,25 @@ function allophonyRows(project, language) {
 function vocabularyTable(project, language) {
   const hasSurface = hasSurfaceDisplay(language);
   const checker = createPhonotacticsChecker(language);
+  // Metadata columns appear only for fields the lexicon actually uses, so an
+  // older project's report keeps its original shape.
+  const columns = lexiconColumns(language.vocabulary);
   return {
-    headers: hasSurface ? ["Gloss", "Form", "Surface", "Note"] : ["Gloss", "Form", "Note"],
+    headers: [
+      "Gloss",
+      "Form",
+      ...(hasSurface ? ["Surface"] : []),
+      ...columns.map((column) => column.label),
+      "Note",
+    ],
+    // Only the IPA columns get monospaced form styling in the HTML report.
+    formColumns: hasSurface ? [1, 2] : [1],
     rows: language.vocabulary.map((word) => {
       const row = [word.gloss, formatPhonemic(phonemicFormForWord(word, checker))];
       if (hasSurface) {
         row.push(formatPhonetic(surfaceOf(project, language, word.form, word.gloss, word.stress)));
       }
+      for (const column of columns) row.push(formatMetaCell(word, column.field));
       row.push(word.note);
       return row;
     }),
@@ -388,9 +401,7 @@ function htmlLanguageSection(project, language, index) {
 
   const vocab = vocabularyTable(project, language);
   const vocabHtml = language.vocabulary.length
-    ? htmlTable(vocab.headers, vocab.rows, {
-        formColumns: vocab.headers.map((header, index) => (header === "Gloss" || header === "Note" ? -1 : index)).filter((index) => index >= 0),
-      })
+    ? htmlTable(vocab.headers, vocab.rows, { formColumns: vocab.formColumns })
     : `<p class="report-empty">No words recorded.</p>`;
 
   return `
