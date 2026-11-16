@@ -55,7 +55,7 @@ const state = {
 
 function isTarget(element) {
   return (
-    element instanceof HTMLInputElement &&
+    (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
     element.isConnected &&
     !element.disabled &&
     !element.readOnly &&

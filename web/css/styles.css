@@ -2398,11 +2398,28 @@ a.lineage-chip:hover {
 .ipa-input {
   font-family: var(--font-ipa);
   font-size: 15px;
-  /* IPA leans on combining marks: the "m b" tie (U+035C) reaches ~0.45em below
-     the baseline and overline marks reach ~0.7em above it. Single-line inputs
-     clip ink that passes the content box, so give these inputs vertical room
-     (rule of thumb: content height ≈ 2×font-size) instead of the default. */
-  height: 38px;
+}
+
+/* IPA fields are one-row textareas, not single-line inputs. Chromium's input
+   editor clips above-baseline ties (t͡ɬ) to the content box and drops
+   below-baseline ties (a͜i, m͜b) entirely; a textarea paints both. Keep it from
+   growing or wrapping so it still behaves like a single-line field. */
+textarea.ipa-input {
+  display: block;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  overflow-wrap: normal;
+  line-height: 1.5;
+  height: 42px;
+}
+
+textarea.table-input.ipa-input {
+  padding: 6px 5px;
+}
+
+textarea.input.ipa-input {
+  padding: 6px 10px;
 }
 
 .select {
@@ -4598,8 +4615,6 @@ th:hover > .axis-menu,
 
 .table-input {
   width: 100%;
-  /* 34px instead of 29px: IPA word forms carry combining marks (m͜b reaches
-     0.44em below the baseline) and inputs clip below-baseline ink without it. */
   height: 34px;
   padding: 0 5px;
   color: var(--ink);
@@ -4731,7 +4746,9 @@ th:hover > .axis-menu,
 }
 
 .surface-preview-wrap {
-  padding: 0 6px;
+  /* A little headroom so an above-baseline tie in the preview does not touch
+     the stress picker in the row above. */
+  padding: 3px 6px 0;
 }
 
 .surface-preview-wrap:empty {
@@ -4739,7 +4756,7 @@ th:hover > .axis-menu,
 }
 
 .phonemic-preview-wrap {
-  padding: 0 6px;
+  padding: 3px 6px 0;
 }
 
 .phonemic-preview-wrap:empty {

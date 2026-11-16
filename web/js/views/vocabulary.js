@@ -490,7 +490,7 @@ export function renderVocabulary(container, ctx) {
           <td class="word-form">
             <span class="level-input-wrap">
               <span class="level-mark" aria-hidden="true">/</span>
-              <input class="table-input ipa-input" data-word-field="form" value="${esc(word.form)}" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form (phonemic)">
+              <textarea class="table-input ipa-input" data-word-field="form" rows="1" wrap="off" placeholder="IPA form" autocomplete="off" spellcheck="false" aria-label="Word form (phonemic)">${esc(word.form)}</textarea>
               <span class="level-mark" aria-hidden="true">/</span>
             </span>
             <div class="word-stress-wrap" data-word-stress-wrap>${stressSelectMarkup(word, result, checker)}</div>
