@@ -150,6 +150,21 @@ export function parseClassRef(text, index) {
       return failed(source, `The ${chart} chart has no axis label “${key}” (from “${source}”).`);
     }
   }
+  // Without a pin every chart that mentions a label contributes its own
+  // slice. With several labels that would union unrelated slices — e.g.
+  // plosive.front would gather the plosives and the front vowels even though
+  // no sound is both. Require one chart to carry every label instead.
+  if (!chart && labels.length > 1) {
+    const together = (index_.charts || []).some((entry) =>
+      labels.every((key) => entry.axisKeys.row.has(key) || entry.axisKeys.col.has(key))
+    );
+    if (!together) {
+      return failed(
+        source,
+        `No single chart carries all the labels of “${source}”; pin a chart (C. or V.) or use labels from one chart.`
+      );
+    }
+  }
   return { ok: true, chart, labels, source };
 }
 

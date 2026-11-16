@@ -128,7 +128,13 @@ import {
 } from "../web/js/cognateData.js";
 import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } from "../web/js/reconstruction.js";
 import { subgroupingEvidence } from "../web/js/subgrouping.js";
-import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
+import {
+  buildClassIndex,
+  classForText,
+  filterSuggestions,
+  matchesQuery,
+  suggestQuery,
+} from "../web/js/naturalclasses.js";
 import { applyWordList, rowStatus } from "../web/js/bulk.js";
 import { newLibraryRules, normalizeLibraryNotation, soundChangeLibrary } from "../web/js/soundlaws.js";
 import { ipaToXSampa, xSampaToIPA } from "../web/js/xsampa.js";
@@ -398,6 +404,15 @@ equal("insertion respects its environment", apply("∅ > ʔ / V _ V", "apa"), { 
 equal("chart class plosive.velar", apply("plosive.velar > ∅ / _ #", "tak"), { out: "ta" });
 equal("chart class back vowels", apply("back > a / _ #", "ku"), { out: "ka" });
 equal("class in environment", apply("t > k / _ back", "tu"), { out: "ku" });
+// A class whose labels live on different charts previously unioned the two
+// unrelated slices (plosive.front matched t, k and the front vowel i).
+const acrossCharts = classForText("plosive.front", ctx.classIndex);
+truthy("an unpinned class cannot span two charts", !acrossCharts.ok);
+truthy(
+  "a cross-chart class names the problem",
+  /single chart|pin a chart/i.test(acrossCharts.error || "")
+);
+equal("a same-chart class still resolves", classForText("plosive.velar", ctx.classIndex).members, ["k"]);
 const brokenClass = compileRule("t > k / _ nosuch.label", ctx);
 truthy("broken dotted class fails loudly", !brokenClass.ok && /No chart row or column/.test(brokenClass.error));
 const bareUnknown = compileRule("t > k / _ nosuchlabel", ctx);
