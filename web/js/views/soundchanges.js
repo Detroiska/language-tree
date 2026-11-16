@@ -105,7 +105,9 @@ function directDerivation(ctx, form, gloss = "", optionalRuleIds = [], wordStres
 function statusFor(rule, context) {
   // A warning keeps the rule usable — the user may be mid-edit — while making
   // an inert rule (for example compact “CV > x” letter literals) visible.
-  return ruleStatusFor(rule, (notation) => compileRule(notation, context));
+  return ruleStatusFor(rule, (notation) =>
+    compileRule(notation, context, { allowStressChange: true })
+  );
 }
 
 function exceptionsMarkup(rule) {
@@ -432,6 +434,8 @@ function notationHelpMarkup() {
           <li><code>V &gt; [αround] / [αround] _</code><span>Spread rounding rightward; α is bound by the segment on the left.</span></li>
           <li><code>C V &gt; V C</code><span>Metathesis: an output word that names a class echoes the segment the input matched, so each pair swaps.</span></li>
           <li><code>V &gt; Vː / _ #</code><span>Lengthen final vowels — an echo may carry a glued diacritic, and the copy stays one token.</span></li>
+          <li><code>ˈa b &gt; a ˈb</code><span>Move primary stress from the first syllable to the second. An input mark requires that stress; an output mark assigns it.</span></li>
+          <li><code>b &gt; ˌb</code><span>Give b’s syllable secondary stress; <code>ˈa &gt; a</code> clears a primary mark.</span></li>
         </ul>
         <dl class="help-terms">
           <div><dt>V, C</dt><dd>Any vowel or consonant in the language’s inventory.</dd></div>
@@ -444,6 +448,7 @@ function notationHelpMarkup() {
           <div><dt>#</dt><dd>Word boundary in an environment.</dd></div>
           <div><dt>_</dt><dd>Marks where the input sits in the environment.</dd></div>
           <div><dt>∅, 0</dt><dd>Zero: deletion on the output side, insertion on the input side.</dd></div>
+          <div><dt>ˈ, ˌ</dt><dd>On the input side, require the following segment to carry that stress. On the output side, assign that stress to the following segment, so one rule can move a mark. A mark needs a following segment, and a rule can assign primary stress only once. Input marks need phonemic scope; output marks still write the field but stay hidden in /…/ outside it.</dd></div>
         </dl>
         <p class="help-foot">Precedence inside brackets is literal sound, then category, then chart class, then feature bundle. A bracketed output that contains signs is a feature change, not a surface symbol: it is applied as a delta to the matched segment and must resolve to a sound in the current chart, or the rule stops with a suggestion. Sound changes never synthesize off-chart surface symbols; an α-rule is total, so if a trigger binds a value the target cannot realize (for example <code>n &gt; [αplace] / _ [αplace]</code> before glottal <code>h</code>), the derivation stops — restrict the trigger set when that can happen. Outputs may also echo matched segments (see above) to reorder and copy them; insertions still need concrete sounds, since there is nothing to copy. Top-level rules are all checked against the form inherited from the parent, so their order does not change whether they apply. Dotted rules run after that pass, in order, against the changed form. Within one rule, matches are found left to right. Forms are read as IPA, using the sounds in the ancestry’s charts, and chart classes resolve against every chart in that ancestry. Categories are read from this language’s Phonotactics tab.</p>
       </div>
