@@ -304,6 +304,20 @@ equal(
   });
 }
 {
+  const row = parseWordList("flour\tmuˈ").rows[0];
+  equal("a trailing inline mark imports instead of being dropped", [row.form, row.stress], [
+    "mu",
+    { primary: 0, secondary: [] },
+  ]);
+}
+{
+  const row = parseWordList("flour\tkaiˈa").rows[0];
+  equal("an inline mark before a hiatus vowel imports its syllable index", row.stress, {
+    primary: 2,
+    secondary: [],
+  });
+}
+{
   const lang = stressLanguage();
   applyWordList(
     lang,

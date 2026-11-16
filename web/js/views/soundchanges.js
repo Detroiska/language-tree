@@ -56,6 +56,15 @@ const testerOptionalMemory = new Map();
 // The inherited check can either follow the primary path or include every
 // optional rule; the choice is remembered per language.
 const checkOptionalMemory = new Map();
+// The check's filter and page survive structural re-renders (rule toggles,
+// deletes, add-child), just as they do in the phonotactics check.
+const checkViewMemory = new Map();
+function rememberCheckView(languageId) {
+  if (!checkViewMemory.has(languageId)) {
+    checkViewMemory.set(languageId, { status: "all", page: 1 });
+  }
+  return checkViewMemory.get(languageId);
+}
 // The reconstruction field is remembered for the same reason. The value is
 // `{ form, gloss }` so a selected vocabulary item keeps its gloss across
 // re-renders and the parent-lexicon check can use it.
@@ -566,7 +575,7 @@ function openRuleLibrary(language, ctx) {
   });
 }
 
-function inheritedPanelMarkup(ctx, optionalRules = []) {
+function inheritedPanelMarkup(ctx, optionalRules = [], status = "all") {
   const includeOptional = checkOptionalMemory.get(ctx.language.id) === true;
   return `
     <section class="panel inherited-panel" data-inherited-panel>
@@ -577,12 +586,19 @@ function inheritedPanelMarkup(ctx, optionalRules = []) {
         </div>
         <div class="panel-actions check-toolbar">
           <select class="select check-status-filter" data-check-status aria-label="Filter inherited words by status">
-            <option value="all">All words</option>
-            <option value="attention">Needs attention</option>
-            <option value="differs">Differs</option>
-            <option value="missing">Missing</option>
-            <option value="error">Rule errors</option>
-            <option value="match">Matches</option>
+            ${[
+              ["all", "All words"],
+              ["attention", "Needs attention"],
+              ["differs", "Differs"],
+              ["missing", "Missing"],
+              ["error", "Rule errors"],
+              ["match", "Matches"],
+            ]
+              .map(
+                ([value, label]) =>
+                  `<option value="${value}" ${value === status ? "selected" : ""}>${label}</option>`
+              )
+              .join("")}
           </select>
           ${optionalRules.length ? `<label class="rule-option check-optional-toggle" title="Include every optional sound change in this comparison"><input type="checkbox" data-check-optional ${includeOptional ? "checked" : ""}>Include optional changes (${optionalRules.length})</label>` : ""}
           <span class="check-summary" data-check-summary></span>
@@ -817,6 +833,9 @@ function lineageMarkup(ctx) {
 
 export function renderChanges(container, ctx, activeTool = "rules") {
   const language = ctx.language;
+  const checkView = rememberCheckView(language.id);
+  let checkStatus = checkView.status;
+  let checkPage = checkView.page;
   const context = contextForLanguage(ctx.project, language.id);
   const parent = ancestorsOf(ctx.project, language.id).at(-1);
   const stats = languageStats(language);
@@ -875,7 +894,7 @@ export function renderChanges(container, ctx, activeTool = "rules") {
       </section>
 
       <section class="tool-panel" ${toolPanelAttrs("changes", "check", activeTool)}>
-        ${inheritedPanelMarkup(ctx, directOptionalRules)}
+        ${inheritedPanelMarkup(ctx, directOptionalRules, checkStatus)}
       </section>
     </div>
   `;
@@ -894,8 +913,6 @@ export function renderChanges(container, ctx, activeTool = "rules") {
         ? ""
         : defaultTestWord?.gloss || "";
   let includeOptional = checkOptionalMemory.get(language.id) === true;
-  let checkStatus = "all";
-  let checkPage = 1;
   const optionalIdsForCheck = () => (includeOptional ? directOptionalRules.map((rule) => rule.id) : []);
   let testOptional = new Set(
     [...(testerOptionalMemory.get(language.id) || [])].filter((id) =>
@@ -972,6 +989,7 @@ export function renderChanges(container, ctx, activeTool = "rules") {
     // A rule edit can shrink the filtered list under the current page; keep
     // the view on the nearest valid page instead of showing an empty table.
     checkPage = data.paging.page;
+    checkView.page = checkPage;
     checkBody.innerHTML = data.html;
     if (checkSummary) checkSummary.textContent = data.summary;
   };
@@ -1072,12 +1090,15 @@ export function renderChanges(container, ctx, activeTool = "rules") {
     includeOptional = event.target.checked;
     checkOptionalMemory.set(language.id, includeOptional);
     checkPage = 1;
+    checkView.page = checkPage;
     refreshCheck();
   });
 
   checkPanel?.querySelector("[data-check-status]")?.addEventListener("change", (event) => {
     checkStatus = event.target.value;
     checkPage = 1;
+    checkView.status = checkStatus;
+    checkView.page = checkPage;
     refreshCheck();
   });
 
@@ -1294,6 +1315,7 @@ export function renderChanges(container, ctx, activeTool = "rules") {
       if (pageButton) {
         const action = pageButton.dataset.pagerAction;
         checkPage = Number(pageButton.dataset.pagerPage);
+        checkView.page = checkPage;
         refreshCheck();
         focusPager(checkBody, action);
         return;

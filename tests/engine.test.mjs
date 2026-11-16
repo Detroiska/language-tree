@@ -128,7 +128,7 @@ import {
 } from "../web/js/cognateData.js";
 import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } from "../web/js/reconstruction.js";
 import { subgroupingEvidence } from "../web/js/subgrouping.js";
-import { filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
+import { classForText, filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
 import { applyWordList, rowStatus } from "../web/js/bulk.js";
 import { newLibraryRules, normalizeLibraryNotation, soundChangeLibrary } from "../web/js/soundlaws.js";
 import { ipaToXSampa, xSampaToIPA } from "../web/js/xsampa.js";
@@ -398,6 +398,15 @@ equal("insertion respects its environment", apply("∅ > ʔ / V _ V", "apa"), { 
 equal("chart class plosive.velar", apply("plosive.velar > ∅ / _ #", "tak"), { out: "ta" });
 equal("chart class back vowels", apply("back > a / _ #", "ku"), { out: "ka" });
 equal("class in environment", apply("t > k / _ back", "tu"), { out: "ku" });
+// A class whose labels live on different charts previously unioned the two
+// unrelated slices (plosive.front matched t, k and the front vowel i).
+const acrossCharts = classForText("plosive.front", ctx.classIndex);
+truthy("an unpinned class cannot span two charts", !acrossCharts.ok);
+truthy(
+  "a cross-chart class names the problem",
+  /single chart|pin a chart/i.test(acrossCharts.error || "")
+);
+equal("a same-chart class still resolves", classForText("plosive.velar", ctx.classIndex).members, ["k"]);
 const brokenClass = compileRule("t > k / _ nosuch.label", ctx);
 truthy("broken dotted class fails loudly", !brokenClass.ok && /No chart row or column/.test(brokenClass.error));
 const bareUnknown = compileRule("t > k / _ nosuchlabel", ctx);
@@ -1709,6 +1718,48 @@ truthy(
 equal("parent links follow a regenerated id", fineId.parentId, craftedId.id);
 truthy("duplicate ids get a fresh id", duplicateId.id !== "ok" && duplicateId.id !== craftedId.id);
 
+// Chart axis ids are file-sourced too. An id containing the composite-cell
+// separator must be repaired, and the cell it anchors must follow the new id
+// instead of being silently dropped during migration.
+const hostileAxisProject = ensureProject({
+  title: "Chart ids",
+  languages: [
+    {
+      id: "a",
+      name: "A",
+      inventory: {
+        consonants: {
+          rows: [{ id: "r|1", label: "Plosive", children: [] }],
+          columns: [{ id: "c1", label: "Alveolar", children: [] }],
+          cells: { "r|1|c1": ["p"] },
+        },
+        vowels: { rows: [], columns: [], cells: {} },
+      },
+    },
+  ],
+});
+const repairedAxis = hostileAxisProject.languages[0].inventory.consonants;
+truthy(
+  "an unsafe chart axis id is regenerated",
+  repairedAxis.rows[0].id !== "r|1" && /^[A-Za-z0-9_-]+$/.test(repairedAxis.rows[0].id)
+);
+equal("cells follow a repaired axis id instead of being dropped", repairedAxis.cells, {
+  [`${repairedAxis.rows[0].id}|c1`]: ["p"],
+});
+
+// The same slug rule applies to allophony rule ids: they also reach selectors
+// and attributes, so a crafted id must not survive a load/save round-trip.
+const unsafeAlloId = 'a" onmouseover="alert(1) t="';
+const alloIdProject = ensureProject({
+  title: "Allophony ids",
+  languages: [{ id: "a", name: "A", allophony: [{ id: unsafeAlloId, notation: "p > pʰ / # _ V" }] }],
+});
+const alloId = alloIdProject.languages[0].allophony[0].id;
+truthy(
+  "an unsafe allophony id is regenerated",
+  alloId !== unsafeAlloId && /^[A-Za-z0-9_-]+$/.test(alloId)
+);
+
 const repairedCycleProject = ensureProject({
   title: "Cycle repair",
   languages: [
@@ -2009,6 +2060,24 @@ equal("legacy marks keep a single primary", stressMarksFromForm("ˈkaˈsa"), {
   secondary: [],
 });
 equal("a form without marks has no stress field", stressMarksFromForm("kasa"), null);
+// Marks at the end of a form or before a vowel inside a vowel run were
+// silently dropped: record() only ran when a new (unmarked) nucleus began.
+equal("a trailing primary mark migrates to the last syllable", stressMarksFromForm("kaˈ"), {
+  primary: 0,
+  secondary: [],
+});
+equal("a trailing secondary mark migrates", stressMarksFromForm("kaˌ"), {
+  primary: null,
+  secondary: [0],
+});
+equal("a mark before a vowel in a hiatus run migrates", stressMarksFromForm("kaiˈa"), {
+  primary: 2,
+  secondary: [],
+});
+equal("a mark before the second vowel of a run migrates", stressMarksFromForm("kaˈia"), {
+  primary: 1,
+  secondary: [],
+});
 
 const twoSyllables = [
   { start: 0, end: 2 },
@@ -4233,6 +4302,32 @@ truthy(
 
 const unboundAlpha = compileRule("n > [αplace]", featureCtx);
 truthy("an unbound alpha variable is rejected", !unboundAlpha.ok && /not bound/.test(unboundAlpha.error));
+// A widened domain may skip segments, but the greedy nearest-first choice can
+// bind an alpha variable to a segment that leaves a later atom unsatisfied.
+// The matcher must backtrack to an assignment that satisfies the whole side.
+const widenedProject = ensureProject({
+  title: "Widened alpha",
+  languages: [
+    {
+      id: "a",
+      name: "A",
+      inventory: defaultInventory(),
+      allophony: [
+        { id: "r1", notation: "p > f / [αplace] [αplace] _", domain: "word", enabled: true },
+      ],
+    },
+  ],
+});
+const widenedCtx = contextForAllophony(widenedProject, "a");
+const widenedRules = compileAllophonyRules(widenedProject.languages[0].allophony, widenedCtx);
+const widenedApply = (form) =>
+  applyAllophony(widenedCtx.tokenize(form), widenedRules, widenedCtx).tokens.join("");
+equal("a widened domain still applies an adjacent alpha match", widenedApply("ttp"), "ttf");
+equal(
+  "a widened domain backtracks when the nearest alpha binding cannot satisfy the pattern",
+  widenedApply("ttkp"),
+  "ttkf"
+);
 const mixedFeature = compileRule("[+nasal p] > a", featureCtx);
 truthy(
   "a bracket cannot mix sounds and features",
@@ -5554,6 +5649,33 @@ equal("a chart-class name is a valid echo on both sides", apply("plosive.velar V
 equal("a glide tail glues onto the echoed vowel", apply("V > Vʷ / _ u", "katau"), {
   out: "kataʷu",
 });
+// Echo suffixes share the engine's segment-modifier set: velarization and
+// pharyngealization are as valid as aspiration or length.
+truthy("a velarization tail glues onto an echoed vowel", compileRule("V > Vˠ", ctx).ok);
+truthy("a pharyngealization tail glues onto an echoed vowel", compileRule("V > Vˤ", ctx).ok);
+// A category or chart-class word can begin with V or C; it is a named echo,
+// not a class echo with a stray letter suffix.
+const namedEchoCtx = contextForLanguage(
+  ensureProject({
+    title: "Named echoes",
+    languages: [
+      {
+        id: "a",
+        name: "A",
+        inventory,
+        phonotactics: { classes: [{ name: "COR", sounds: "t k" }] },
+      },
+    ],
+  }),
+  "a"
+);
+const namedEchoCompile = compileRule("COR V > V COR", namedEchoCtx);
+truthy("a category name beginning with C is a valid echo", namedEchoCompile.ok);
+truthy(
+  "a named C-class echo swaps with a vowel",
+  namedEchoCompile.ok &&
+    applyRule(namedEchoCtx.tokenize("ta"), namedEchoCompile.rule, namedEchoCtx).tokens.join("") === "at"
+);
 
 equal("echoing a class more often than it matches is rejected", !compileRule("C > C C", ctx).ok, true);
 truthy(

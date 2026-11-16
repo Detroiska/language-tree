@@ -186,17 +186,24 @@ export function projectFileName(title) {
   return `${slug || "untitled-project"}.json`;
 }
 
-function ensureAxisNode(node, kind, seen) {
+function ensureAxisNode(node, kind, seen, remap) {
   if (!node || typeof node !== "object" || Array.isArray(node)) return null;
-  if (typeof node.id === "number") node.id = String(node.id);
-  if (typeof node.id !== "string" || !node.id || seen.has(node.id)) {
-    node.id = uid(kind === "row" ? "row" : "col");
-  }
-  seen.add(node.id);
+  node.id = normalizeId(node.id, seen, kind === "row" ? "row" : "col", remap);
   if (typeof node.label !== "string" || !node.label.trim()) node.label = "Unnamed";
   if (!Array.isArray(node.children)) node.children = [];
-  node.children = node.children.map((child) => ensureAxisNode(child, kind, seen)).filter(Boolean);
+  node.children = node.children.map((child) => ensureAxisNode(child, kind, seen, remap)).filter(Boolean);
   return node;
+}
+
+// Groups and leaves can both anchor a cell, so capture every original id
+// before normalization rewrites them. Cell keys embed those ids verbatim.
+function nodeIdsOf(nodes, out = []) {
+  for (const node of nodes || []) {
+    if (!node || typeof node !== "object") continue;
+    if (typeof node.id === "string" || typeof node.id === "number") out.push(String(node.id));
+    if (Array.isArray(node.children)) nodeIdsOf(node.children, out);
+  }
+  return out;
 }
 
 function ensureChart(chart, fallbackFactory, kind) {
@@ -205,10 +212,36 @@ function ensureChart(chart, fallbackFactory, kind) {
   if (!Array.isArray(base.columns)) base.columns = fallbackFactory().columns;
   if (!base.cells || typeof base.cells !== "object" || Array.isArray(base.cells)) base.cells = {};
   if (typeof base.notes !== "string") base.notes = "";
+  const oldRowIds = nodeIdsOf(base.rows);
+  const oldColumnIds = nodeIdsOf(base.columns);
+  const rowRemap = new Map();
+  const colRemap = new Map();
   const seen = new Set();
-  base.rows = base.rows.map((node) => ensureAxisNode(node, "row", seen)).filter(Boolean);
+  base.rows = base.rows.map((node) => ensureAxisNode(node, "row", seen, rowRemap)).filter(Boolean);
   const colSeen = new Set();
-  base.columns = base.columns.map((node) => ensureAxisNode(node, "col", colSeen)).filter(Boolean);
+  base.columns = base.columns.map((node) => ensureAxisNode(node, "col", colSeen, colRemap)).filter(Boolean);
+  // Rebuild cell keys from the captured originals rather than splitting the
+  // stored key: an id containing the "|" separator (or any repaired id) must
+  // carry its phonemes to the new key instead of being dropped as malformed.
+  const oldKeys = new Map();
+  for (const oldRowId of oldRowIds) {
+    for (const oldColumnId of oldColumnIds) {
+      oldKeys.set(cellKey(oldRowId, oldColumnId), { oldRowId, oldColumnId });
+    }
+  }
+  const sourceCells = {};
+  // Walk the stored cells in their original order so a demo or hand-edited
+  // project with already-safe ids round-trips byte for byte.
+  for (const [key, value] of Object.entries(base.cells)) {
+    const ids = oldKeys.get(key);
+    if (!ids) continue;
+    sourceCells[
+      cellKey(
+        rowRemap.get(ids.oldRowId) || ids.oldRowId,
+        colRemap.get(ids.oldColumnId) || ids.oldColumnId
+      )
+    ] = value;
+  }
   // Cells belong to leaf intersections. Entries that point at a missing
   // row/column are dropped; entries that point at an interior group are
   // migrated to that group's leftmost leaf so hand-edited or legacy files do
@@ -230,7 +263,7 @@ function ensureChart(chart, fallbackFactory, kind) {
   // iterating its snapshot let a later leaf entry overwrite an earlier
   // interior-group merge, so the same document depended on JSON key order.
   const cells = {};
-  for (const [key, value] of Object.entries(base.cells)) {
+  for (const [key, value] of Object.entries(sourceCells)) {
     const { rowId, columnId } = splitCellKey(key);
     const rowTarget = rowAnchors.get(rowId);
     const columnTarget = columnAnchors.get(columnId);
@@ -329,7 +362,7 @@ function ensureAllophony(value) {
   const items = [];
   const seen = new Set();
   const uniqueId = (id, prefix) => {
-    let next = typeof id === "string" && id && !seen.has(id) ? id : uid(prefix);
+    let next = typeof id === "string" && SAFE_ID.test(id) && !seen.has(id) ? id : uid(prefix);
     while (seen.has(next)) next = uid(prefix);
     seen.add(next);
     return next;

@@ -154,6 +154,7 @@ export function stressMarksToIndices(form, vowelSymbols = []) {
   const vowelAt = (index) => vowels.find((symbol) => source.startsWith(symbol, index)) || "";
   let nuclei = 0;
   let inNucleus = false;
+  let nucleusVowels = 0;
   let pending = [];
   let primary = null;
   const secondary = [];
@@ -182,17 +183,28 @@ export function stressMarksToIndices(form, vowelSymbols = []) {
     }
     const vowel = vowelAt(index);
     if (vowel) {
-      if (!inNucleus) {
+      // A mark before a vowel puts that vowel at a syllable start. If the run
+      // already holds other vowels, its last vowel closes the previous
+      // syllable (hiatus), so count it before opening the marked one.
+      const marked = pending.length > 0;
+      if (inNucleus && marked && nucleusVowels > 1) nuclei += 1;
+      if (!inNucleus || marked) {
         nuclei += 1;
         inNucleus = true;
+        nucleusVowels = 1;
         record();
+      } else {
+        nucleusVowels += 1;
       }
       index += vowel.length;
       continue;
     }
     inNucleus = false;
+    nucleusVowels = 0;
     index += 1;
   }
+  // A mark at the end of the form still belongs to the latest nucleus.
+  record();
   if (primary === null && !secondary.length) return null;
   return normalizeWordStress({ primary, secondary });
 }
