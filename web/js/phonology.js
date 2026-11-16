@@ -1173,6 +1173,8 @@ function parsePattern(text, context, options = {}) {
     allowSet = true,
     allowVariables = true,
     allowProsody = false,
+    allowStress = allowProsody,
+    allowSyllable = allowProsody,
     allowEcho = false,
     role = "pattern",
   } = options;
@@ -1233,7 +1235,7 @@ function parsePattern(text, context, options = {}) {
       }
     }
     if (chunk === "ˈ" || chunk === "ˌ") {
-      if (!allowProsody) {
+      if (!allowStress) {
         return {
           ok: false,
           error: "Stress marks (ˈ, ˌ) only work in the environment, after “/”.",
@@ -1243,7 +1245,7 @@ function parsePattern(text, context, options = {}) {
       continue;
     }
     if (chunk === "." || chunk === "σ") {
-      if (!allowProsody) {
+      if (!allowSyllable) {
         return {
           ok: false,
           error: "Syllable edges (. or σ) only work in the environment, after “/”.",
@@ -1483,7 +1485,8 @@ function targetCandidates(atom, context) {
   return [];
 }
 
-export function compileRule(notation, context) {
+export function compileRule(notation, context, options = {}) {
+  const { allowStressChange = false } = options;
   const source = String(notation || "").trim();
   if (!source) return { ok: false, empty: true, error: "Empty rule." };
   const arrow = source.match(/→|->|>/);
@@ -1522,12 +1525,39 @@ export function compileRule(notation, context) {
   // a zero-width point in the environment instead of rewriting a segment.
   const warnings = [];
   const isInsertion = targetText === "∅" || targetText === "0";
-  const target = isInsertion ? { ok: true, pattern: [] } : parsePattern(targetText, context, { role: "input" });
+  const target = isInsertion
+    ? { ok: true, pattern: [] }
+    : parsePattern(targetText, context, {
+        role: "input",
+        allowStress: allowStressChange,
+        allowSyllable: false,
+      });
   if (!target.ok) return target;
   warnings.push(...(target.warnings || []));
 
+  // A stress mark on the input side is a condition on the segment that follows
+  // it. Pull those atoms out so the rest of the compiler still sees a pattern
+  // of segments only; `stressInput` is aligned with the cleaned target atoms.
+  const stressInput = [];
+  const cleanTarget = [];
+  let pendingInputStress = null;
+  for (const atom of target.pattern) {
+    if (atom.type === "stress") {
+      pendingInputStress = atom.value;
+      continue;
+    }
+    cleanTarget.push(atom);
+    stressInput.push(pendingInputStress);
+    pendingInputStress = null;
+  }
+  if (pendingInputStress) {
+    return { ok: false, error: "A stress mark on the input must be followed by a segment." };
+  }
+  target.pattern = cleanTarget;
+
   let replacement = [];
   let outputPattern = [];
+  const stressOutput = [];
   let featureOutput = null;
   let echoOutput = false;
   if (outputText && outputText !== "∅" && outputText !== "0") {
@@ -1537,9 +1567,29 @@ export function compileRule(notation, context) {
       allowSet: false,
       allowVariables: true,
       allowEcho: true,
+      allowStress: allowStressChange,
+      allowSyllable: false,
       role: "output",
     });
     if (!parsedOutput.ok) return parsedOutput;
+    const cleanOutput = [];
+    let pendingOutputStress = null;
+    for (const atom of parsedOutput.pattern) {
+      if (atom.type === "stress") {
+        pendingOutputStress = atom.value;
+        continue;
+      }
+      cleanOutput.push(atom);
+      stressOutput.push(pendingOutputStress);
+      pendingOutputStress = null;
+    }
+    if (pendingOutputStress) {
+      return { ok: false, error: "A stress mark on the output must be followed by a segment." };
+    }
+    if (stressOutput.filter((value) => value === "ˈ").length > 1) {
+      return { ok: false, error: "A rule can assign primary stress to only one output segment." };
+    }
+    parsedOutput.pattern = cleanOutput;
     const featureAtoms = parsedOutput.pattern.filter((item) => item.type === "feature");
     if (featureAtoms.length) {
       if (featureAtoms.length !== 1 || parsedOutput.pattern.length !== 1) {
@@ -1756,16 +1806,21 @@ export function compileRule(notation, context) {
 
   // Stress marks are inert when the language has no stress system. Warn once
   // instead of letting the rule look valid but never match.
-  if (left.some((atom) => atom.type === "stress") || right.some((atom) => atom.type === "stress")) {
+  if (
+    left.some((atom) => atom.type === "stress") ||
+    right.some((atom) => atom.type === "stress") ||
+    stressInput.some(Boolean) ||
+    stressOutput.some(Boolean)
+  ) {
     if ((context.stressSystem || "none") === "none") {
       warnings.push(
-        "This language has no stress system, so stress marks (ˈ, ˌ) cannot match. Choose one in Phonotactics → Stress."
+        "This language has no stress system, so stress marks (ˈ, ˌ) cannot match or assign stress. Choose one in Phonotactics → Stress."
       );
     } else if (!context.stressVisible) {
       // Allophony contexts keep stress visible even in phonetic scope, so this
       // warning belongs to sound changes only: there the mark is truly inert.
       warnings.push(
-        "Stress marks only match in phonemic scope. Set the scope to “Phonemic” in Phonotactics → Stress, or this rule will never see stress."
+        "Stress marks only match in phonemic scope. Set the scope to “Phonemic” in Phonotactics → Stress, or this rule will never see or write stress."
       );
     }
   }
@@ -1837,10 +1892,15 @@ export function compileRule(notation, context) {
       echoes,
       left,
       right,
+      stressInput,
+      stressOutput,
+      stressChange: stressInput.some(Boolean) || stressOutput.some(Boolean),
       environment: environment ? environment.trim() : "",
-      needsProsody: [...target.pattern, ...left, ...right].some(
-        (atom) => atom.type === "stress" || atom.type === "syllable"
-      ),
+      needsProsody:
+        stressInput.some(Boolean) ||
+        [...target.pattern, ...left, ...right].some(
+          (atom) => atom.type === "stress" || atom.type === "syllable"
+        ),
     },
   };
 }
@@ -1925,6 +1985,14 @@ function findRuleMatches(tokens, compiled, context, junctures = null, wordStress
   let index = 0;
   while (index < tokens.length) {
     let bindings = matchTarget(tokens, index, compiled.target, context);
+    if (
+      bindings &&
+      compiled.stressInput?.some(
+        (value, offset) => value && (!prosody || prosody.stress[index + offset] !== value)
+      )
+    ) {
+      bindings = null;
+    }
     if (!bindings) {
       index += 1;
       continue;
@@ -2160,6 +2228,38 @@ function dropEdgeJunctures(junctures, length) {
   return junctures;
 }
 
+// Apply the stress marks written on a rule's input and output sides. Input
+// marks clear the origin syllable they condition on; output marks assign the
+// origin of the segment they precede. Indices stay in source-syllable
+// coordinates, so the final remap projects them onto the daughter's syllables.
+function nextStressForChanges(wordStress, changes, origins) {
+  let primary = wordStress?.primary ?? null;
+  const secondary = new Set(wordStress?.secondary || []);
+  for (const change of changes) {
+    const rule = change.rule;
+    if (!rule?.stressChange) continue;
+    for (const [offset, mark] of (rule.stressInput || []).entries()) {
+      if (!mark) continue;
+      const sourceIndex = origins?.[change.start + offset];
+      if (sourceIndex == null) continue;
+      if (mark === "ˈ" && primary === sourceIndex) primary = null;
+      else if (mark === "ˌ") secondary.delete(sourceIndex);
+    }
+    for (const [offset, mark] of (rule.stressOutput || []).entries()) {
+      if (!mark) continue;
+      const sourceIndex = change.originLabels?.[offset];
+      if (sourceIndex == null) continue;
+      if (mark === "ˈ") {
+        primary = sourceIndex;
+        secondary.delete(sourceIndex);
+      } else {
+        secondary.add(sourceIndex);
+      }
+    }
+  }
+  return normalizeWordStress({ primary, secondary: [...secondary] });
+}
+
 // Give each output segment the syllable origin of the input segment it came
 // from. Echo outputs name that input explicitly; one-to-one rewrites keep the
 // matching position; insertions and untraceable rewrites carry no origin.
@@ -2187,6 +2287,7 @@ export function applyRule(tokens, compiled, context, junctures = null, wordStres
       tokens: [...tokens],
       junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
       origins: origins ? [...origins] : null,
+      stress: wordStress,
       changed: false,
     };
   }
@@ -2200,12 +2301,14 @@ export function applyRule(tokens, compiled, context, junctures = null, wordStres
         tokens: [...tokens],
         junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
         origins: origins ? [...origins] : null,
+        stress: wordStress,
         changed: false,
         error: resolved.error,
       };
     }
     changes.push({
       ...match,
+      rule: compiled,
       replacement: resolved.replacement,
       originLabels: originsForReplacement(tokens, match, compiled, resolved.replacement, origins),
     });
@@ -2231,6 +2334,7 @@ export function applyRule(tokens, compiled, context, junctures = null, wordStres
     tokens: output,
     junctures: outputJunctures,
     origins: origins ? outputOrigins : null,
+    stress: nextStressForChanges(wordStress, changes, origins),
     changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
   };
 }
@@ -2242,11 +2346,11 @@ export function compileRuleStages(rules, context) {
   return ruleGroups(rules).map((group) => ({
     rule: group.rule,
     label: numbers.get(group.rule.id),
-    compiled: compileRule(group.rule.notation, context),
+    compiled: compileRule(group.rule.notation, context, { allowStressChange: true }),
     children: group.children.map((child) => ({
       rule: child,
       label: numbers.get(child.id),
-      compiled: compileRule(child.notation, context),
+      compiled: compileRule(child.notation, context, { allowStressChange: true }),
     })),
   }));
 }
@@ -2353,6 +2457,7 @@ function applyParallel(
       return {
         ok: false,
         origins: origins ? [...origins] : null,
+        stress: wordStress,
         error: `Rules ${a.label} (“${a.rule.notation}”) and ${b.label} (“${b.rule.notation}”) both change overlapping parts of the ancestral form “${joinSegments(tokens, cuts)}”. Make one of them sequential or make the rules mutually exclusive.`,
         // Structured conflict for the tester's one-click fix: turning the
         // later-overlapping rule into a sequential child of the earlier one
@@ -2375,14 +2480,18 @@ function applyParallel(
       tokens: [...tokens],
       junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
       origins: origins ? [...origins] : null,
+      stress: wordStress,
       changed: false,
       entries,
     };
   }
   for (const change of changes) {
     const resolved = replacementForMatch(tokens, change, change.entry.group.compiled.rule, context);
-    if (!resolved.ok) return { ok: false, origins: origins ? [...origins] : null, error: resolved.error, entries };
+    if (!resolved.ok) {
+      return { ok: false, origins: origins ? [...origins] : null, stress: wordStress, error: resolved.error, entries };
+    }
     change.replacement = resolved.replacement;
+    change.rule = change.entry.group.compiled.rule;
     change.originLabels = originsForReplacement(
       tokens,
       change,
@@ -2411,6 +2520,7 @@ function applyParallel(
     tokens: output,
     junctures: outputJunctures,
     origins: origins ? outputOrigins : null,
+    stress: nextStressForChanges(wordStress, changes, origins),
     changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
     entries,
   };
@@ -2428,12 +2538,19 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
   // The source word's lexical stress travels with the derivation so rules in
   // phonemic scope can condition on it. Segment origins tracked below also let
   // the final form carry that stress onto the daughter's own syllables.
-  const wordStress = options.wordStress || null;
+  let currentStress = options.wordStress || null;
+  const hasStressRules = stages.some((stage) =>
+    (stage.groups || []).some(
+      (group) =>
+        group.compiled?.rule?.stressChange ||
+        (group.children || []).some((child) => child.compiled?.rule?.stressChange)
+    )
+  );
   // Label the input tokens with the source language's syllables only when a
-  // word actually carries stress. Most derivations have none, and a matrix can
-  // derive thousands of cells, so skip the extra prosody work in that case.
+  // word carries stress or a rule can write it. Most derivations have neither,
+  // and a matrix can derive thousands of cells, so skip the extra work there.
   let currentOrigins = null;
-  if (wordStress) {
+  if (currentStress || hasStressRules) {
     const sourceContext = options.sourceContext || context;
     const sourceProsody = sourceContext.prosodyFor(inputTokens, currentJunctures, null);
     currentOrigins = options.origins
@@ -2488,7 +2605,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
       currentJunctures,
       optionalRuleIds,
       diagnostics,
-      wordStress,
+      currentStress,
       currentOrigins
     );
     if (!parallel.ok) {
@@ -2534,6 +2651,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
       current = parallel.tokens;
       currentJunctures = parallel.junctures;
       currentOrigins = parallel.origins || currentOrigins;
+      currentStress = parallel.stress;
     }
 
     // Sequential children run after the whole ancestral pass, in display
@@ -2607,7 +2725,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           child.compiled.rule,
           stageContext,
           currentJunctures,
-          wordStress,
+          currentStress,
           currentOrigins
         );
         if (result.error) {
@@ -2644,7 +2762,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           debug: result.changed
             ? ""
             : diagnostics
-              ? explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures, wordStress) || ""
+              ? explainRuleMiss(current, child.compiled.rule, stageContext, currentJunctures, currentStress) || ""
               : "",
           optional: child.rule.optional === true,
           rate: normalizeRuleRate(child.rule.rate),
@@ -2653,6 +2771,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         current = result.tokens;
         currentJunctures = result.junctures;
         currentOrigins = result.origins || currentOrigins;
+        currentStress = result.stress;
       }
     }
     if (stageFailed) {
@@ -2662,12 +2781,12 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
   }
 
   let stress = null;
-  if (wordStress && currentOrigins) {
+  if (currentStress && currentOrigins) {
     const derivedProsody = context.prosodyFor(current, currentJunctures, null);
     stress = remapStressToSyllables(
       derivedProsody.syllables,
       currentOrigins,
-      wordStress,
+      currentStress,
       context.stressSystem
     );
   }
@@ -2701,7 +2820,14 @@ export function deriveForm(form, project, languageId, options = {}) {
   // parent for a direct inheritance check, or the root of the chain otherwise.
   // Its syllabifier defines the syllable indices stored in `wordStress`.
   const sourceLanguage = directOnly ? lineage.at(-2) || languages[0] : languages[0];
-  const sourceContext = wordStress && sourceLanguage
+  const hasStressRules = stages.some((stage) =>
+    (stage.groups || []).some(
+      (group) =>
+        group.compiled?.rule?.stressChange ||
+        (group.children || []).some((child) => child.compiled?.rule?.stressChange)
+    )
+  );
+  const sourceContext = (wordStress || hasStressRules) && sourceLanguage
     ? contextForLanguage(project, sourceLanguage.id)
     : context;
   const derived = deriveStages(tokens, stages, context, {

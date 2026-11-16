@@ -1893,6 +1893,18 @@ equal(
   gluedStressRule.rule?.left.map((atom) => atom.type),
   ["literal", "stress"],
 );
+truthy(
+  "an input stress mark needs a following segment",
+  !compileRule("ˈ > a", stressCtx, { allowStressChange: true }).ok
+);
+truthy(
+  "a rule can assign primary stress only once",
+  !compileRule("a b > ˈa ˈb", stressCtx, { allowStressChange: true }).ok
+);
+truthy(
+  "stress output stays unavailable to allophony rules",
+  !compileRule("a > ˈa", stressCtx).ok
+);
 
 /* ---- lexical stress and stress scope ------------------------------------ */
 
@@ -2420,6 +2432,75 @@ equal(
   "a recorded stress difference makes a cognate cell differ",
   statusForCognate(cognateStressSource, cognateStressRow, cognateStressCell).kind,
   "differs"
+);
+
+const stressMoveProject = ensureProject({
+  title: "Stress-changing rules",
+  languages: [
+    {
+      id: "move_root",
+      name: "Root",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [],
+      vocabulary: [],
+    },
+    {
+      id: "move_daughter",
+      name: "Daughter",
+      parentId: "move_root",
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [{ id: "shift", notation: "ˈa b > a ˈb", note: "", enabled: true }],
+      vocabulary: [],
+    },
+    {
+      id: "clear_daughter",
+      name: "Clearer",
+      parentId: "move_root",
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [{ id: "clear", notation: "ˈa > a", note: "", enabled: true }],
+      vocabulary: [],
+    },
+    {
+      id: "set_daughter",
+      name: "Setter",
+      parentId: "move_root",
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+      soundChanges: [{ id: "set", notation: "b > ˌb", note: "", enabled: true }],
+      vocabulary: [],
+    },
+  ],
+});
+const movedPrimary = deriveInheritedWord(
+  { gloss: "house", form: "kaba", stress: { primary: 0 } },
+  stressMoveProject,
+  "move_daughter"
+);
+equal("a stress-moving rule leaves the segments alone", movedPrimary.text, "kaba");
+equal("a stress-moving rule moves the primary to the output syllable", movedPrimary.stress, {
+  primary: 1,
+  secondary: [],
+});
+equal(
+  "a stress-moving rule requires the input mark",
+  deriveInheritedWord({ gloss: "house", form: "kaba", stress: { primary: 1 } }, stressMoveProject, "move_daughter")
+    .stress,
+  { primary: 1, secondary: [] }
+);
+equal(
+  "a stress-clearing rule removes the inherited primary",
+  deriveInheritedWord({ gloss: "house", form: "kaba", stress: { primary: 0 } }, stressMoveProject, "clear_daughter")
+    .stress,
+  null
+);
+equal(
+  "a stress-setting rule adds a secondary without inherited stress",
+  deriveInheritedWord({ gloss: "house", form: "kaba" }, stressMoveProject, "set_daughter").stress,
+  { primary: null, secondary: [1] }
 );
 
 const emptyTemplateLanguage = {
