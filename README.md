@@ -39,6 +39,7 @@ The repository ships with a demo family, `data/example_project.json`: a document
 - **Phonemic / phonetic notation** — forms are stored as bare IPA and displayed as `/…/` when phonemic and `[…]` when surface. Pasting delimiters into word forms, chart cells, or bulk imports strips them safely; all comparison, search, and phonotactics stay level-agnostic. Surface notation also adds predicted stress (`ˈ`, `ˌ`) and syllable dots from the language’s phonotactics, and a `+` morpheme cut stays where a form puts it; these marks are presentation only and never become segments. In **phonemic stress scope**, a word’s stored primary and secondary stress also appears inside `/…/` and can distinguish otherwise identical forms.
 - **Basic vocabulary** — gloss + phonemic IPA form, with a live `[…]` surface preview when allophony or stress is defined, per-word primary and secondary stress controls when the language has a stress system, an inherited-form check that applies the current language's sound changes to the parent's words, and a phonotactic validity check on every form.
 - **Lexicon metadata** — each word can also carry a part of speech, senses, tags / semantic domains, status, source, and etymology in an expandable details panel. Compact POS/status badges show in the gloss column; filters and quick search cover the new fields, and reports and exports include them when present. `gloss` stays the canonical key everywhere.
+- **Orthography** — a per-language phoneme↔grapheme table with longest-match conversion, a two-way tester, orthographic previews in the lexicon, and a written-form column in reports. Unpaired sounds pass through, and spelling never feeds derivation or phonotactics.
 - **Cognate explorer** — follow any recorded gloss down the family: each daughter's chain-derived phonemic form next to its recorded form, with inherited stress remapped onto the daughter's syllables in phonemic scope, diverging segments highlighted in both, an optional surface column that includes stress and syllables, a one-click record action, and a whole-lexicon matrix view.
 - **Sound correspondences** — the cognate explorer's all-glosses view tabulates per-position correspondences between a source language and its descendants: each source segment by word position, the dominant reflex in every daughter with counts, rare singleton reflexes marked as irregular, and inserted segments listed separately. Switch between recorded forms and chain-derived forms.
 - **Subgrouping evidence** — a family-level report over every internal node with at least two daughters: branch innovations, changes shared by every daughter branch, changes shared by only some, and which rules are unique to the clade. Nodes are marked supported, weak, or unsupported so the stored tree can be checked against the stored sound changes.
@@ -330,6 +331,12 @@ The chevron at the end of a vocabulary row expands a detail panel for that word.
 
 These fields are optional and absent by default: older projects (including the tracked demo) load and save unchanged, and a word without metadata reads as empty. `gloss` remains the single identity used by derivation, cognates, reconstruction, and reports — metadata never changes which words are considered the same.
 
+### Orthography
+
+The **Orthography** tab records how a language is written. Add pairs such as `ʃ` → `sh`, `t͡s` → `ts`, or a single sound to itself. Each pair has an optional note. Order does not matter: conversion is a longest-match, left-to-right scan, so a two-letter grapheme is used instead of its one-letter prefix. A phoneme with no pair passes through unchanged, which makes a partly specified spelling system safe to build incrementally.
+
+The tester converts a typed phonemic form into its written form and a typed orthographic form back into IPA; both update as you type. Once pairs exist, vocabulary rows show the written form under the phonemic one, quick search indexes it, and the Markdown and HTML reports gain an Orthography table plus a **Written** column in the vocabulary table. A language with no pairs produces an unchanged report.
+
 ### Cognate explorer
 
 The **Cognate explorer** follows one recorded word down the whole family. Open it from the sidebar, or press the trace button on any vocabulary row.
@@ -364,7 +371,7 @@ The **Sound-change timeline** view (sidebar, below Subgrouping evidence) reads t
 
 Press `Ctrl+K` (`Cmd+K` on macOS), or use **Quick search** in the top bar, to jump anywhere in the project:
 
-- Search covers **languages** (name and lineage path — typing an ancestor finds its daughters), **words** (gloss, IPA form, note), **sound changes** (notation and note), **allophony rules** (notation and note), plus the family tree, cognate explorer, and subgrouping evidence as direct actions. Pasting `/…/` or `[…]` into the search box is accepted; the delimiters are stripped before matching.
+- Search covers **languages** (name and lineage path — typing an ancestor finds its daughters), **words** (gloss, IPA form, note, metadata, and orthographic form), **sound changes** (notation and note), **allophony rules** (notation and note), plus the family tree, cognate explorer, and subgrouping evidence as direct actions. Pasting `/…/` or `[…]` into the search box is accepted; the delimiters are stripped before matching.
 - `↑`/`↓` move through results, `Enter` opens the first match, `Esc` closes. Each result jumps to the right tab and briefly highlights the word, rule, or title it leads to.
 - Empty states are handled: with no query the palette lists every language as a jump target, and a query with no matches says so. The palette never opens on top of a dialog, and `Ctrl+K` closes it again while it is open.
 
@@ -381,7 +388,7 @@ Open **Import / export** in a language's vocabulary tab to move word lists in an
 
 On the family tree header, **Report / backup** opens a menu with three downloads, all generated from the project exactly as it is on screen (including unsaved changes):
 
-- **Markdown report** (`{project}-report.md`) — GitHub-flavored plain text: a box-drawing tree sketch, one section per language (consonant and vowel charts as tables, feature overrides, phonotactics, sound changes with a *(disabled)* marker, allophony and derived allophones, the full vocabulary), and a closing **cognate sets** matrix that groups words sharing a gloss across the family.
+- **Markdown report** (`{project}-report.md`) — GitHub-flavored plain text: a box-drawing tree sketch, one section per language (consonant and vowel charts as tables, feature overrides, orthography pairs when defined, phonotactics, sound changes with a *(disabled)* marker, allophony and derived allophones, the full vocabulary with a **Written** column when orthography is defined), and a closing **cognate sets** matrix that groups words sharing a gloss across the family.
 - **HTML report** (`{project}-report.html`) — the same content as a self-contained styled page. No external assets, so it opens anywhere and prints nicely; a table of contents links to each language.
 - **JSON backup** (`{project}-backup-YYYY-MM-DD.json`) — the exact project document, a round-trippable snapshot of the active file in `data/`.
 
@@ -394,6 +401,8 @@ Everything is saved to the active project file in `data/` automatically after a 
 Each language also keeps `featureOverrides`, keyed by normalized IPA symbol. An override stores a complete bundle (`place` as a string or `null`, every other feature as `true`, `false`, or `null`); sounds without an override fall back to the curated table in `web/js/features.js`. Overrides are copied when a daughter, sibling, or ancestor is created, and they travel with the language in the JSON backup.
 
 A word can additionally carry `pos`, `status`, `source`, and `etymology` strings plus `senses` and `tags` arrays. These are optional: normalization trims strings and de-dupes list items but only rewrites fields already on disk, so a document written before they existed loads and saves without gaining them. New words created in the app or by import carry the fields they use.
+
+A language may also keep `orthography: { "pairs": [{ "id", "phonemes", "graph", "note" }] }`. Like word metadata, it is normalized only when already present, so older documents stay byte-identical; new languages start with an empty table, and daughters, siblings, and ancestors inherit a copy.
 
 The repository ignores every `data/*.json` project except `data/example_project.json`, so personal families are not committed by accident. If you do want to version one intentionally, force-add it by name:
 
@@ -492,6 +501,7 @@ language-tree/
       ├─ paging.js         # shared page math, pager markup, and focus restoration
       ├─ gloss.js          # gloss normalization shared by lexicon and reports
       ├─ lexicon.js        # word metadata defaults, normalization, report columns
+       ├─ orthography.js    # grapheme pair normalization and two-way longest-match conversion
       ├─ bulk.js           # vocabulary import/export parsing and writers
       ├─ xsampa.js         # X-SAMPA <-> IPA conversion for stored forms
       ├─ report.js         # Markdown/HTML family report builders
@@ -503,6 +513,7 @@ language-tree/
          ├─ language.js
          ├─ inventory.js
          ├─ phonotactics.js
+         ├─ orthography.js   # grapheme pair editor and two-way tester
          ├─ soundchanges.js
          ├─ allophony.js
          ├─ vocabulary.js
