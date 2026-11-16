@@ -223,15 +223,24 @@ function ensureChart(chart, fallbackFactory, kind) {
   // Rebuild cell keys from the captured originals rather than splitting the
   // stored key: an id containing the "|" separator (or any repaired id) must
   // carry its phonemes to the new key instead of being dropped as malformed.
-  const sourceCells = {};
+  const oldKeys = new Map();
   for (const oldRowId of oldRowIds) {
     for (const oldColumnId of oldColumnIds) {
-      const oldKey = cellKey(oldRowId, oldColumnId);
-      if (!Object.hasOwn(base.cells, oldKey)) continue;
-      sourceCells[
-        cellKey(rowRemap.get(oldRowId) || oldRowId, colRemap.get(oldColumnId) || oldColumnId)
-      ] = base.cells[oldKey];
+      oldKeys.set(cellKey(oldRowId, oldColumnId), { oldRowId, oldColumnId });
     }
+  }
+  const sourceCells = {};
+  // Walk the stored cells in their original order so a demo or hand-edited
+  // project with already-safe ids round-trips byte for byte.
+  for (const [key, value] of Object.entries(base.cells)) {
+    const ids = oldKeys.get(key);
+    if (!ids) continue;
+    sourceCells[
+      cellKey(
+        rowRemap.get(ids.oldRowId) || ids.oldRowId,
+        colRemap.get(ids.oldColumnId) || ids.oldColumnId
+      )
+    ] = value;
   }
   // Cells belong to leaf intersections. Entries that point at a missing
   // row/column are dropped; entries that point at an interior group are

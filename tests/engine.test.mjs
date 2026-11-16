@@ -128,13 +128,7 @@ import {
 } from "../web/js/cognateData.js";
 import { invertRule, invertRules, reconstructForm, reconstructionAlternatives } from "../web/js/reconstruction.js";
 import { subgroupingEvidence } from "../web/js/subgrouping.js";
-import {
-  buildClassIndex,
-  classForText,
-  filterSuggestions,
-  matchesQuery,
-  suggestQuery,
-} from "../web/js/naturalclasses.js";
+import { classForText, filterSuggestions, matchesQuery, suggestQuery } from "../web/js/naturalclasses.js";
 import { applyWordList, rowStatus } from "../web/js/bulk.js";
 import { newLibraryRules, normalizeLibraryNotation, soundChangeLibrary } from "../web/js/soundlaws.js";
 import { ipaToXSampa, xSampaToIPA } from "../web/js/xsampa.js";
