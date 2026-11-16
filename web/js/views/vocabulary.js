@@ -8,7 +8,11 @@ import {
   surfaceForForm,
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, normalizeSearchText, samePhonemicForm, stripLevelMarks, stripStressMarks } from "../notation.js";
-import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
+import {
+  createPhonotacticsChecker,
+  phonemicFormForWord,
+  pruneWordStressForForm,
+} from "../phonotacticsCheck.js";
 import { normalizeWordStress, pruneSecondaryStress, stressMarksFromForm, toggleSecondaryStress } from "../prosody.js";
 // ASCII form for notes and external tools; conversion lives in web/js/xsampa.js.
 import { ipaToXSampa } from "../xsampa.js";
@@ -39,7 +43,7 @@ async function copyToClipboard(text) {
 }
 
 async function copyWords(words, format = "tsv", language = null) {
-  const content = format === "json" ? toJson(words) : toTsv(words, language);
+  const content = format === "json" ? toJson(words, language) : toTsv(words, language);
   const done = await copyToClipboard(content);
   if (done) toast(`Copied ${words.length} word${words.length === 1 ? "" : "s"} as ${format.toUpperCase()}.`, { type: "success" });
   else toast("Copy failed — select the text and copy manually.", { type: "info" });
@@ -48,7 +52,7 @@ async function copyWords(words, format = "tsv", language = null) {
 
 function downloadWords(words, languageName, format, language = null) {
   const extension = format === "json" ? "json" : "tsv";
-  const content = format === "json" ? toJson(words) : toTsv(words, language);
+  const content = format === "json" ? toJson(words, language) : toTsv(words, language);
   const name = `${String(languageName || "vocabulary").replace(/[^\w-]+/g, "_").replace(/^_+|_+$/g, "")}-vocabulary.${extension}`;
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -371,7 +375,7 @@ function openBulkDialog(ctx, language, words) {
       };
 
       const refreshExport = () => {
-        if (exportOpen) output.value = format === "json" ? toJson(words) : toTsv(words, language);
+        if (exportOpen) output.value = format === "json" ? toJson(words, language) : toTsv(words, language);
       };
 
       root.querySelectorAll("[data-bulk-tab]").forEach((tab) => {
@@ -748,14 +752,19 @@ export function renderVocabulary(container, ctx) {
           const inlineStress = stressMarksFromForm(word.form, [...checker.context.vowels]);
           const clean = stripStressMarks(stripLevelMarks(input.value));
           let changed = false;
-          if (inlineStress) {
-            word.stress = inlineStress;
-            if (language.phonotactics) language.phonotactics.stressScope = "phonemic";
-            changed = true;
-          }
           if (clean !== input.value) {
             input.value = clean;
             word.form = clean;
+            changed = true;
+          }
+          if (inlineStress) {
+            // Inline marks are another way to write a stress record. Apply the
+            // same pruning as the picker so a hidden collision cannot be
+            // imported just by typing ˌ into the form.
+            const stress = pruneWordStressForForm(word.form, checker, inlineStress);
+            if (stress) word.stress = stress;
+            else delete word.stress;
+            if (stress && language.phonotactics) language.phonotactics.stressScope = "phonemic";
             changed = true;
           }
           if (changed) {

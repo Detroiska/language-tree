@@ -79,7 +79,12 @@ import {
   resolveFeatureBundle,
 } from "../web/js/features.js";
 import { compilePhonotactics } from "../web/js/phonotactics.js";
-import { createPhonotacticsChecker, phonemicFormForWord, stressMarkedForm } from "../web/js/phonotacticsCheck.js";
+import {
+  createPhonotacticsChecker,
+  phonemicFormForWord,
+  pruneWordStressForForm,
+  stressMarkedForm,
+} from "../web/js/phonotacticsCheck.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
 import {
   isHeavySyllable,
@@ -2011,6 +2016,21 @@ equal(
   "a form change that moves the default primary drops the colliding secondary",
   pruneSecondaryStress(survivingSecondary, longPenult.stressIndex, longPenult.syllables.length),
   null
+);
+equal(
+  "form-based pruning drops a secondary colliding with the default primary",
+  pruneWordStressForForm("muka", initialChecker, { primary: null, secondary: [0] }),
+  null
+);
+equal(
+  "form-based pruning keeps a secondary that does not collide",
+  pruneWordStressForForm("muka", initialChecker, { primary: null, secondary: [1] }),
+  { primary: null, secondary: [1] }
+);
+equal(
+  "form-based pruning leaves a draft without a form alone",
+  pruneWordStressForForm("", initialChecker, { primary: null, secondary: [0] }),
+  { primary: null, secondary: [0] }
 );
 
 const stressFixture = ensureProject({

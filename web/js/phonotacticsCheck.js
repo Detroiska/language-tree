@@ -31,6 +31,39 @@ export function createPhonotacticsChecker(language) {
   };
 }
 
+// The stress positions a form actually uses: an explicit word override when
+// valid, otherwise the language default. Callers use this to edit, display, and
+// export the same effective marks.
+export function effectiveStressForForm(form, checker, wordStress = null) {
+  const result = checker.validate(form, wordStress);
+  const fallback =
+    result.stressIndex == null && result.tokens?.length
+      ? checker.context.prosodyFor(result.tokens, result.junctures, wordStress)
+      : null;
+  return {
+    result,
+    syllableCount: result.syllables?.length || fallback?.syllables?.length || 0,
+    primaryIndex: result.stressIndex ?? fallback?.stressIndex ?? -1,
+    secondaryIndices: result.secondaryIndices ?? fallback?.secondaryIndices ?? [],
+  };
+}
+
+// Keep a stored stress record consistent with its form: drop secondary marks
+// that collide with the effective primary or point past the current syllables.
+// Without a checker or a form there is nothing to resolve against, so the
+// normalized record is returned unchanged.
+export function pruneWordStressForForm(form, checker, wordStress = null) {
+  const stored = normalizeWordStress(wordStress);
+  if (!checker || !String(form || "").trim()) return stored;
+  const effective = effectiveStressForForm(form, checker, stored);
+  if (!effective.syllableCount) return stored;
+  return pruneSecondaryStress(
+    stored,
+    effective.primaryIndex >= 0 ? effective.primaryIndex : null,
+    effective.syllableCount
+  );
+}
+
 // Rewrite a form with its primary and secondary stress marks before the
 // stressed syllables. Returns null when the form has no analysis. A lexical
 // override is honored even when the language has no default stress system.

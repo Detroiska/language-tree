@@ -359,6 +359,23 @@ equal(
     { gloss: "plain", form: "kasa", note: "" },
   ]
 );
+equal(
+  "JSON export prunes a secondary colliding with the default primary",
+  JSON.parse(toJson(
+    [{ gloss: "flour", form: "muka", note: "", stress: { primary: null, secondary: [0] } }],
+    stressLanguage()
+  )),
+  [{ gloss: "flour", form: "muka", note: "" }]
+);
+{
+  const lang = stressLanguage();
+  applyWordList(
+    lang,
+    [{ gloss: "flour", form: "muka", note: "", stress: { primary: null, secondary: [0] } }],
+    "update"
+  );
+  equal("a bulk import prunes a colliding secondary", Object.hasOwn(lang.vocabulary[0], "stress"), false);
+}
 {
   const words = [{ gloss: "flour", form: "muka", note: "", stress: { primary: 1, secondary: [0] } }];
   const lang = stressLanguage();
