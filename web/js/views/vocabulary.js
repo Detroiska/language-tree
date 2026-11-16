@@ -167,6 +167,27 @@ function filterOptions(words, field) {
   return [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
+function optionMarkup(values, allLabel, selected) {
+  return `<option value="">${allLabel}</option>${values
+    .map((value) => `<option value="${esc(value)}"${selected === value ? " selected" : ""}>${esc(value)}</option>`)
+    .join("")}`;
+}
+
+// Scalar detail edits stay in place (a full re-render would drop keyboard
+// focus), so the compact badges and the filter option lists are refreshed here.
+function refreshMetaChrome(container, words, row, word) {
+  const badges = row?.querySelector("[data-word-badges]");
+  if (badges) badges.innerHTML = metaBadges(word);
+  const posValues = filterOptions(words, "pos");
+  const statusValues = filterOptions(words, "status");
+  if (lexiconFilter.pos && !posValues.includes(lexiconFilter.pos)) lexiconFilter.pos = "";
+  if (lexiconFilter.wordStatus && !statusValues.includes(lexiconFilter.wordStatus)) lexiconFilter.wordStatus = "";
+  const posSelect = container.querySelector("[data-word-pos-filter]");
+  if (posSelect) posSelect.innerHTML = optionMarkup(posValues, "All parts of speech", lexiconFilter.pos);
+  const statusSelect = container.querySelector("[data-word-status-meta-filter]");
+  if (statusSelect) statusSelect.innerHTML = optionMarkup(statusValues, "All statuses", lexiconFilter.wordStatus);
+}
+
 function expectedFor(ctx, word, parent) {
   if (!parent) return null;
   const parentWord = parent.vocabulary.find(
@@ -587,7 +608,7 @@ export function renderVocabulary(container, ctx) {
       const opened = openWordId === word.id;
       return `
         <tr data-word-id="${esc(word.id)}">
-          <td class="word-gloss"><input class="table-input gloss-input" data-word-field="gloss" value="${esc(word.gloss)}" placeholder="meaning" autocomplete="off" aria-label="Gloss">${metaBadges(word)}</td>
+          <td class="word-gloss"><input class="table-input gloss-input" data-word-field="gloss" value="${esc(word.gloss)}" placeholder="meaning" autocomplete="off" aria-label="Gloss"><span data-word-badges>${metaBadges(word)}</span></td>
           <td class="word-form">
             <span class="level-input-wrap">
               <span class="level-mark" aria-hidden="true">/</span>
@@ -653,18 +674,8 @@ export function renderVocabulary(container, ctx) {
                   <option value="invalid">Phonotactics: invalid</option>
                   ${hasParent ? `<option value="differs">Inherited: differs</option>` : ""}
                 </select>
-                <select class="select lexicon-filter-select" data-word-pos-filter aria-label="Filter words by part of speech">
-                  <option value="">All parts of speech</option>
-                  ${filterOptions(words, "pos")
-                    .map((value) => `<option value="${esc(value)}"${lexiconFilter.pos === value ? " selected" : ""}>${esc(value)}</option>`)
-                    .join("")}
-                </select>
-                <select class="select lexicon-filter-select" data-word-status-meta-filter aria-label="Filter words by status">
-                  <option value="">All statuses</option>
-                  ${filterOptions(words, "status")
-                    .map((value) => `<option value="${esc(value)}"${lexiconFilter.wordStatus === value ? " selected" : ""}>${esc(value)}</option>`)
-                    .join("")}
-                </select>
+                <select class="select lexicon-filter-select" data-word-pos-filter aria-label="Filter words by part of speech">${optionMarkup(filterOptions(words, "pos"), "All parts of speech", lexiconFilter.pos)}</select>
+                <select class="select lexicon-filter-select" data-word-status-meta-filter aria-label="Filter words by status">${optionMarkup(filterOptions(words, "status"), "All statuses", lexiconFilter.wordStatus)}</select>
                 <span class="lexicon-filter-count" data-filter-count></span>
               </div>
               <div class="table-scroll lexicon-scroll">
@@ -1024,6 +1035,7 @@ export function renderVocabulary(container, ctx) {
       const field = input.dataset.detailField;
       if (field) {
         word[field] = input.value;
+        refreshMetaChrome(container, words, detailRow.previousElementSibling, word);
         ctx.touch({ label: "Edit word details", coalesceKey: `wordmeta:${word.id}:${field}` });
         return;
       }
@@ -1048,6 +1060,7 @@ export function renderVocabulary(container, ctx) {
         if (field) {
           input.value = trimmed;
           word[field] = trimmed;
+          refreshMetaChrome(container, words, detailRow.previousElementSibling, word);
           ctx.touch({ label: "Edit word details", coalesceKey: `wordmeta:${word.id}:${field}` });
           return;
         }
