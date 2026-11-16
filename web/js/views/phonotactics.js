@@ -838,6 +838,14 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   });
 
   testInput?.addEventListener("input", updateTest);
+  // The IPA field is a one-row textarea; Enter must stay a single-line field's
+  // submit gesture rather than inserting an invisible newline into the form.
+  testInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      updateTest();
+    }
+  });
 
   container.querySelector("[data-phonotactics-word-status]")?.addEventListener("change", (event) => {
     wordCheckStatus = event.target.value;
