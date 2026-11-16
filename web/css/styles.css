@@ -4801,6 +4801,53 @@ th:hover > .axis-menu,
   min-width: 0;
 }
 
+/* Orthography: table of phoneme -> grapheme pairs and a two-way tester. */
+.ortho-table .ortho-phonemes,
+.ortho-table .ortho-graph {
+  width: 28%;
+}
+
+.ortho-table .ortho-arrow {
+  width: 26px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.ortho-table .ortho-note {
+  width: 32%;
+}
+
+.ortho-scroll {
+  max-height: 420px;
+}
+
+.ortho-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 36px 24px 40px;
+  text-align: center;
+}
+
+.ortho-tester {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.ortho-test-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ortho-test-result {
+  padding: 6px 2px 0;
+  border-top: 1px dashed var(--line);
+}
+
 /* The lexicon is the one table that grows without bound, so it scrolls
    inside the panel with its header pinned. The th background is already
    opaque (var(--surface-soft)); sticky just lifts it above the rows. */
@@ -4866,6 +4913,16 @@ th:hover > .axis-menu,
 }
 
 .phonemic-preview-wrap:empty {
+  display: none;
+}
+
+.orthographic-preview-wrap {
+  padding: 1px 6px 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.orthographic-preview-wrap:empty {
   display: none;
 }
 

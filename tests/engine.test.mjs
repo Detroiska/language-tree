@@ -65,6 +65,7 @@ import {
 } from "../web/js/notation.js";
 import { esc, escapeDialogCopy } from "../web/js/escape.js";
 import { indexWordsByGloss, normalizeGloss } from "../web/js/gloss.js";
+import { fromOrthography, normalizeOrthography, toOrthography } from "../web/js/orthography.js";
 import { compileClasses } from "../web/js/categories.js";
 import {
   IPA_FEATURES,
@@ -1741,6 +1742,67 @@ equal(
   "metadata normalization is idempotent",
   metaAgain.languages[0].vocabulary[0].senses,
   ["dwelling", "household"]
+);
+
+/* ---- orthography --------------------------------------------------------- */
+
+const orthoTable = normalizeOrthography({
+  futureOrtho: "keep",
+  pairs: [
+    { phonemes: "t͡s", graph: "ts" },
+    { phonemes: "ʃ", graph: "sh" },
+    { phonemes: "a", graph: "a" },
+    { phonemes: "  ", graph: "x" },
+    { phonemes: "k", graph: "" },
+    { phonemes: "ʃ", graph: "sh" },
+    "not a pair",
+    { phonemes: "k", graph: "k", futurePair: { keep: true } },
+  ],
+});
+equal(
+  "orthography drops invalid and duplicate pairs",
+  orthoTable.pairs.map((pair) => [pair.phonemes, pair.graph]),
+  [["t͡s", "ts"], ["ʃ", "sh"], ["a", "a"], ["k", "k"]]
+);
+equal(
+  "orthography preserves unknown fields on the table and its pairs",
+  [orthoTable.futureOrtho, orthoTable.pairs[3].futurePair],
+  ["keep", { keep: true }]
+);
+equal("a legacy language gains no orthography field on load", Object.hasOwn(ensureProject({
+  title: "No orthography",
+  languages: [{ id: "l", name: "L", vocabulary: [] }],
+}).languages[0], "orthography"), false);
+
+equal("orthography prefers the longest matching phoneme sequence", toOrthography("t͡sa", orthoTable), "tsa");
+equal("orthography leaves unmapped phonemes unchanged", toOrthography("kasa", orthoTable), "kasa");
+equal("orthography converts graphemes back to phonemes", fromOrthography("tsa", orthoTable), "t͡sa");
+equal("orthography preserves cuts and stress marks", toOrthography("ˈa+ʃa", orthoTable), "ˈa+sha");
+equal("an empty table is an identity conversion", toOrthography("kasa", normalizeOrthography({ pairs: [] })), "kasa");
+const orthoAgain = normalizeOrthography(JSON.parse(JSON.stringify(orthoTable)));
+equal("orthography normalization is idempotent", orthoAgain.pairs.length, 4);
+
+equal("new languages start with an empty orthography table", createLanguage("Ortho").orthography, { pairs: [] });
+const orthographyProject = ensureProject({
+  title: "Orthography family",
+  languages: [
+    {
+      id: "parent",
+      name: "Parent",
+      orthography: { pairs: [{ phonemes: "ʃ", graph: "sh" }] },
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "a sibling inherits a copy of the orthography table",
+  createSibling(orthographyProject, "parent", "Sibling").orthography.pairs,
+  [{ phonemes: "ʃ", graph: "sh", id: orthographyProject.languages[0].orthography.pairs[0].id }]
+);
+equal(
+  "an ancestor inherits a copy of the orthography table",
+  createAncestor(orthographyProject, "parent", "Ancestor").orthography.pairs.length,
+  1
 );
 
 /* ---- id normalization ---------------------------------------------------- */
@@ -4877,6 +4939,40 @@ const hostileMetaReport = buildHtml({
   ],
 });
 truthy("HTML report escapes metadata text", hostileMetaReport.includes("&lt;img src=x") && !hostileMetaReport.includes("<img src=x"));
+
+const orthoReportProject = {
+  title: "Orthography report",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      allophony: [],
+      orthography: { pairs: [{ phonemes: "ʃ", graph: "sh" }, { phonemes: "a", graph: "a" }] },
+      vocabulary: [{ id: "w", gloss: "house", form: "ʃaka", note: "" }],
+    },
+  ],
+};
+const orthoMarkdown = buildMarkdown(orthoReportProject);
+truthy(
+  "report includes an orthography table when pairs exist",
+  /### Orthography/.test(orthoMarkdown) && orthoMarkdown.includes("| Phonemes | Grapheme | Note |") && orthoMarkdown.includes("sh")
+);
+truthy(
+  "report writes orthographic forms in the vocabulary table",
+  orthoMarkdown.includes("| Gloss | Form | Written | Note |") && orthoMarkdown.includes("shaka")
+);
+truthy(
+  "reports without orthography keep their original columns",
+  allophonyMarkdown.includes("| Gloss | Form | Surface | Note |")
+);
+const orthoHtmlReport = buildHtml(orthoReportProject);
+truthy(
+  "HTML report includes orthography and written forms",
+  orthoHtmlReport.includes("<h3>Orthography</h3>") && orthoHtmlReport.includes("shaka")
+);
 
 /* ---- segment diff -------------------------------------------------------- */
 

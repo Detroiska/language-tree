@@ -1,5 +1,6 @@
 import { normalizeGloss } from "../gloss.js";
 import { wordMetaText } from "../lexicon.js";
+import { hasOrthography, toOrthography } from "../orthography.js";
 import { allophonyRules, ancestorsOf, uid } from "../model.js";
 import { applyWordList, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
 import {
@@ -242,6 +243,13 @@ function surfaceMarkup(word, ctx) {
     return `<span class="surface-preview surface-error" title="${esc(result.errors[0])}">${icon("warning")}surface error</span>`;
   }
   return `<span class="surface-preview" title="Surface form after allophony, with predicted stress and syllables">${esc(formatPhonetic(result.display))}</span>`;
+}
+
+function orthographicPreviewMarkup(word, language) {
+  if (!hasOrthography(language.orthography) || !String(word.form || "").trim()) return "";
+  const written = toOrthography(word.form, language.orthography);
+  if (!written || written === word.form) return "";
+  return `<span class="orthographic-preview" title="Written form in this language’s orthography">${esc(written)}</span>`;
 }
 
 function phonemicPreviewMarkup(word, checker) {
@@ -617,6 +625,7 @@ export function renderVocabulary(container, ctx) {
             </span>
             <div class="word-stress-wrap" data-word-stress-wrap>${stressSelectMarkup(word, result, checker)}</div>
             <div class="phonemic-preview-wrap" data-phonemic-preview>${phonemicPreviewMarkup(word, checker)}</div>
+            <div class="orthographic-preview-wrap" data-ortho-preview>${orthographicPreviewMarkup(word, language)}</div>
             <div class="surface-preview-wrap" data-surface-preview>${surfaceMarkup(word, ctx)}</div>
             <div class="word-issue-wrap" data-word-issue>${phonotacticIssueMarkup(result)}</div>
           </td>
@@ -903,6 +912,8 @@ export function renderVocabulary(container, ctx) {
           if (surface) surface.innerHTML = surfaceMarkup(word, ctx);
           const phonemic = row.querySelector("[data-phonemic-preview]");
           if (phonemic) phonemic.innerHTML = phonemicPreviewMarkup(word, checker);
+          const orthographic = row.querySelector("[data-ortho-preview]");
+          if (orthographic) orthographic.innerHTML = orthographicPreviewMarkup(word, language);
           const summary = container.querySelector("[data-phonotactics-summary]");
           if (summary) summary.textContent = validitySummary(words, checker);
         }

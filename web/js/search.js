@@ -1,4 +1,5 @@
 import { wordMetaText } from "./lexicon.js";
+import { hasOrthography, toOrthography } from "./orthography.js";
 import { allophonyEntries, getLineage, ruleNumberMap } from "./model.js";
 import { formatPhonemic, normalizeSearchText } from "./notation.js";
 import { esc, icon } from "./ui.js";
@@ -73,7 +74,9 @@ function indexEntries(project) {
         languageId: language.id,
         title: word.gloss || "(no gloss)",
         subtitle: `${formatPhonemic(word.form) || "∅"} · ${language.name}`,
-        searchText: `${word.gloss} ${normalizeSearchText(word.form)} ${word.note} ${wordMetaText(word)} ${language.name}`,
+        searchText: `${word.gloss} ${normalizeSearchText(word.form)} ${word.note} ${wordMetaText(word)} ${
+          hasOrthography(language.orthography) ? toOrthography(word.form, language.orthography) : ""
+        } ${language.name}`,
         hash: `#/language/${encodeURIComponent(language.id)}/vocabulary`,
         focus: { kind: "word", id: word.id },
       });
