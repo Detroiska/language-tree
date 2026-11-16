@@ -63,14 +63,49 @@ export function normalizeWordStress(value) {
   return { primary, secondary };
 }
 
-// Toggle secondary stress on one syllable. Secondary stress cannot share the
-// primary syllable, so clicking that syllable is a no-op. The result is
-// normalized (unique, sorted, no overlapping index) and may be null when the
-// last mark is removed; callers store it directly or delete the field. Kept
-// DOM-free so the vocabulary picker and the tests use the same rule.
-export function toggleSecondaryStress(wordStress, index) {
+// Secondary indices are stored as the user clicked them, but the syllable that
+// actually carries primary stress may come from the language default when the
+// word has no explicit primary. Keep only marks that still name a real syllable
+// and do not collide with that effective primary. The caller supplies the
+// resolved primary and syllable count; both default to "unknown".
+export function pruneSecondaryStress(wordStress, primaryIndex = null, syllableCount = Infinity) {
   const stored = normalizeWordStress(wordStress);
-  if (!Number.isInteger(index) || index < 0 || stored?.primary === index) return stored;
+  if (!stored) return null;
+  const count =
+    Number.isInteger(syllableCount) && syllableCount >= 0 ? syllableCount : Infinity;
+  const primary = Number.isInteger(primaryIndex) && primaryIndex >= 0 ? primaryIndex : null;
+  return normalizeWordStress({
+    primary: stored.primary,
+    secondary: stored.secondary.filter(
+      (index) => index < count && (primary === null || index !== primary)
+    ),
+  });
+}
+
+// Toggle secondary stress on one syllable. Secondary stress cannot share the
+// primary syllable, so clicking that syllable is a no-op. `effectivePrimary`
+// and `syllableCount` let the picker reject the language's default primary and
+// prune stale stored marks when the form changed. The result is normalized
+// (unique, sorted, no overlapping index) and may be null when the last mark is
+// removed; callers store it directly or delete the field. Kept DOM-free so the
+// vocabulary picker and the tests use the same rule.
+export function toggleSecondaryStress(
+  wordStress,
+  index,
+  effectivePrimary = null,
+  syllableCount = Infinity
+) {
+  const stored = pruneSecondaryStress(wordStress, effectivePrimary, syllableCount);
+  const count =
+    Number.isInteger(syllableCount) && syllableCount >= 0 ? syllableCount : Infinity;
+  const primary =
+    Number.isInteger(effectivePrimary) && effectivePrimary >= 0
+      ? effectivePrimary
+      : stored?.primary ?? null;
+  if (!Number.isInteger(index) || index < 0 || index >= count || stored?.primary === index) {
+    return stored;
+  }
+  if (primary !== null && index === primary) return stored;
   const secondary = new Set(stored?.secondary || []);
   if (secondary.has(index)) secondary.delete(index);
   else secondary.add(index);

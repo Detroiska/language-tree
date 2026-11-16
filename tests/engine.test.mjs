@@ -86,6 +86,7 @@ import {
   normalizeStressScope,
   normalizeStressSystem,
   normalizeWordStress,
+  pruneSecondaryStress,
   resolveStress,
   stressIndexOf,
   stressLabel,
@@ -1963,6 +1964,54 @@ equal(
   toggleSecondaryStress({ primary: 0, secondary: [null, "2", -3, 0.5] }, 2),
   { primary: 0, secondary: [2] }
 );
+equal(
+  "pruning drops a secondary that collides with the effective primary",
+  pruneSecondaryStress({ primary: null, secondary: [0, 1] }, 0, 2),
+  { primary: null, secondary: [1] }
+);
+equal(
+  "pruning drops secondary indices beyond the syllable count",
+  pruneSecondaryStress({ primary: null, secondary: [0, 2] }, null, 2),
+  { primary: null, secondary: [0] }
+);
+equal(
+  "toggling rejects the syllable carrying the effective primary",
+  toggleSecondaryStress(null, 0, 0, 2),
+  null
+);
+equal(
+  "toggling rejects a syllable beyond the current count",
+  toggleSecondaryStress(null, 2, null, 2),
+  null
+);
+equal(
+  "toggling prunes a stored collision with the effective primary",
+  toggleSecondaryStress({ primary: null, secondary: [0] }, 1, 0, 2),
+  { primary: null, secondary: [1] }
+);
+
+const penultChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "penult" },
+});
+const shortPenult = penultChecker.validate("kasa");
+const longPenult = penultChecker.validate("kasaka");
+equal("penult stress lands on the first syllable of a short word", shortPenult.stressIndex, 0);
+equal("penult stress moves right when a syllable is added", longPenult.stressIndex, 1);
+const survivingSecondary = pruneSecondaryStress(
+  { primary: null, secondary: [1] },
+  shortPenult.stressIndex,
+  shortPenult.syllables.length
+);
+equal("a secondary survives while it does not collide", survivingSecondary, {
+  primary: null,
+  secondary: [1],
+});
+equal(
+  "a form change that moves the default primary drops the colliding secondary",
+  pruneSecondaryStress(survivingSecondary, longPenult.stressIndex, longPenult.syllables.length),
+  null
+);
 
 const stressFixture = ensureProject({
   title: "Stress fixtures",
@@ -2290,6 +2339,25 @@ equal(
   "a secondary-only stress record exports without a predicted primary",
   stressMarkedForm("muka", initialChecker, { primary: null, secondary: [1] }),
   "muˌka"
+);
+equal(
+  "export drops a secondary that collides with the default primary",
+  stressMarkedForm("muka", initialChecker, { primary: null, secondary: [0] }),
+  "muka"
+);
+equal(
+  "export keeps secondaries that do not collide with the default primary",
+  stressMarkedForm("takama", initialChecker, { primary: null, secondary: [0, 2] }),
+  "takaˌma"
+);
+const initialPhonemicChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+});
+equal(
+  "the phonemic display ignores a colliding secondary",
+  phonemicFormForWord({ form: "muka", stress: { primary: null, secondary: [0] } }, initialPhonemicChecker),
+  "ˈmu.ka"
 );
 equal(
   "multiple secondary indices survive export",

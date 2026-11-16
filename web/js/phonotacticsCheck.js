@@ -4,6 +4,7 @@ import {
   normalizeStressScope,
   normalizeStressSystem,
   normalizeWordStress,
+  pruneSecondaryStress,
   stressMarkedText,
 } from "./prosody.js";
 
@@ -51,11 +52,16 @@ export function stressMarkedForm(form, checker, wordStress = null) {
 
   if (stored) {
     const primary =
-      stored.primary != null && stored.primary < syllables.length ? stored.primary : -1;
-    const secondary = stored.secondary.filter(
-      (index) => index < syllables.length && index !== primary
-    );
-    return stressMarkedText(tokens, syllables, primary, result.junctures, secondary) || null;
+      stored.primary != null && stored.primary < syllables.length ? stored.primary : null;
+    // With Auto primary, the language default still decides which syllable
+    // cannot carry ˌ. Filter against either explicit or effective primary so
+    // export agrees with the /…/ display instead of writing a mark that is
+    // never shown.
+    const effectivePrimary =
+      primary ?? result.stressIndex ?? fallback?.stressIndex ?? -1;
+    const secondary =
+      pruneSecondaryStress(stored, effectivePrimary, syllables.length)?.secondary || [];
+    return stressMarkedText(tokens, syllables, primary ?? -1, result.junctures, secondary) || null;
   }
 
   if (result.stressIndex >= 0 || result.secondaryIndices?.length) return result.marked;

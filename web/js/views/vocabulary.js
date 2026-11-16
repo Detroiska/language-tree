@@ -9,7 +9,7 @@ import {
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, normalizeSearchText, samePhonemicForm, stripLevelMarks, stripStressMarks } from "../notation.js";
 import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
-import { normalizeWordStress, stressMarksFromForm, toggleSecondaryStress } from "../prosody.js";
+import { normalizeWordStress, pruneSecondaryStress, stressMarksFromForm, toggleSecondaryStress } from "../prosody.js";
 // ASCII form for notes and external tools; conversion lives in web/js/xsampa.js.
 import { ipaToXSampa } from "../xsampa.js";
 import { esc, icon, openModal, toast } from "../ui.js";
@@ -130,36 +130,64 @@ function phonemicPreviewMarkup(word, checker) {
   return `<span class="phonemic-preview" title="Phonemic form with stored stress">${esc(formatPhonemic(display))}</span>`;
 }
 
+// The primary position a word actually uses: an explicit lexical index when
+// valid, otherwise the language's default. The picker needs this to disable the
+// right syllable even when the stress field says "Auto", and to prune secondary
+// marks that the display would silently drop.
+function effectiveStressFor(result, checker, wordStress = null) {
+  const fallback =
+    result?.stressIndex == null && result?.tokens?.length
+      ? checker.context.prosodyFor(result.tokens, result.junctures, wordStress)
+      : null;
+  return {
+    syllableCount: result?.syllables?.length || fallback?.syllables?.length || 0,
+    primaryIndex: result?.stressIndex ?? fallback?.stressIndex ?? -1,
+    secondaryIndices: result?.secondaryIndices ?? fallback?.secondaryIndices ?? [],
+  };
+}
+
+function sameStoredStress(left, right) {
+  const a = normalizeWordStress(left);
+  const b = normalizeWordStress(right);
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.primary === b.primary &&
+    a.secondary.length === b.secondary.length &&
+    a.secondary.every((index, position) => index === b.secondary[position])
+  );
+}
+
 function stressSelectMarkup(word, result, checker) {
   if (checker.stress === "none" && !word.stress) return "";
   // Syllable positions come from the template when it parses. If checks are
   // off or the template is broken, the same maximal-onset fallback used by the
   // preview still lets a stored stress be edited instead of hiding the picker.
-  const syllableCount =
-    result.syllables?.length ||
-    (result.tokens?.length
-      ? checker.context.prosodyFor(result.tokens, result.junctures, word.stress).syllables.length
-      : 0);
+  const effective = effectiveStressFor(result, checker, word.stress);
+  const syllableCount = effective.syllableCount;
   const primary = word.stress?.primary;
-  const secondary = word.stress?.secondary || [];
+  const hasPrimary = primary != null && primary < syllableCount;
   const options = [
-    `<option value="" ${primary == null ? "selected" : ""}>${checker.stress === "none" ? "None" : "Auto"}</option>`,
+    `<option value="" ${hasPrimary ? "" : "selected"}>${checker.stress === "none" ? "None" : "Auto"}</option>`,
     ...Array.from({ length: syllableCount }, (_, index) => {
       return `<option value="${index}" ${primary === index ? "selected" : ""}>Syllable ${index + 1}</option>`;
     }),
   ].join("");
   // Secondary stress can sit on several syllables at once, so use toggles
-  // rather than a second single-value select. The primary syllable is disabled:
-  // one syllable cannot carry both marks.
+  // rather than a second single-value select. The syllable that actually
+  // carries the primary — including one chosen by the language's default — is
+  // disabled: one syllable cannot carry both marks.
   const secondaryMarkup =
     syllableCount < 2
       ? ""
       : `<span class="word-secondary" role="group" aria-label="Secondary stress">
           <span>Secondary</span>
           ${Array.from({ length: syllableCount }, (_, index) => {
-            const active = secondary.includes(index);
-            const primarySyllable = index === primary;
-            const label = `Secondary stress on syllable ${index + 1}`;
+            const active = effective.secondaryIndices.includes(index);
+            const primarySyllable = index === effective.primaryIndex;
+            const label = primarySyllable
+              ? `Primary stress on syllable ${index + 1}`
+              : `Secondary stress on syllable ${index + 1}`;
             return `<button type="button" class="stress-toggle${active ? " active" : ""}" data-word-secondary="${index}" aria-pressed="${active}" aria-label="${label}" title="${primarySyllable ? "Primary stress" : label}"${primarySyllable ? " disabled" : ""}>${index + 1}</button>`;
           }).join("")}
         </span>`;
@@ -632,10 +660,20 @@ export function renderVocabulary(container, ctx) {
       if (!select || !row.contains(select)) return;
       const value = select.value;
       const secondary = word.stress?.secondary || [];
-      const stress =
+      const candidate =
         value === ""
           ? normalizeWordStress({ primary: null, secondary })
           : normalizeWordStress({ primary: Number(value), secondary });
+      // Switching back to Auto can make the language's default primary land on
+      // a kept secondary mark. Resolve the effective position first, then prune
+      // the collision so storage and display agree.
+      const result = checker.validate(word.form, candidate);
+      const effective = effectiveStressFor(result, checker, candidate);
+      const stress = pruneSecondaryStress(
+        candidate,
+        effective.primaryIndex >= 0 ? effective.primaryIndex : null,
+        effective.syllableCount
+      );
       if (stress) word.stress = stress;
       else delete word.stress;
       // An explicit lexical mark is a phonemic claim; make the scope match so
@@ -644,26 +682,50 @@ export function renderVocabulary(container, ctx) {
       ctx.touch({ label: "Edit word stress" });
       ctx.refresh();
     });
-    row.querySelectorAll("[data-word-secondary]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const stress = toggleSecondaryStress(word.stress, Number(button.dataset.wordSecondary));
-        if (stress) word.stress = stress;
-        else delete word.stress;
-        // As with a primary mark, an explicit secondary mark is a claim about
-        // the phonemic form, so make the scope match.
-        if (language.phonotactics) language.phonotactics.stressScope = "phonemic";
-        ctx.touch({ label: "Edit word stress" });
-        ctx.refresh();
-      });
+    // Delegate secondary clicks to the row. The form handler replaces the
+    // stress controls' innerHTML on every keystroke, so listeners bound to the
+    // buttons themselves would be lost after the user types a form.
+    row.addEventListener("click", (event) => {
+      const button = event.target.closest?.("[data-word-secondary]");
+      if (!button || !row.contains(button) || button.disabled) return;
+      const result = checker.validate(word.form, word.stress);
+      const effective = effectiveStressFor(result, checker, word.stress);
+      const stress = toggleSecondaryStress(
+        word.stress,
+        Number(button.dataset.wordSecondary),
+        effective.primaryIndex >= 0 ? effective.primaryIndex : null,
+        effective.syllableCount
+      );
+      if (stress) word.stress = stress;
+      else delete word.stress;
+      // As with a primary mark, keep an explicit secondary claim in phonemic
+      // scope; removing the last mark does not add a new claim.
+      if (stress && language.phonotactics) language.phonotactics.stressScope = "phonemic";
+      ctx.touch({ label: "Edit word stress" });
+      ctx.refresh();
     });
     row.querySelectorAll("[data-word-field]").forEach((input) => {
       input.addEventListener("input", () => {
         const field = input.dataset.wordField;
         word[field] = field === "form" ? stripLevelMarks(input.value) : input.value;
+        let result = null;
+        if (field === "form") {
+          result = checker.validate(word.form, word.stress);
+          const effective = effectiveStressFor(result, checker, word.stress);
+          const pruned = pruneSecondaryStress(
+            word.stress,
+            effective.primaryIndex >= 0 ? effective.primaryIndex : null,
+            effective.syllableCount
+          );
+          if (!sameStoredStress(pruned, word.stress)) {
+            if (pruned) word.stress = pruned;
+            else delete word.stress;
+            result = checker.validate(word.form, word.stress);
+          }
+        }
         ctx.touch({ label: "Edit word", coalesceKey: word.id });
         if (field === "gloss" || field === "form") updateRowCheck(row, ctx, word, parent, checker);
         if (field === "form") {
-          const result = checker.validate(word.form, word.stress);
           updateRowPhonotactics(row, result);
           const stress = row.querySelector("[data-word-stress-wrap]");
           if (stress) stress.innerHTML = stressSelectMarkup(word, result, checker);
