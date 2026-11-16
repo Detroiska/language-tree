@@ -2,8 +2,11 @@ import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
 import {
   STRESS_SCOPES,
   STRESS_SYSTEMS,
+  STRESS_WEIGHT_FALLBACK,
+  STRESS_WEIGHT_PRIMARY,
   normalizeStressScope,
   normalizeStressSystem,
+  normalizeWeightStress,
   normalizeWordStress,
   stressLabel,
 } from "../prosody.js";
@@ -13,6 +16,16 @@ import { esc, icon, toast } from "../ui.js";
 import { CHECK_PAGE_SIZE, focusPager, pagerMarkup, paginate } from "../paging.js";
 import { languageHref } from "../routes.js";
 import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
+
+// Check-tool state lives outside the render so structural re-renders (for
+// example when the stress system changes) do not discard a typed test form.
+const checkMemory = new Map();
+function rememberCheck(languageId) {
+  if (!checkMemory.has(languageId)) {
+    checkMemory.set(languageId, { text: "", status: "all", page: 1 });
+  }
+  return checkMemory.get(languageId);
+}
 
 const CLASS_PRESETS = [
   { name: "N", label: "N · nasals", sounds: "m n ɲ ŋ" },
@@ -337,6 +350,9 @@ function wordCheckMarkup(language, checker, results, { status = "all", page = 1 
 export function renderPhonotactics(container, ctx, activeTool = "template") {
   const { language } = ctx;
   const phonotactics = language.phonotactics;
+  const checkState = rememberCheck(language.id);
+  let wordCheckStatus = checkState.status;
+  let wordCheckPage = checkState.page;
   let checker = createPhonotacticsChecker(language);
   const chartClasses = suggestClassRefs(checker.context.classIndex);
 
@@ -387,7 +403,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
               </header>
               <div class="phonotactics-test-body">
                 <label class="field-label" for="phonotactics-test-form">Form <span class="field-optional">IPA</span></label>
-                <input class="input ipa-input" id="phonotactics-test-form" data-phonotactics-test placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+                <input class="input ipa-input" id="phonotactics-test-form" data-phonotactics-test value="${esc(checkState.text)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
                 <div data-phonotactics-test-result></div>
               </div>
             </section>
@@ -533,8 +549,36 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
                     `<option value="${esc(item.value)}" ${normalizeStressSystem(phonotactics.stress) === item.value ? "selected" : ""}>${esc(item.label)}</option>`
                 ).join("")}
               </select>
-              <span class="field-help">Weight-sensitive stress stresses a heavy penult — one with a coda or long nucleus — and otherwise falls back to the antepenult. Rule environments can test stress with <code>ˈ</code>/<code>ˌ</code> and syllable edges with <code>.</code> or <code>σ</code>.</span>
+              <span class="field-help">Rule environments can test stress with <code>ˈ</code>/<code>ˌ</code> and syllable edges with <code>.</code> or <code>σ</code>.</span>
             </label>
+            ${
+              normalizeStressSystem(phonotactics.stress) === "weight"
+                ? (() => {
+                    const weight = normalizeWeightStress(phonotactics.weightStress);
+                    return `
+            <label class="field">
+              <span class="field-label">Heavy syllable</span>
+              <select class="select" data-phonotactics-field="weight.primary" aria-label="Heavy syllable to check">
+                ${STRESS_WEIGHT_PRIMARY.map(
+                  (item) =>
+                    `<option value="${esc(item.value)}" ${weight.primary === item.value ? "selected" : ""}>${esc(item.label)}</option>`
+                ).join("")}
+              </select>
+              <span class="field-help">A heavy syllable has a coda, a long nucleus, or a diphthong. The chosen position is stressed when it is heavy.</span>
+            </label>
+            <label class="field">
+              <span class="field-label">No heavy syllable</span>
+              <select class="select" data-phonotactics-field="weight.fallback" aria-label="Fallback when no heavy syllable">
+                ${STRESS_WEIGHT_FALLBACK.map(
+                  (item) =>
+                    `<option value="${esc(item.value)}" ${weight.fallback === item.value ? "selected" : ""}>${esc(item.label)}</option>`
+                ).join("")}
+              </select>
+              <span class="field-help">Where primary stress lands when the heavy-syllable check fails. The defaults reproduce the original penult-if-heavy, otherwise antepenult behavior.</span>
+            </label>`;
+                  })()
+                : ""
+            }
             <label class="field">
               <span class="field-label">Stress scope</span>
               <select class="select" data-phonotactics-field="stressScope" aria-label="Stress scope">
@@ -559,12 +603,12 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
             </div>
             <div class="panel-actions">
               <select class="select check-status-filter" data-phonotactics-word-status aria-label="Filter vocabulary forms by status">
-                <option value="all">All forms</option>
-                <option value="attention">Needs attention</option>
-                <option value="invalid">Invalid</option>
-                <option value="template-error">Template errors</option>
-                <option value="off">Checks off</option>
-                <option value="valid">Valid</option>
+                <option value="all" ${wordCheckStatus === "all" ? "selected" : ""}>All forms</option>
+                <option value="attention" ${wordCheckStatus === "attention" ? "selected" : ""}>Needs attention</option>
+                <option value="invalid" ${wordCheckStatus === "invalid" ? "selected" : ""}>Invalid</option>
+                <option value="template-error" ${wordCheckStatus === "template-error" ? "selected" : ""}>Template errors</option>
+                <option value="off" ${wordCheckStatus === "off" ? "selected" : ""}>Checks off</option>
+                <option value="valid" ${wordCheckStatus === "valid" ? "selected" : ""}>Valid</option>
               </select>
               <span class="check-summary" data-phonotactics-word-summary></span>
               <button class="button button-quiet button-small" type="button" data-open-vocabulary>${icon("book")}Open vocabulary</button>
@@ -586,9 +630,6 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   const testResultElement = container.querySelector("[data-phonotactics-test-result]");
   const markStressButton = container.querySelector("[data-mark-stress]");
 
-  let wordCheckStatus = "all";
-  let wordCheckPage = 1;
-
   const refresh = () => {
     checker = createPhonotacticsChecker(language);
     const results = language.vocabulary.map((word) => checker.validate(word.form, word.stress));
@@ -600,6 +641,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
     });
     // A template or filter change can shrink the list under the current page.
     wordCheckPage = wordCheck.paging.page;
+    checkState.page = wordCheckPage;
     wordCheckElement.innerHTML = wordCheck.html;
     templateStatusElement.innerHTML = templateStatusMarkup(checker.compiled);
     templateFeedbackElement.innerHTML = templateFeedbackMarkup(checker.compiled);
@@ -611,6 +653,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
 
   const updateTest = () => {
     if (!testInput || !testResultElement) return;
+    checkState.text = testInput.value;
     testResultElement.innerHTML = testResultMarkup(checker.validate(testInput.value), checker.stress);
   };
 
@@ -769,11 +812,27 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
 
   container.querySelectorAll("[data-phonotactics-field]").forEach((input) => {
     input.addEventListener("input", () => {
-      language.phonotactics[input.dataset.phonotacticsField] = input.value;
+      const field = input.dataset.phonotacticsField;
+      if (field.startsWith("weight.")) {
+        const part = field.slice("weight.".length);
+        language.phonotactics.weightStress = {
+          ...normalizeWeightStress(language.phonotactics.weightStress),
+          [part]: input.value,
+        };
+      } else {
+        language.phonotactics[field] = input.value;
+      }
       ctx.touch({
         label: "Edit phonotactics",
-        coalesceKey: `field:${input.dataset.phonotacticsField}`,
+        coalesceKey: `field:${field}`,
       });
+      // Changing the stress system adds or removes the weight-setting fields,
+      // and changing a weight setting refreshes their labels, so those edits
+      // need a full re-render rather than just a checker refresh.
+      if (field === "stress" || field.startsWith("weight.")) {
+        ctx.refresh();
+        return;
+      }
       refresh();
     });
   });
@@ -783,6 +842,8 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   container.querySelector("[data-phonotactics-word-status]")?.addEventListener("change", (event) => {
     wordCheckStatus = event.target.value;
     wordCheckPage = 1;
+    checkState.status = wordCheckStatus;
+    checkState.page = wordCheckPage;
     refresh();
   });
 
@@ -791,6 +852,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
     if (pageButton) {
       const action = pageButton.dataset.pagerAction;
       wordCheckPage = Number(pageButton.dataset.pagerPage);
+      checkState.page = wordCheckPage;
       refresh();
       focusPager(wordCheckElement, action);
       return;

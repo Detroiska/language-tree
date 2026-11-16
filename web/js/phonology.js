@@ -18,6 +18,7 @@ import {
   normalizeStressScope,
   normalizeStressSystem,
   normalizeWordStress,
+  normalizeWeightStress,
   prosodyFallback,
   prosodyFromSyllables,
   remapStressToSyllables,
@@ -118,6 +119,7 @@ class SegmentContext {
     allowSyntheticOutputs = false,
     stressSystem = "none",
     stressScope = "phonetic",
+    weightStress = null,
     stressVisible = true,
     phonotactics = null,
   } = {}) {
@@ -128,6 +130,7 @@ class SegmentContext {
     // the compiled forms are cached on first use.
     this.stressSystem = normalizeStressSystem(stressSystem);
     this.stressScope = normalizeStressScope(stressScope);
+    this.weightStress = normalizeWeightStress(weightStress);
     // Sound-change rules see stress only in phonemic scope. Allophony and the
     // vocabulary checker always need it for the surface display, so they leave
     // this on even when the language stores stress phonetically.
@@ -293,7 +296,14 @@ class SegmentContext {
     if (compiled?.ok) {
       const parse = syllabifyTokens(tokens, compiled.shapes, this);
       if (parse.ok) {
-        prosody = prosodyFromSyllables(tokens, parse.syllables, this.stressSystem, cuts, storedStress);
+        prosody = prosodyFromSyllables(
+          tokens,
+          parse.syllables,
+          this.stressSystem,
+          cuts,
+          storedStress,
+          this.weightStress
+        );
       }
     }
     if (!prosody) {
@@ -302,7 +312,8 @@ class SegmentContext {
         (token) => this.isVowel(token),
         this.stressSystem,
         cuts,
-        storedStress
+        storedStress,
+        this.weightStress
       );
     }
     if (!this.stressVisible) {
@@ -318,7 +329,11 @@ class SegmentContext {
   }
 }
 
-export function contextForInventory(inventory, featureOverrides = null, { stress = "none", stressScope = "phonemic" } = {}) {
+export function contextForInventory(
+  inventory,
+  featureOverrides = null,
+  { stress = "none", stressScope = "phonemic", weightStress = null } = {}
+) {
   const known = new Set();
   const vowels = new Set();
   const consonants = new Set();
@@ -349,6 +364,7 @@ export function contextForInventory(inventory, featureOverrides = null, { stress
     featureOverrides,
     stressSystem: stress,
     stressScope,
+    weightStress,
     // The inventory context backs the vocabulary checker, which needs stress
     // for display even when the language keeps it out of the phonemic form.
     stressVisible: true,
@@ -442,6 +458,7 @@ function buildLanguageContext(
     allowSyntheticOutputs,
     stressSystem: language?.phonotactics?.stress,
     stressScope: language?.phonotactics?.stressScope,
+    weightStress: language?.phonotactics?.weightStress,
     // Sound-change contexts hide stress in phonetic scope. Allophony opts in
     // again below, since the surface form always shows predicted stress.
     stressVisible: language?.phonotactics?.stressScope === "phonemic",
@@ -2811,7 +2828,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
       derivedProsody.syllables,
       currentOrigins,
       currentStress,
-      context.stressSystem
+      context.stressSystem,
+      context.weightStress
     );
   }
   return {

@@ -177,9 +177,11 @@ The **Stress** panel picks one system per language:
 | Penultimate | the second-to-last syllable |
 | Antepenultimate | the third-to-last syllable |
 | Final | the last syllable |
-| Weight-sensitive | a heavy penult (coda, long nucleus, or diphthong); otherwise the antepenult, or the first syllable in a short word |
+| Weight-sensitive | a heavy penult (coda, long nucleus, or diphthong) by default; the tested position and the fallback when it is not heavy are configurable |
 
 Stress is computed from the same maximal-onset syllabifier as the template. Surface forms render it as `ˈ` before the stressed syllable, secondary stress as `ˌ`, and a dot between syllables, so `kasa` displays as `ˈka.sa` under initial stress.
+
+With **Weight-sensitive** stress the Stress panel also chooses which of the penultimate or antepenultimate syllable is tested for heaviness (a coda, long nucleus, or diphthong) and where stress falls when that syllable is not heavy: first, penultimate, antepenultimate, or final. The defaults are the original heavy-penult / otherwise-antepenult behavior, and older projects keep those defaults until a setting is changed.
 
 **Stress scope** decides whether that stress is part of the phonemic form:
 
