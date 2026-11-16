@@ -275,10 +275,12 @@ export function renderTree(container, ctx) {
     applyTransform();
   };
 
-  const zoomAt = (factor, clientX = viewport.clientWidth / 2, clientY = viewport.clientHeight / 2) => {
+  const zoomAt = (factor, clientX, clientY) => {
     const rect = viewport.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    // Wheel events pass page coordinates; the buttons pass none and mean the
+    // viewport's page-space center, not its local width/height.
+    const x = (clientX ?? rect.left + rect.width / 2) - rect.left;
+    const y = (clientY ?? rect.top + rect.height / 2) - rect.top;
     const next = Math.min(2.2, Math.max(0.25, zoom * factor));
     const ratio = next / zoom;
     panX = x - (x - panX) * ratio;

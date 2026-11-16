@@ -182,9 +182,12 @@ function updateChartCount(container, chart, kind, ctx) {
   // panel, so an in-place cell edit must refresh them too.
   const consonants = new Set(chartPhonemeList(ctx.language.inventory.consonants)).size;
   const vowels = new Set(chartPhonemeList(ctx.language.inventory.vowels)).size;
+  // The totals live in the section intro, a sibling of the tool panel that
+  // owns the edited cell — not inside the panel this helper is given.
+  const root = container.closest(".workspace-stack") || container;
   const summary = {
-    consonants: container.querySelector('[data-inventory-count="consonants"]'),
-    vowels: container.querySelector('[data-inventory-count="vowels"]'),
+    consonants: root.querySelector('[data-inventory-count="consonants"]'),
+    vowels: root.querySelector('[data-inventory-count="vowels"]'),
   };
   if (summary.consonants) summary.consonants.textContent = String(consonants);
   if (summary.vowels) summary.vowels.textContent = String(vowels);
