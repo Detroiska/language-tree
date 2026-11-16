@@ -431,7 +431,7 @@ function openBulkDialog(ctx, language, words) {
       </div>
       <div data-bulk-pane="import">
         <textarea class="bulk-input" data-bulk-input rows="7" spellcheck="false" placeholder="gloss → IPA form → note&#10;house&#9;kasa&#9;dwelling" aria-label="Word list to import"></textarea>
-        <p class="bulk-hint">One word per line: gloss, IPA form, optional note. Tabs, semicolons, or commas separate columns; 2+ spaces make an aligned table (multi-word glosses keep their spaces). A JSON array — or a single <code>{gloss, form, note}</code> object — works too. A header row is skipped when the first cell is “gloss”.</p>
+        <p class="bulk-hint">One word per line: gloss, IPA form, optional note. Tabs, semicolons, or commas separate columns; 2+ spaces make an aligned table (multi-word glosses keep their spaces). A JSON array — or a single <code>{gloss, form, note}</code> object — works too; it can also carry <code>pos</code>, <code>senses</code>, <code>tags</code>, <code>status</code>, <code>source</code> and <code>etymology</code> (JSON is the lossless format for those fields). The extended TSV header adds the four scalar fields; list fields stay JSON-only. A header row is skipped when the first cell is “gloss”.</p>
         <div class="bulk-mode-row">
           <label class="bulk-mode"><input type="radio" name="bulk-mode" value="skip" checked> Keep existing glosses (add new only)</label>
           <label class="bulk-mode"><input type="radio" name="bulk-mode" value="update"> Update existing glosses with the pasted forms</label>

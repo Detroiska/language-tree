@@ -451,6 +451,78 @@ equal(
   ]);
 }
 
+/* ---- lexicon metadata ---------------------------------------------------- */
+
+const metaEntry = {
+  gloss: "house",
+  form: "kasa",
+  note: "a place",
+  pos: "noun",
+  senses: ["dwelling", "household"],
+  tags: ["nature", "dwelling"],
+  status: "attested",
+  source: "Wiktionary",
+  etymology: "from *kas-",
+};
+const importedMeta = parseWordList(JSON.stringify([metaEntry])).rows[0];
+equal(
+  "JSON import reads every metadata field",
+  [importedMeta.pos, importedMeta.senses, importedMeta.tags, importedMeta.status, importedMeta.source, importedMeta.etymology],
+  ["noun", ["dwelling", "household"], ["nature", "dwelling"], "attested", "Wiktionary", "from *kas-"]
+);
+
+const metaTsv = toTsv([metaEntry]);
+equal(
+  "TSV adds scalar metadata columns only when fields are used",
+  metaTsv.split("\n")[0],
+  "gloss\tform\tnote\tpos\tstatus\tsource\tetymology"
+);
+const metaTsvRow = parseWordList(metaTsv).rows[0];
+equal(
+  "the extended TSV header imports scalar metadata",
+  [metaTsvRow.pos, metaTsvRow.status, metaTsvRow.source, metaTsvRow.etymology],
+  ["noun", "attested", "Wiktionary", "from *kas-"]
+);
+equal("list metadata stays JSON-only in TSV", Object.hasOwn(metaTsvRow, "senses"), false);
+
+{
+  const lang = { vocabulary: [] };
+  applyWordList(lang, [importedMeta], "skip");
+  equal(
+    "an imported word carries its metadata",
+    [lang.vocabulary[0].pos, lang.vocabulary[0].senses, lang.vocabulary[0].tags, lang.vocabulary[0].etymology],
+    ["noun", ["dwelling", "household"], ["nature", "dwelling"], "from *kas-"]
+  );
+}
+{
+  const lang = {
+    vocabulary: [
+      {
+        id: "w",
+        gloss: "house",
+        form: "kasa",
+        note: "",
+        pos: "noun",
+        senses: ["dwelling"],
+        etymology: "old note",
+      },
+    ],
+  };
+  applyWordList(lang, [{ gloss: "house", form: "kasa", note: "new note", pos: "" }], "update");
+  equal(
+    "blank or omitted metadata does not clobber recorded values",
+    [lang.vocabulary[0].pos, lang.vocabulary[0].senses, lang.vocabulary[0].etymology],
+    ["noun", ["dwelling"], "old note"]
+  );
+}
+
+const exportedMeta = JSON.parse(toJson([metaEntry]))[0];
+equal(
+  "JSON export includes scalar and list metadata",
+  [exportedMeta.pos, exportedMeta.senses, exportedMeta.tags, exportedMeta.status, exportedMeta.source, exportedMeta.etymology],
+  ["noun", ["dwelling", "household"], ["nature", "dwelling"], "attested", "Wiktionary", "from *kas-"]
+);
+
 /* ---- summary ------------------------------------------------------------- */
 
 console.log(`${passed} passed, ${failures.length} failed`);

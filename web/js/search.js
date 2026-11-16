@@ -1,9 +1,11 @@
+import { wordMetaText } from "./lexicon.js";
 import { allophonyEntries, getLineage, ruleNumberMap } from "./model.js";
 import { formatPhonemic, normalizeSearchText } from "./notation.js";
 import { esc, icon } from "./ui.js";
 
 // The command palette: Ctrl+K opens a searchable index of the whole project —
-// languages (by name and by lineage path), words (gloss, form, note), sound
+// languages (by name and by lineage path), words (gloss, form, note and
+// metadata), sound
 // changes (notation, note), allophony rules, plus the global views.
 // Results jump straight to the matching tab and highlight the hit.
 const TYPE_META = {
@@ -71,7 +73,7 @@ function indexEntries(project) {
         languageId: language.id,
         title: word.gloss || "(no gloss)",
         subtitle: `${formatPhonemic(word.form) || "∅"} · ${language.name}`,
-        searchText: `${word.gloss} ${normalizeSearchText(word.form)} ${word.note} ${language.name}`,
+        searchText: `${word.gloss} ${normalizeSearchText(word.form)} ${word.note} ${wordMetaText(word)} ${language.name}`,
         hash: `#/language/${encodeURIComponent(language.id)}/vocabulary`,
         focus: { kind: "word", id: word.id },
       });
