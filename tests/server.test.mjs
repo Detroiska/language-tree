@@ -1182,6 +1182,37 @@ try {
   equal("unexpected Host is refused", badHost.status, 403);
   equal("unexpected Host returns JSON", badHost.json?.error, "Unexpected Host header.");
 
+  // A Host beginning with a colon normalizes to the empty string in a naive
+  // host:port split, and the empty host is allowlisted for HTTP/1.0 clients.
+  // Those malformed values must not inherit that exemption.
+  const colonHost = await rawCall(server, { headers: { Host: ":evil.example" } });
+  equal("a Host beginning with a colon is refused", colonHost.status, 403);
+  const extraColonHost = await rawCall(server, { headers: { Host: "127.0.0.1:80:90" } });
+  equal("a Host with extra colons is refused", extraColonHost.status, 403);
+  const bracketedV6 = await rawCall(server, { headers: { Host: "[::1]:8765" } });
+  equal("a bracketed IPv6 loopback Host is still accepted", bracketedV6.status, 200);
+
+  // The banner and browser-launch URL must bracket an IPv6 literal.
+  const urlForHost = (host, port) => {
+    const probe = spawnSync(
+      python,
+      [
+        "-c",
+        [
+          "import sys",
+          `sys.path.insert(0, ${JSON.stringify(server.root)})`,
+          "import server",
+          `print(server.url_for_host(${JSON.stringify(host)}, ${port}))`,
+        ].join("\n"),
+      ],
+      { cwd: server.root, encoding: "utf8" }
+    );
+    if (probe.status !== 0) throw new Error(probe.stderr || probe.stdout);
+    return probe.stdout.trim();
+  };
+  equal("IPv4 loopback URL", urlForHost("127.0.0.1", 8765), "http://127.0.0.1:8765/");
+  equal("IPv6 loopback URL brackets the literal", urlForHost("::1", 8765), "http://[::1]:8765/");
+
   const badHeadHost = await rawCall(server, {
     method: "HEAD",
     path: "/index.html",

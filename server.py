@@ -62,7 +62,20 @@ def host_name_of(headers) -> str:
     host = (headers.get("Host") or "").strip().lower()
     if host.startswith("["):  # IPv6 literal, e.g. [::1]:8765
         return host[1:].split("]")[0]
+    # Only a well-formed host:port has a host part before a single colon. An
+    # unbracketed IPv6 literal (::1) or a leading colon (:evil.example) would
+    # otherwise normalize to the empty host, which is allowlisted for HTTP/1.0.
+    if host.startswith(":") or host.count(":") > 1:
+        return host
     return host.split(":")[0]  # drop the port
+
+
+def url_for_host(host: str, port: int) -> str:
+    """A URL a browser can open; IPv6 literals need brackets in URLs."""
+    host = host.strip()
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{port}/"
 
 
 def utc_now() -> str:
@@ -1050,7 +1063,7 @@ def main() -> None:
 
     host = args.host.strip()
     if args.port and host.lower() in LOOPBACK_BINDS:
-        url = f"http://{host}:{args.port}/"
+        url = url_for_host(host, args.port)
         if running_instance(host, args.port):
             # A repeat launch (common when start.bat is double-clicked again)
             # should reach the app, not create a second server that competes
@@ -1067,7 +1080,7 @@ def main() -> None:
     ensure_data_files()
     active = resolve_active_name()
     try:
-        server = LanguageTreeHTTPServer((args.host, args.port), LanguageTreeHandler)
+        server = LanguageTreeHTTPServer((host, args.port), LanguageTreeHandler)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise
@@ -1082,11 +1095,11 @@ def main() -> None:
     # Loopback binds serve this machine only, so the Host header must say so
     # too; any other name is treated as a rebinding attempt. Non-loopback
     # binds serve a network deliberately and skip the check.
-    server.allowed_hosts = LOOPBACK_HOSTS if args.host.strip().lower() in LOOPBACK_BINDS else None
+    server.allowed_hosts = LOOPBACK_HOSTS if host.lower() in LOOPBACK_BINDS else None
     # server_address carries the real port, which matters for --port 0: bind an
     # ephemeral port for tests without guessing one in advance.
     port = server.server_address[1]
-    url = f"http://{args.host}:{port}/"
+    url = url_for_host(host, port)
     print()
     print("  Language Tree")
     print(f"  {url}")
