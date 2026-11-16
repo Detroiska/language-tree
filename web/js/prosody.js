@@ -46,8 +46,8 @@ export function stressLabel(system) {
 }
 
 // A word-level override is stored as a 0-based syllable index. `null` means
-// "use the language system"; `secondary` is reserved for the secondary-stress
-// level but is preserved now so a legacy form does not lose its ˌ marks.
+// "use the language system"; `secondary` holds the other syllables that carry
+// ˌ. Legacy forms keep their ˌ marks by migrating them into this field.
 export function normalizeWordStress(value) {
   if (value == null) return null;
   const primaryRaw = typeof value === "number" ? value : value.primary;
@@ -61,6 +61,23 @@ export function normalizeWordStress(value) {
   ].sort((left, right) => left - right);
   if (primary === null && !secondary.length) return null;
   return { primary, secondary };
+}
+
+// Toggle secondary stress on one syllable. Secondary stress cannot share the
+// primary syllable, so clicking that syllable is a no-op. The result is
+// normalized (unique, sorted, no overlapping index) and may be null when the
+// last mark is removed; callers store it directly or delete the field. Kept
+// DOM-free so the vocabulary picker and the tests use the same rule.
+export function toggleSecondaryStress(wordStress, index) {
+  const stored = normalizeWordStress(wordStress);
+  if (!Number.isInteger(index) || index < 0 || stored?.primary === index) return stored;
+  const secondary = new Set(stored?.secondary || []);
+  if (secondary.has(index)) secondary.delete(index);
+  else secondary.add(index);
+  return normalizeWordStress({
+    primary: stored?.primary ?? null,
+    secondary: [...secondary],
+  });
 }
 
 // One-time migration from marks typed into a legacy word form. It counts vowel

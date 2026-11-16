@@ -90,6 +90,7 @@ import {
   stressIndexOf,
   stressLabel,
   stressMarksFromForm,
+  toggleSecondaryStress,
 } from "../web/js/prosody.js";
 import { decodeHashPart, languageHref } from "../web/js/routes.js";
 import {
@@ -1927,6 +1928,42 @@ equal(
   { primaryIndex: 1, secondaryIndices: [0] }
 );
 
+equal(
+  "toggling a syllable adds secondary stress",
+  toggleSecondaryStress({ primary: 1, secondary: [] }, 0),
+  { primary: 1, secondary: [0] }
+);
+equal(
+  "toggling an existing secondary removes it",
+  toggleSecondaryStress({ primary: 1, secondary: [0, 2] }, 0),
+  { primary: 1, secondary: [2] }
+);
+equal(
+  "secondary indices stay sorted and unique",
+  toggleSecondaryStress({ primary: 0, secondary: [2] }, 1),
+  { primary: 0, secondary: [1, 2] }
+);
+equal(
+  "the primary syllable cannot also carry secondary stress",
+  toggleSecondaryStress({ primary: 1, secondary: [] }, 1),
+  { primary: 1, secondary: [] }
+);
+equal(
+  "a negative syllable is ignored",
+  toggleSecondaryStress({ primary: 1, secondary: [] }, -1),
+  { primary: 1, secondary: [] }
+);
+equal(
+  "secondary stress can be set without a primary",
+  toggleSecondaryStress(null, 2),
+  { primary: null, secondary: [2] }
+);
+equal(
+  "toggling drops invalid stored secondary values",
+  toggleSecondaryStress({ primary: 0, secondary: [null, "2", -3, 0.5] }, 2),
+  { primary: 0, secondary: [2] }
+);
+
 const stressFixture = ensureProject({
   title: "Stress fixtures",
   languages: [
@@ -2254,6 +2291,20 @@ equal(
   stressMarkedForm("muka", initialChecker, { primary: null, secondary: [1] }),
   "muˌka"
 );
+equal(
+  "multiple secondary indices survive export",
+  stressMarkedForm("takama", initialChecker, { primary: 0, secondary: [1, 2] }),
+  "ˈtaˌkaˌma"
+);
+equal(
+  "a secondary-index difference makes phonemic forms distinct",
+  samePhonemicForm(
+    { form: "takama", stress: { primary: 0, secondary: [1, 2] } },
+    { form: "takama", stress: { primary: 0, secondary: [1] } },
+    { scope: "phonemic" }
+  ),
+  false
+);
 
 const stressProject = ensureProject({
   title: "Stress display",
@@ -2325,6 +2376,36 @@ equal(
   "allophony can condition on stress",
   surfaceForForm("kasa", stressAllophonyProject, "only").text,
   "kasə"
+);
+
+const secondaryStressProject = ensureProject({
+  title: "Secondary stress rules",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      phonotactics: { ...language.phonotactics, stress: "none" },
+      soundChanges: [{ id: "r1", notation: "a > ə / ˌ _", note: "", enabled: true }],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "sound changes can condition on secondary stress",
+  deriveForm("taka", secondaryStressProject, "only", {
+    wordStress: { primary: null, secondary: [1] },
+  }).text,
+  "takə"
+);
+equal(
+  "secondary stress does not satisfy a primary-stress rule",
+  deriveForm("taka", secondaryStressProject, "only", {
+    wordStress: { primary: 1, secondary: [] },
+  }).text,
+  "taka"
 );
 
 /* ---- morpheme boundaries ------------------------------------------------ */
