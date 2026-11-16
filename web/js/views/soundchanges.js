@@ -266,7 +266,7 @@ function testPanelMarkup(ctx, optionalRules = []) {
           ? `
             <div class="test-input-wrap">
               <label class="field-label" for="test-word">Input form <span class="field-optional">${esc(parent.name)}</span></label>
-              <input class="input ipa-input" id="test-word" data-test-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+              <textarea class="input ipa-input" id="test-word" data-test-input rows="1" wrap="off" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">${esc(initialValue)}</textarea>
               ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-test-word="${esc(word.form)}" data-test-gloss="${esc(word.gloss)}" title="Test with the gloss “${esc(word.gloss)}”">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
             </div>
             ${optionalRulesPickerMarkup(optionalRules, selectedOptional, "data-test-optional")}
@@ -314,7 +314,7 @@ function reconstructPanelMarkup(ctx) {
           ? `
             <div class="test-input-wrap">
               <label class="field-label" for="reconstruct-word">Daughter form <span class="field-optional">${esc(ctx.language.name)}</span></label>
-              <input class="input ipa-input" id="reconstruct-word" data-reconstruct-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+              <textarea class="input ipa-input" id="reconstruct-word" data-reconstruct-input rows="1" wrap="off" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">${esc(initialValue)}</textarea>
               ${suggestions.length ? `<div class="word-suggestions">${suggestions.map((word) => `<button class="word-suggestion" type="button" data-reconstruct-word="${esc(word.form)}" data-reconstruct-gloss="${esc(word.gloss)}" title="${esc(word.gloss)}">${esc(word.form)}<span>${esc(word.gloss)}</span></button>`).join("")}</div>` : ""}
             </div>
             <div class="derivation" data-reconstruct>

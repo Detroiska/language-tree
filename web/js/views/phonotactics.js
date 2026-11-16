@@ -403,7 +403,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
               </header>
               <div class="phonotactics-test-body">
                 <label class="field-label" for="phonotactics-test-form">Form <span class="field-optional">IPA</span></label>
-                <input class="input ipa-input" id="phonotactics-test-form" data-phonotactics-test value="${esc(checkState.text)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+                <textarea class="input ipa-input" id="phonotactics-test-form" data-phonotactics-test rows="1" wrap="off" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">${esc(checkState.text)}</textarea>
                 <div data-phonotactics-test-result></div>
               </div>
             </section>
@@ -838,6 +838,14 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   });
 
   testInput?.addEventListener("input", updateTest);
+  // The IPA field is a one-row textarea; Enter must stay a single-line field's
+  // submit gesture rather than inserting an invisible newline into the form.
+  testInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      updateTest();
+    }
+  });
 
   container.querySelector("[data-phonotactics-word-status]")?.addEventListener("change", (event) => {
     wordCheckStatus = event.target.value;

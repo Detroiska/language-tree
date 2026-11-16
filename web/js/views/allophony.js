@@ -266,7 +266,7 @@ function testPanelMarkup(language, optionalRules = []) {
       </header>
       <div class="test-input-wrap">
         <label class="field-label" for="allo-test-word">Phonemic input <span class="field-optional">/…/</span></label>
-        <input class="input ipa-input" id="allo-test-word" data-allo-test-input value="${esc(initialValue)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+        <textarea class="input ipa-input" id="allo-test-word" data-allo-test-input rows="1" wrap="off" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">${esc(initialValue)}</textarea>
         ${
           suggestions.length
             ? `<div class="word-suggestions">${suggestions
