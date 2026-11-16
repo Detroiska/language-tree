@@ -257,7 +257,7 @@ export function remapStressToSyllables(syllables, origins, wordStress, system) {
 
   const project = (sourceIndex) => {
     let best = -1;
-    let bestCount = 0;
+    let bestCount = -1;
     for (const [index, syllable] of syllables.entries()) {
       let count = 0;
       for (let position = 0; position < origins.length; position += 1) {
@@ -265,7 +265,9 @@ export function remapStressToSyllables(syllables, origins, wordStress, system) {
           count += 1;
         }
       }
-      if (count > bestCount || (count === bestCount && best === -1 && count > 0)) {
+      // First syllable with surviving origin segments wins ties. Zero-count
+      // syllables never claim the mark.
+      if (count > 0 && count > bestCount) {
         best = index;
         bestCount = count;
       }
