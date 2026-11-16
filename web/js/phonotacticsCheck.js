@@ -18,6 +18,7 @@ export function createPhonotacticsChecker(language) {
   const context = contextForInventory(language.inventory, language.featureOverrides, {
     stress,
     stressScope,
+    weightStress: language.phonotactics?.weightStress,
   });
   const compiled = compilePhonotactics(language.phonotactics || {}, context);
   return {

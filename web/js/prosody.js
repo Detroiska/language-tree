@@ -19,7 +19,7 @@ export const STRESS_SYSTEMS = [
   { value: "penult", label: "Penultimate" },
   { value: "antepenult", label: "Antepenultimate" },
   { value: "final", label: "Final" },
-  { value: "weight", label: "Weight-sensitive (penult if heavy)" },
+  { value: "weight", label: "Weight-sensitive (heavy syllable)" },
 ];
 
 const STRESS_VALUES = new Set(STRESS_SYSTEMS.map((item) => item.value));
@@ -28,6 +28,30 @@ export const STRESS_SCOPES = [
   { value: "phonetic", label: "Phonetic only — shown in [ … ]" },
   { value: "phonemic", label: "Phonemic — shown in / … / and usable in sound changes" },
 ];
+
+// Weight-sensitive placement has two settings: which of the last two
+// syllables is tested for heaviness, and where stress lands when that test
+// fails. The defaults reproduce the original hardcoded behavior.
+export const STRESS_WEIGHT_PRIMARY = [
+  { value: "penult", label: "Penultimate (toward the end)" },
+  { value: "antepenult", label: "Antepenultimate (toward the start)" },
+];
+export const STRESS_WEIGHT_FALLBACK = [
+  { value: "initial", label: "First syllable" },
+  { value: "penult", label: "Penultimate" },
+  { value: "antepenult", label: "Antepenultimate" },
+  { value: "final", label: "Final syllable" },
+];
+const WEIGHT_PRIMARY_VALUES = new Set(STRESS_WEIGHT_PRIMARY.map((item) => item.value));
+const WEIGHT_FALLBACK_VALUES = new Set(STRESS_WEIGHT_FALLBACK.map((item) => item.value));
+
+export function normalizeWeightStress(value) {
+  const base = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    primary: WEIGHT_PRIMARY_VALUES.has(base.primary) ? base.primary : "penult",
+    fallback: WEIGHT_FALLBACK_VALUES.has(base.fallback) ? base.fallback : "antepenult",
+  };
+}
 
 export function normalizeStressSystem(value) {
   return STRESS_VALUES.has(value) ? value : "none";
@@ -198,7 +222,7 @@ export function isHeavySyllable(syllable) {
 
 // "weight" follows the Latin-style default: stress the penult if it is heavy,
 // otherwise the antepenult, falling back to the first syllable in short words.
-export function stressIndexOf(syllables, system) {
+export function stressIndexOf(syllables, system, weightStress = null) {
   const count = syllables?.length || 0;
   if (!count) return -1;
   const normalized = normalizeStressSystem(system);
@@ -209,9 +233,13 @@ export function stressIndexOf(syllables, system) {
   if (normalized === "antepenult") return Math.max(0, count - 3);
   if (normalized === "weight") {
     if (count === 1) return 0;
-    const penult = count - 2;
-    if (isHeavySyllable(syllables[penult])) return penult;
-    return count >= 3 ? count - 3 : 0;
+    const config = normalizeWeightStress(weightStress);
+    const candidate = config.primary === "antepenult" ? count - 3 : count - 2;
+    if (candidate >= 0 && isHeavySyllable(syllables[candidate])) return candidate;
+    if (config.fallback === "initial") return 0;
+    if (config.fallback === "final") return count - 1;
+    if (config.fallback === "penult") return Math.max(0, count - 2);
+    return Math.max(0, count - 3);
   }
   return -1;
 }
@@ -220,12 +248,14 @@ export function stressIndexOf(syllables, system) {
 // index is stale (the form or template changed), so the default takes over
 // instead of silently stressing the wrong syllable. A secondary index is
 // dropped only when the form no longer has that syllable.
-export function resolveStress(syllables, system, wordStress = null) {
+export function resolveStress(syllables, system, wordStress = null, weightStress = null) {
   const count = syllables?.length || 0;
   if (!count) return { primaryIndex: -1, secondaryIndices: [] };
   const stored = normalizeWordStress(wordStress);
   const primaryIndex =
-    stored?.primary != null && stored.primary < count ? stored.primary : stressIndexOf(syllables, system);
+    stored?.primary != null && stored.primary < count
+      ? stored.primary
+      : stressIndexOf(syllables, system, weightStress);
   const secondaryIndices = (stored?.secondary || []).filter(
     (index) => index < count && index !== primaryIndex
   );
@@ -251,7 +281,7 @@ export function syllableOrigins(syllables, tokenCount) {
 // stressed syllable is lost, the primary is left unset so the daughter's
 // default placement takes over. The result is pruned against the effective
 // primary, so a surviving secondary cannot hide behind a new default.
-export function remapStressToSyllables(syllables, origins, wordStress, system) {
+export function remapStressToSyllables(syllables, origins, wordStress, system, weightStress = null) {
   const stored = normalizeWordStress(wordStress);
   if (!stored || !syllables?.length || !origins?.length) return null;
 
@@ -282,7 +312,7 @@ export function remapStressToSyllables(syllables, origins, wordStress, system) {
     secondary,
   });
   if (!candidate) return null;
-  const effective = resolveStress(syllables, system, candidate);
+  const effective = resolveStress(syllables, system, candidate, weightStress);
   return pruneSecondaryStress(candidate, effective.primaryIndex, syllables.length);
 }
 
@@ -324,9 +354,21 @@ export function stressMarksFromForm(form, vowelSymbols = []) {
 // the stress array marks every token of the stressed syllable, which lets a
 // rule condition on any segment in that syllable without special-casing
 // onsets, nuclei, and codas.
-export function prosodyFromSyllables(tokens, syllables, system, junctures = null, wordStress = null) {
+export function prosodyFromSyllables(
+  tokens,
+  syllables,
+  system,
+  junctures = null,
+  wordStress = null,
+  weightStress = null
+) {
   const cuts = cutSet(junctures);
-  const { primaryIndex: stressIndex, secondaryIndices } = resolveStress(syllables, system, wordStress);
+  const { primaryIndex: stressIndex, secondaryIndices } = resolveStress(
+    syllables,
+    system,
+    wordStress,
+    weightStress
+  );
   const stress = new Array(tokens.length).fill("");
   const boundaries = new Set([0, tokens.length]);
 
@@ -412,7 +454,14 @@ function fallbackSyllables(tokens, isVowel) {
   });
 }
 
-export function prosodyFallback(tokens, isVowel, system, junctures = null, wordStress = null) {
+export function prosodyFallback(
+  tokens,
+  isVowel,
+  system,
+  junctures = null,
+  wordStress = null,
+  weightStress = null
+) {
   const syllables = fallbackSyllables(tokens, isVowel);
   if (!syllables.length) {
     const text = joinSegments(tokens, cutSet(junctures));
@@ -426,5 +475,5 @@ export function prosodyFallback(tokens, isVowel, system, junctures = null, wordS
       marked: text,
     };
   }
-  return prosodyFromSyllables(tokens, syllables, system, junctures, wordStress);
+  return prosodyFromSyllables(tokens, syllables, system, junctures, wordStress, weightStress);
 }

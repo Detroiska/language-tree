@@ -2,8 +2,11 @@ import { createPhonotacticsChecker } from "../phonotacticsCheck.js";
 import {
   STRESS_SCOPES,
   STRESS_SYSTEMS,
+  STRESS_WEIGHT_FALLBACK,
+  STRESS_WEIGHT_PRIMARY,
   normalizeStressScope,
   normalizeStressSystem,
+  normalizeWeightStress,
   normalizeWordStress,
   stressLabel,
 } from "../prosody.js";
@@ -533,8 +536,36 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
                     `<option value="${esc(item.value)}" ${normalizeStressSystem(phonotactics.stress) === item.value ? "selected" : ""}>${esc(item.label)}</option>`
                 ).join("")}
               </select>
-              <span class="field-help">Weight-sensitive stress stresses a heavy penult — one with a coda or long nucleus — and otherwise falls back to the antepenult. Rule environments can test stress with <code>ˈ</code>/<code>ˌ</code> and syllable edges with <code>.</code> or <code>σ</code>.</span>
+              <span class="field-help">Rule environments can test stress with <code>ˈ</code>/<code>ˌ</code> and syllable edges with <code>.</code> or <code>σ</code>.</span>
             </label>
+            ${
+              normalizeStressSystem(phonotactics.stress) === "weight"
+                ? (() => {
+                    const weight = normalizeWeightStress(phonotactics.weightStress);
+                    return `
+            <label class="field">
+              <span class="field-label">Heavy syllable</span>
+              <select class="select" data-phonotactics-field="weight.primary" aria-label="Heavy syllable to check">
+                ${STRESS_WEIGHT_PRIMARY.map(
+                  (item) =>
+                    `<option value="${esc(item.value)}" ${weight.primary === item.value ? "selected" : ""}>${esc(item.label)}</option>`
+                ).join("")}
+              </select>
+              <span class="field-help">A heavy syllable has a coda, a long nucleus, or a diphthong. The chosen position is stressed when it is heavy.</span>
+            </label>
+            <label class="field">
+              <span class="field-label">No heavy syllable</span>
+              <select class="select" data-phonotactics-field="weight.fallback" aria-label="Fallback when no heavy syllable">
+                ${STRESS_WEIGHT_FALLBACK.map(
+                  (item) =>
+                    `<option value="${esc(item.value)}" ${weight.fallback === item.value ? "selected" : ""}>${esc(item.label)}</option>`
+                ).join("")}
+              </select>
+              <span class="field-help">Where primary stress lands when the heavy-syllable check fails. The defaults reproduce the original penult-if-heavy, otherwise antepenult behavior.</span>
+            </label>`;
+                  })()
+                : ""
+            }
             <label class="field">
               <span class="field-label">Stress scope</span>
               <select class="select" data-phonotactics-field="stressScope" aria-label="Stress scope">
@@ -769,11 +800,27 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
 
   container.querySelectorAll("[data-phonotactics-field]").forEach((input) => {
     input.addEventListener("input", () => {
-      language.phonotactics[input.dataset.phonotacticsField] = input.value;
+      const field = input.dataset.phonotacticsField;
+      if (field.startsWith("weight.")) {
+        const part = field.slice("weight.".length);
+        language.phonotactics.weightStress = {
+          ...normalizeWeightStress(language.phonotactics.weightStress),
+          [part]: input.value,
+        };
+      } else {
+        language.phonotactics[field] = input.value;
+      }
       ctx.touch({
         label: "Edit phonotactics",
-        coalesceKey: `field:${input.dataset.phonotacticsField}`,
+        coalesceKey: `field:${field}`,
       });
+      // Changing the stress system adds or removes the weight-setting fields,
+      // and changing a weight setting refreshes their labels, so those edits
+      // need a full re-render rather than just a checker refresh.
+      if (field === "stress" || field.startsWith("weight.")) {
+        ctx.refresh();
+        return;
+      }
       refresh();
     });
   });

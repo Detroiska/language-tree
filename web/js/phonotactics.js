@@ -867,7 +867,8 @@ export function validateWord(form, compiled, context, wordStress = null) {
       parse.syllables,
       context.stressSystem || "none",
       parsed.junctures,
-      wordStress
+      wordStress,
+      context.weightStress
     );
     result.stressIndex = prosody.stressIndex;
     result.secondaryIndices = prosody.secondaryIndices;

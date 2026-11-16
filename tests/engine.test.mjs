@@ -93,6 +93,7 @@ import {
   normalizeWordStress,
   pruneSecondaryStress,
   resolveStress,
+  normalizeWeightStress,
   stressIndexOf,
   stressLabel,
   stressMarksFromForm,
@@ -1838,7 +1839,7 @@ equal(
   macronChecker.validate("papaːpa").stressIndex
 );
 equal("unknown stress systems normalize to none", normalizeStressSystem("loud"), "none");
-equal("stress labels read naturally", stressLabel("weight"), "Weight-sensitive (penult if heavy)");
+equal("stress labels read naturally", stressLabel("weight"), "Weight-sensitive (heavy syllable)");
 equal("missing stress defaults to none", migratedPhonotactics.stress, "none");
 
 const initialChecker = createPhonotacticsChecker({
@@ -1864,6 +1865,62 @@ const weightChecker = createPhonotacticsChecker({
 });
 equal("a heavy penult is stressed", weightChecker.validate("kasantan").displayText, "ka.ˈsan.tan");
 equal("a light penult falls back to the antepenult", weightChecker.validate("kasantaka").displayText, "ka.ˈsan.ta.ka");
+
+const wLight = (start) => ({ start, end: start + 1, nucleus: ["a"], coda: [] });
+const wHeavy = (start) => ({ start, end: start + 2, nucleus: ["a"], coda: ["t"] });
+const fourSyllables = [wLight(0), wLight(1), wHeavy(2), wLight(3)];
+equal(
+  "weight stress defaults to a heavy penult",
+  stressIndexOf(fourSyllables, "weight"),
+  2
+);
+equal(
+  "weight stress can check the antepenult instead",
+  stressIndexOf(fourSyllables, "weight", { primary: "antepenult", fallback: "initial" }),
+  0
+);
+equal(
+  "weight stress can fall back to the final syllable",
+  stressIndexOf([wLight(0), wLight(1), wLight(2)], "weight", { primary: "penult", fallback: "final" }),
+  2
+);
+equal(
+  "weight settings normalize unknown values to the historical defaults",
+  normalizeWeightStress({ primary: "sideways", fallback: "middle" }),
+  { primary: "penult", fallback: "antepenult" }
+);
+const configuredWeightChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: {
+    ...language.phonotactics,
+    stress: "weight",
+    weightStress: { primary: "penult", fallback: "final" },
+  },
+});
+equal(
+  "a configured fallback reaches the phonotactics checker",
+  configuredWeightChecker.validate("kasa").displayText,
+  "ka.ˈsa"
+);
+const legacyWeightProject = ensureProject({
+  title: "Legacy weight",
+  languages: [
+    {
+      id: "legacy_weight",
+      name: "Legacy",
+      parentId: null,
+      ...language,
+      phonotactics: { ...language.phonotactics, stress: "weight" },
+      soundChanges: [],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "older projects keep implicit weight defaults without a new field",
+  Object.hasOwn(legacyWeightProject.languages[0].phonotactics, "weightStress"),
+  false
+);
 
 equal("stress-conditioned rule targets the stressed syllable", stressApply(stressCtx, "a > ə / ˈ _", "kasa"), { out: "kəsa" });
 equal("stress-conditioned rule ignores unstressed syllables", stressApply(finalCtx, "a > ə / ˈ _", "kasa"), { out: "kasə" });

@@ -3,6 +3,7 @@ import { normalizeFeatureOverrides } from "./features.js";
 import {
   normalizeStressScope,
   normalizeStressSystem,
+  normalizeWeightStress,
   normalizeWordStress,
   stressMarksFromForm,
 } from "./prosody.js";
@@ -561,6 +562,11 @@ function ensurePhonotactics(value) {
       : [],
     stress: normalizeStressSystem(base.stress),
   };
+  // Like stressScope, this is written only when the file already carries it so
+  // older projects (including the tracked demo) stay byte-identical on load.
+  if (base.weightStress && typeof base.weightStress === "object") {
+    phonotactics.weightStress = normalizeWeightStress(base.weightStress);
+  }
   // Older files did not have a scope field, and the tracked demo must stay
   // byte-identical through ensureProject. Missing means the phonetic default;
   // write the field only when the file already carried one or migration sets
