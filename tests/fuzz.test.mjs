@@ -13,6 +13,7 @@
 // The summary prints at the end and failures print details; the process exits
 // non-zero on any failure.
 
+import { normalizeWordMeta } from "../web/js/lexicon.js";
 import { defaultInventory } from "../web/js/model.js";
 import { applyRule, compileRule, contextForInventory } from "../web/js/phonology.js";
 import { parseWordList, toJson, toTsv } from "../web/js/bulk.js";
@@ -634,6 +635,49 @@ runFuzz(
       check(
         parsed.warnings.some((warning) => /not a word list/i.test(warning)),
         "a non-word object did not warn"
+      );
+    }
+  }
+);
+
+const META_FIELDS_FOR_FUZZ = ["pos", "status", "source", "etymology", "senses", "tags"];
+
+function randomMetaEntry(random) {
+  const word = randomWord(random);
+  const entry = { gloss: word.gloss, form: word.form };
+  for (const field of ["pos", "status", "source", "etymology"]) {
+    if (chance(random, 0.5)) entry[field] = pick(random, [" noun ", "verb", "", "  ", 42, null]);
+  }
+  for (const field of ["senses", "tags"]) {
+    if (!chance(random, 0.5)) continue;
+    const items = [];
+    const count = randomInt(random, 0, 4);
+    for (let index = 0; index < count; index += 1) {
+      items.push(pick(random, [" dwelling ", "house", "", "  ", 7, "HOUSE"]));
+    }
+    entry[field] = items;
+  }
+  return entry;
+}
+
+runFuzz(
+  "JSON metadata imports with the same normalization as the model",
+  SEED,
+  CASES,
+  (random) => {
+    const entry = randomMetaEntry(random);
+    return { entry, text: JSON.stringify([entry]) };
+  },
+  ({ entry, text }) => {
+    const row = parseWordList(text).rows[0];
+    const normalized = normalizeWordMeta(entry);
+    for (const field of META_FIELDS_FOR_FUZZ) {
+      const expected = Object.prototype.hasOwnProperty.call(normalized, field)
+        ? normalized[field]
+        : undefined;
+      check(
+        JSON.stringify(row[field]) === JSON.stringify(expected),
+        `${field} mismatch for ${text}\n    expected: ${JSON.stringify(expected)}\n    actual:   ${JSON.stringify(row[field])}`
       );
     }
   }

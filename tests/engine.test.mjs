@@ -4818,6 +4818,66 @@ truthy(
   overrideHtml.includes("Feature overrides") && overrideHtml.includes(customSymbol)
 );
 
+const metaReportProject = {
+  title: "Meta report",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      allophony: [],
+      vocabulary: [
+        {
+          id: "m1",
+          gloss: "house",
+          form: "kasa",
+          note: "dwelling",
+          pos: "noun",
+          senses: ["dwelling", "household"],
+          tags: ["nature"],
+          status: "attested",
+          source: "Wiktionary",
+          etymology: "from *kas-",
+        },
+      ],
+    },
+  ],
+};
+const metaReportMarkdown = buildMarkdown(metaReportProject);
+truthy(
+  "report adds metadata columns when fields are used",
+  metaReportMarkdown.includes("| Gloss | Form | POS | Senses | Tags | Status | Source | Etymology | Note |")
+);
+truthy(
+  "report writes list metadata as readable cells",
+  metaReportMarkdown.includes("dwelling; household") && metaReportMarkdown.includes("nature")
+);
+truthy(
+  "a report without metadata keeps its original vocabulary columns",
+  allophonyMarkdown.includes("| Gloss | Form | Surface | Note |")
+);
+const metaReportHtml = buildHtml(metaReportProject);
+truthy(
+  "HTML report includes metadata columns and values",
+  metaReportHtml.includes("<th>POS</th>") && metaReportHtml.includes("from *kas-")
+);
+truthy(
+  "HTML report does not style metadata cells as IPA",
+  !metaReportHtml.includes('<td class="form">noun</td>')
+);
+const hostileMetaReport = buildHtml({
+  ...metaReportProject,
+  languages: [
+    {
+      ...metaReportProject.languages[0],
+      vocabulary: [{ ...metaReportProject.languages[0].vocabulary[0], source: '<img src=x onerror="alert(1)">' }],
+    },
+  ],
+});
+truthy("HTML report escapes metadata text", hostileMetaReport.includes("&lt;img src=x") && !hostileMetaReport.includes("<img src=x"));
+
 /* ---- segment diff -------------------------------------------------------- */
 
 equal(
