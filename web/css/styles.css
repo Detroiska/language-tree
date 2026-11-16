@@ -4916,6 +4916,16 @@ th:hover > .axis-menu,
   display: none;
 }
 
+.orthographic-preview-wrap {
+  padding: 1px 6px 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.orthographic-preview-wrap:empty {
+  display: none;
+}
+
 .phonemic-preview {
   display: inline-block;
   color: var(--ink-soft, var(--ink));

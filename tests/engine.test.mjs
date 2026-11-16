@@ -4940,6 +4940,40 @@ const hostileMetaReport = buildHtml({
 });
 truthy("HTML report escapes metadata text", hostileMetaReport.includes("&lt;img src=x") && !hostileMetaReport.includes("<img src=x"));
 
+const orthoReportProject = {
+  title: "Orthography report",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      ...language,
+      soundChanges: [],
+      allophony: [],
+      orthography: { pairs: [{ phonemes: "ʃ", graph: "sh" }, { phonemes: "a", graph: "a" }] },
+      vocabulary: [{ id: "w", gloss: "house", form: "ʃaka", note: "" }],
+    },
+  ],
+};
+const orthoMarkdown = buildMarkdown(orthoReportProject);
+truthy(
+  "report includes an orthography table when pairs exist",
+  /### Orthography/.test(orthoMarkdown) && orthoMarkdown.includes("| Phonemes | Grapheme | Note |") && orthoMarkdown.includes("sh")
+);
+truthy(
+  "report writes orthographic forms in the vocabulary table",
+  orthoMarkdown.includes("| Gloss | Form | Written | Note |") && orthoMarkdown.includes("shaka")
+);
+truthy(
+  "reports without orthography keep their original columns",
+  allophonyMarkdown.includes("| Gloss | Form | Surface | Note |")
+);
+const orthoHtmlReport = buildHtml(orthoReportProject);
+truthy(
+  "HTML report includes orthography and written forms",
+  orthoHtmlReport.includes("<h3>Orthography</h3>") && orthoHtmlReport.includes("shaka")
+);
+
 /* ---- segment diff -------------------------------------------------------- */
 
 equal(

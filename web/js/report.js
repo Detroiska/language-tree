@@ -15,6 +15,7 @@ import { normalizeStressScope, stressLabel } from "./prosody.js";
 import { describeBundle } from "./features.js";
 import { formatPhonemic, formatPhonetic } from "./notation.js";
 import { formatMetaCell, lexiconColumns } from "./lexicon.js";
+import { hasOrthography, toOrthography } from "./orthography.js";
 import { createPhonotacticsChecker, phonemicFormForWord } from "./phonotacticsCheck.js";
 import { esc } from "./escape.js";
 import { normalizeGloss } from "./gloss.js";
@@ -136,6 +137,11 @@ function featureOverrideRows(language) {
     .map(([sound, bundle]) => [sound, describeBundle(bundle, { full: true }).join(" ")]);
 }
 
+function orthographyRows(language) {
+  const pairs = Array.isArray(language.orthography?.pairs) ? language.orthography.pairs : [];
+  return pairs.map((pair) => [pair.phonemes, pair.graph, pair.note || ""]);
+}
+
 function surfaceOf(project, language, form, gloss = "", wordStress = null) {
   const result = surfaceForForm(form, project, language.id, { gloss, wordStress });
   return result.errors.length ? "" : result.display;
@@ -156,18 +162,21 @@ function vocabularyTable(project, language) {
   // Metadata columns appear only for fields the lexicon actually uses, so an
   // older project's report keeps its original shape.
   const columns = lexiconColumns(language.vocabulary);
+  const orthographic = hasOrthography(language.orthography);
   return {
     headers: [
       "Gloss",
       "Form",
+      ...(orthographic ? ["Written"] : []),
       ...(hasSurface ? ["Surface"] : []),
       ...columns.map((column) => column.label),
       "Note",
     ],
     // Only the IPA columns get monospaced form styling in the HTML report.
-    formColumns: hasSurface ? [1, 2] : [1],
+    formColumns: hasSurface ? [1, orthographic ? 3 : 2] : [1],
     rows: language.vocabulary.map((word) => {
       const row = [word.gloss, formatPhonemic(phonemicFormForWord(word, checker))];
+      if (orthographic) row.push(toOrthography(word.form, language.orthography));
       if (hasSurface) {
         row.push(formatPhonetic(surfaceOf(project, language, word.form, word.gloss, word.stress)));
       }
@@ -248,6 +257,11 @@ function mdLanguageSection(project, language) {
         overrides
       )}`
     );
+  }
+
+  const ortho = orthographyRows(language);
+  if (ortho.length) {
+    parts.push(`${section} Orthography\n\n${mdTable(["Phonemes", "Grapheme", "Note"], ortho)}`);
   }
 
   const phonotactics = phonotacticsRows(language);
@@ -372,6 +386,11 @@ function htmlLanguageSection(project, language, index) {
       )}`
     : "";
 
+  const orthoRowsData = orthographyRows(language);
+  const orthoHtml = orthoRowsData.length
+    ? `<h3>Orthography</h3>${htmlTable(["Phonemes", "Grapheme", "Note"], orthoRowsData, { formColumns: [0, 1] })}`
+    : "";
+
   const phonoRows = phonotacticsRows(language);
   const phonotacticsHtml = phonoRows.length
     ? htmlTable(["Setting", "Value"], phonoRows, { formColumns: [] })
@@ -410,7 +429,7 @@ function htmlLanguageSection(project, language, index) {
       <h2>${esc(language.name)}</h2>
       <p class="report-lineage">${lineage} <span class="report-stats">· ${stats.consonants} C · ${stats.vowels} V · ${stats.changes} ${plural(stats.changes, "rule")} · ${stats.allophony} allophony ${plural(stats.allophony, "rule")} · ${stats.words} ${plural(stats.words, "word")}</span></p>
       ${String(language.notes || "").trim() ? `<blockquote>${esc(language.notes).replace(/\r?\n/g, "<br>")}</blockquote>` : ""}
-      <div class="report-block"><h3 class="block-title">Phonology</h3>${charts}${overridesHtml}</div>
+      <div class="report-block"><h3 class="block-title">Phonology</h3>${charts}${overridesHtml}${orthoHtml}</div>
       ${phonotacticsHtml ? `<div class="report-block"><h3 class="block-title">Phonotactics</h3>${phonotacticsHtml}</div>` : ""}
       ${rulesHtml ? `<div class="report-block"><h3 class="block-title">Sound changes</h3>${rulesHtml}</div>` : ""}
       ${allophonyHtml ? `<div class="report-block"><h3 class="block-title">Allophony</h3>${allophonyHtml}</div>` : ""}

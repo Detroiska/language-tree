@@ -14,6 +14,7 @@
 // non-zero on any failure.
 
 import { normalizeWordMeta } from "../web/js/lexicon.js";
+import { fromOrthography, toOrthography } from "../web/js/orthography.js";
 import { defaultInventory } from "../web/js/model.js";
 import { applyRule, compileRule, contextForInventory } from "../web/js/phonology.js";
 import { parseWordList, toJson, toTsv } from "../web/js/bulk.js";
@@ -680,6 +681,43 @@ runFuzz(
         `${field} mismatch for ${text}\n    expected: ${JSON.stringify(expected)}\n    actual:   ${JSON.stringify(row[field])}`
       );
     }
+  }
+);
+
+const ORTHO_PHONEMES = ["a", "i", "u", "k", "s", "ʃ", "t͡s"];
+const ORTHO_GRAPHS = ["a", "i", "u", "k", "s", "sh", "ts"];
+
+runFuzz(
+  "orthography round-trips forms built from mapped phonemes",
+  SEED,
+  CASES,
+  (random) => {
+    const count = randomInt(random, 1, ORTHO_PHONEMES.length);
+    const pairs = ORTHO_PHONEMES.slice(0, count).map((phonemes, index) => ({ phonemes, graph: ORTHO_GRAPHS[index] }));
+    const table = { pairs };
+    const length = randomInt(random, 0, 6);
+    let form = "";
+    for (let index = 0; index < length; index += 1) form += pick(random, ORTHO_PHONEMES.slice(0, count));
+    return { table, form };
+  },
+  ({ table, form }) => {
+    const written = toOrthography(form, table);
+    check(fromOrthography(written, table) === form, `${form} -> ${written} -> ${fromOrthography(written, table)}`);
+  }
+);
+
+runFuzz(
+  "unmapped phonemes survive orthography conversion",
+  SEED,
+  CASES,
+  (random) => {
+    const table = { pairs: ORTHO_PHONEMES.map((phonemes, index) => ({ phonemes, graph: ORTHO_GRAPHS[index] })) };
+    const form = `?${pick(random, ORTHO_PHONEMES)}?`;
+    return { table, form };
+  },
+  ({ table, form }) => {
+    check(toOrthography(form, table).startsWith("?"), `${form} lost its unmapped prefix`);
+    check(toOrthography(form, table).endsWith("?"), `${form} lost its unmapped suffix`);
   }
 );
 
