@@ -1905,6 +1905,18 @@ truthy(
   "stress output stays unavailable to allophony rules",
   !compileRule("a > ˈa", stressCtx).ok
 );
+truthy(
+  "a failed input stress mark is explained",
+  /stress marks do not/u.test(
+    explainRuleMiss(
+      stressCtx.tokenize("kaki"),
+      compileRule("ˈi > x", stressCtx, { allowStressChange: true }).rule,
+      stressCtx,
+      null,
+      { primary: 0 }
+    )
+  )
+);
 
 /* ---- lexical stress and stress scope ------------------------------------ */
 
@@ -2485,6 +2497,10 @@ equal("a stress-moving rule moves the primary to the output syllable", movedPrim
   primary: 1,
   secondary: [],
 });
+truthy(
+  "a stress-only rule is reported as a changed step",
+  movedPrimary.steps.some((step) => step.changed)
+);
 equal(
   "a stress-moving rule requires the input mark",
   deriveInheritedWord({ gloss: "house", form: "kaba", stress: { primary: 1 } }, stressMoveProject, "move_daughter")

@@ -1820,7 +1820,7 @@ export function compileRule(notation, context, options = {}) {
       // Allophony contexts keep stress visible even in phonetic scope, so this
       // warning belongs to sound changes only: there the mark is truly inert.
       warnings.push(
-        "Stress marks only match in phonemic scope. Set the scope to “Phonemic” in Phonotactics → Stress, or this rule will never see or write stress."
+        "Stress marks only match in phonemic scope. Set the scope to “Phonemic” in Phonotactics → Stress, or this rule will never see input stress; output marks still write the field but stay hidden in /…/."
       );
     }
   }
@@ -2099,11 +2099,20 @@ export function explainRuleMiss(tokens, compiled, context, junctures = null, wor
   }
 
   let targetHits = 0;
+  let stressMisses = 0;
   let leftOk = 0;
   for (let index = 0; index < tokens.length; index += 1) {
     let bindings = matchTarget(tokens, index, compiled.target, context);
     if (!bindings) continue;
     targetHits += 1;
+    if (
+      compiled.stressInput?.some(
+        (value, offset) => value && (!prosody || prosody.stress[index + offset] !== value)
+      )
+    ) {
+      stressMisses += 1;
+      continue;
+    }
     bindings = matchesLeft(tokens, index, left, context, bindings, prosody, "adjacent", null, cuts);
     if (!bindings) continue;
     leftOk += 1;
@@ -2125,6 +2134,9 @@ export function explainRuleMiss(tokens, compiled, context, junctures = null, wor
   if (!targetHits) {
     const form = tokens.join("") || "∅";
     return `The input (${describePattern(compiled.target)}) matches no part of “${form}”.`;
+  }
+  if (stressMisses === targetHits) {
+    return `The input matches at ${unit(targetHits)}, but its stress marks do not (input stress requires phonemic scope).`;
   }
   if (hasLeft && !leftOk) {
     return `The input matches at ${unit(targetHits)}, but the left environment (${describePattern(left)}) always fails there.`;
@@ -2260,6 +2272,10 @@ function nextStressForChanges(wordStress, changes, origins) {
   return normalizeWordStress({ primary, secondary: [...secondary] });
 }
 
+function sameStressRecord(left, right) {
+  return JSON.stringify(normalizeWordStress(left)) === JSON.stringify(normalizeWordStress(right));
+}
+
 // Give each output segment the syllable origin of the input segment it came
 // from. Echo outputs name that input explicitly; one-to-one rewrites keep the
 // matching position; insertions and untraceable rewrites carry no origin.
@@ -2326,16 +2342,20 @@ export function applyRule(tokens, compiled, context, junctures = null, wordStres
     outputOrigins.push(...origins.slice(originCursor));
   }
   const outputJunctures = dropEdgeJunctures(shiftJunctures(cuts, changes), output.length);
+  const outputStress = nextStressForChanges(wordStress, changes, origins);
   // A feature delta can match a segment and leave its bundle unchanged, and a
   // literal rule can rewrite a sound to itself. Neither is a surface change, so
   // the derivation should not present it as one. Losing a cut during a rewrite
-  // is still a change in the displayed form.
+  // or moving a stress mark is still a change.
   return {
     tokens: output,
     junctures: outputJunctures,
     origins: origins ? outputOrigins : null,
-    stress: nextStressForChanges(wordStress, changes, origins),
-    changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
+    stress: outputStress,
+    changed:
+      !sameTokens(tokens, output) ||
+      !sameJunctures(cuts, outputJunctures) ||
+      !sameStressRecord(wordStress, outputStress),
   };
 }
 
@@ -2515,13 +2535,17 @@ function applyParallel(
   output.push(...tokens.slice(cursor));
   if (origins) outputOrigins.push(...origins.slice(originCursor));
   const outputJunctures = dropEdgeJunctures(shiftJunctures(cuts, changes), output.length);
+  const outputStress = nextStressForChanges(wordStress, changes, origins);
   return {
     ok: true,
     tokens: output,
     junctures: outputJunctures,
     origins: origins ? outputOrigins : null,
-    stress: nextStressForChanges(wordStress, changes, origins),
-    changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
+    stress: outputStress,
+    changed:
+      !sameTokens(tokens, output) ||
+      !sameJunctures(cuts, outputJunctures) ||
+      !sameStressRecord(wordStress, outputStress),
     entries,
   };
 }
