@@ -9,7 +9,7 @@ import {
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, normalizeSearchText, samePhonemicForm, stripLevelMarks, stripStressMarks } from "../notation.js";
 import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
-import { normalizeWordStress, stressMarksFromForm } from "../prosody.js";
+import { normalizeWordStress, stressMarksFromForm, toggleSecondaryStress } from "../prosody.js";
 // ASCII form for notes and external tools; conversion lives in web/js/xsampa.js.
 import { ipaToXSampa } from "../xsampa.js";
 import { esc, icon, openModal, toast } from "../ui.js";
@@ -141,17 +141,36 @@ function stressSelectMarkup(word, result, checker) {
       ? checker.context.prosodyFor(result.tokens, result.junctures, word.stress).syllables.length
       : 0);
   const primary = word.stress?.primary;
+  const secondary = word.stress?.secondary || [];
   const options = [
     `<option value="" ${primary == null ? "selected" : ""}>${checker.stress === "none" ? "None" : "Auto"}</option>`,
     ...Array.from({ length: syllableCount }, (_, index) => {
       return `<option value="${index}" ${primary === index ? "selected" : ""}>Syllable ${index + 1}</option>`;
     }),
   ].join("");
+  // Secondary stress can sit on several syllables at once, so use toggles
+  // rather than a second single-value select. The primary syllable is disabled:
+  // one syllable cannot carry both marks.
+  const secondaryMarkup =
+    syllableCount < 2
+      ? ""
+      : `<span class="word-secondary" role="group" aria-label="Secondary stress">
+          <span>Secondary</span>
+          ${Array.from({ length: syllableCount }, (_, index) => {
+            const active = secondary.includes(index);
+            const primarySyllable = index === primary;
+            const label = `Secondary stress on syllable ${index + 1}`;
+            return `<button type="button" class="stress-toggle${active ? " active" : ""}" data-word-secondary="${index}" aria-pressed="${active}" aria-label="${label}" title="${primarySyllable ? "Primary stress" : label}"${primarySyllable ? " disabled" : ""}>${index + 1}</button>`;
+          }).join("")}
+        </span>`;
   return `
-    <label class="word-stress" title="Lexical primary stress; “Auto” follows the language’s stress system">
-      <span>Stress</span>
-      <select class="select select-small" data-word-stress ${syllableCount ? "" : "disabled"}>${options}</select>
-    </label>`;
+    <div class="word-stress">
+      <label title="Lexical primary stress; “Auto” follows the language’s stress system">
+        <span>Stress</span>
+        <select class="select select-small" data-word-stress ${syllableCount ? "" : "disabled"}>${options}</select>
+      </label>
+      ${secondaryMarkup}
+    </div>`;
 }
 
 function updateCheckCell(row, ctx, word, parent, checker) {
@@ -624,6 +643,18 @@ export function renderVocabulary(container, ctx) {
       if (value !== "" && language.phonotactics) language.phonotactics.stressScope = "phonemic";
       ctx.touch({ label: "Edit word stress" });
       ctx.refresh();
+    });
+    row.querySelectorAll("[data-word-secondary]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const stress = toggleSecondaryStress(word.stress, Number(button.dataset.wordSecondary));
+        if (stress) word.stress = stress;
+        else delete word.stress;
+        // As with a primary mark, an explicit secondary mark is a claim about
+        // the phonemic form, so make the scope match.
+        if (language.phonotactics) language.phonotactics.stressScope = "phonemic";
+        ctx.touch({ label: "Edit word stress" });
+        ctx.refresh();
+      });
     });
     row.querySelectorAll("[data-word-field]").forEach((input) => {
       input.addEventListener("input", () => {
