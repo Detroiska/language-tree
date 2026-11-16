@@ -1709,6 +1709,48 @@ truthy(
 equal("parent links follow a regenerated id", fineId.parentId, craftedId.id);
 truthy("duplicate ids get a fresh id", duplicateId.id !== "ok" && duplicateId.id !== craftedId.id);
 
+// Chart axis ids are file-sourced too. An id containing the composite-cell
+// separator must be repaired, and the cell it anchors must follow the new id
+// instead of being silently dropped during migration.
+const hostileAxisProject = ensureProject({
+  title: "Chart ids",
+  languages: [
+    {
+      id: "a",
+      name: "A",
+      inventory: {
+        consonants: {
+          rows: [{ id: "r|1", label: "Plosive", children: [] }],
+          columns: [{ id: "c1", label: "Alveolar", children: [] }],
+          cells: { "r|1|c1": ["p"] },
+        },
+        vowels: { rows: [], columns: [], cells: {} },
+      },
+    },
+  ],
+});
+const repairedAxis = hostileAxisProject.languages[0].inventory.consonants;
+truthy(
+  "an unsafe chart axis id is regenerated",
+  repairedAxis.rows[0].id !== "r|1" && /^[A-Za-z0-9_-]+$/.test(repairedAxis.rows[0].id)
+);
+equal("cells follow a repaired axis id instead of being dropped", repairedAxis.cells, {
+  [`${repairedAxis.rows[0].id}|c1`]: ["p"],
+});
+
+// The same slug rule applies to allophony rule ids: they also reach selectors
+// and attributes, so a crafted id must not survive a load/save round-trip.
+const unsafeAlloId = 'a" onmouseover="alert(1) t="';
+const alloIdProject = ensureProject({
+  title: "Allophony ids",
+  languages: [{ id: "a", name: "A", allophony: [{ id: unsafeAlloId, notation: "p > pʰ / # _ V" }] }],
+});
+const alloId = alloIdProject.languages[0].allophony[0].id;
+truthy(
+  "an unsafe allophony id is regenerated",
+  alloId !== unsafeAlloId && /^[A-Za-z0-9_-]+$/.test(alloId)
+);
+
 const repairedCycleProject = ensureProject({
   title: "Cycle repair",
   languages: [
