@@ -79,17 +79,24 @@ import {
   resolveFeatureBundle,
 } from "../web/js/features.js";
 import { compilePhonotactics } from "../web/js/phonotactics.js";
-import { createPhonotacticsChecker, phonemicFormForWord, stressMarkedForm } from "../web/js/phonotacticsCheck.js";
+import {
+  createPhonotacticsChecker,
+  phonemicFormForWord,
+  pruneWordStressForForm,
+  stressMarkedForm,
+} from "../web/js/phonotacticsCheck.js";
 import { buildHtml, buildMarkdown } from "../web/js/report.js";
 import {
   isHeavySyllable,
   normalizeStressScope,
   normalizeStressSystem,
   normalizeWordStress,
+  pruneSecondaryStress,
   resolveStress,
   stressIndexOf,
   stressLabel,
   stressMarksFromForm,
+  toggleSecondaryStress,
 } from "../web/js/prosody.js";
 import { decodeHashPart, languageHref } from "../web/js/routes.js";
 import {
@@ -1927,6 +1934,105 @@ equal(
   { primaryIndex: 1, secondaryIndices: [0] }
 );
 
+equal(
+  "toggling a syllable adds secondary stress",
+  toggleSecondaryStress({ primary: 1, secondary: [] }, 0),
+  { primary: 1, secondary: [0] }
+);
+equal(
+  "toggling an existing secondary removes it",
+  toggleSecondaryStress({ primary: 1, secondary: [0, 2] }, 0),
+  { primary: 1, secondary: [2] }
+);
+equal(
+  "secondary indices stay sorted and unique",
+  toggleSecondaryStress({ primary: 0, secondary: [2] }, 1),
+  { primary: 0, secondary: [1, 2] }
+);
+equal(
+  "the primary syllable cannot also carry secondary stress",
+  toggleSecondaryStress({ primary: 1, secondary: [] }, 1),
+  { primary: 1, secondary: [] }
+);
+equal(
+  "a negative syllable is ignored",
+  toggleSecondaryStress({ primary: 1, secondary: [] }, -1),
+  { primary: 1, secondary: [] }
+);
+equal(
+  "secondary stress can be set without a primary",
+  toggleSecondaryStress(null, 2),
+  { primary: null, secondary: [2] }
+);
+equal(
+  "toggling drops invalid stored secondary values",
+  toggleSecondaryStress({ primary: 0, secondary: [null, "2", -3, 0.5] }, 2),
+  { primary: 0, secondary: [2] }
+);
+equal(
+  "pruning drops a secondary that collides with the effective primary",
+  pruneSecondaryStress({ primary: null, secondary: [0, 1] }, 0, 2),
+  { primary: null, secondary: [1] }
+);
+equal(
+  "pruning drops secondary indices beyond the syllable count",
+  pruneSecondaryStress({ primary: null, secondary: [0, 2] }, null, 2),
+  { primary: null, secondary: [0] }
+);
+equal(
+  "toggling rejects the syllable carrying the effective primary",
+  toggleSecondaryStress(null, 0, 0, 2),
+  null
+);
+equal(
+  "toggling rejects a syllable beyond the current count",
+  toggleSecondaryStress(null, 2, null, 2),
+  null
+);
+equal(
+  "toggling prunes a stored collision with the effective primary",
+  toggleSecondaryStress({ primary: null, secondary: [0] }, 1, 0, 2),
+  { primary: null, secondary: [1] }
+);
+
+const penultChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "penult" },
+});
+const shortPenult = penultChecker.validate("kasa");
+const longPenult = penultChecker.validate("kasaka");
+equal("penult stress lands on the first syllable of a short word", shortPenult.stressIndex, 0);
+equal("penult stress moves right when a syllable is added", longPenult.stressIndex, 1);
+const survivingSecondary = pruneSecondaryStress(
+  { primary: null, secondary: [1] },
+  shortPenult.stressIndex,
+  shortPenult.syllables.length
+);
+equal("a secondary survives while it does not collide", survivingSecondary, {
+  primary: null,
+  secondary: [1],
+});
+equal(
+  "a form change that moves the default primary drops the colliding secondary",
+  pruneSecondaryStress(survivingSecondary, longPenult.stressIndex, longPenult.syllables.length),
+  null
+);
+equal(
+  "form-based pruning drops a secondary colliding with the default primary",
+  pruneWordStressForForm("muka", initialChecker, { primary: null, secondary: [0] }),
+  null
+);
+equal(
+  "form-based pruning keeps a secondary that does not collide",
+  pruneWordStressForForm("muka", initialChecker, { primary: null, secondary: [1] }),
+  { primary: null, secondary: [1] }
+);
+equal(
+  "form-based pruning leaves a draft without a form alone",
+  pruneWordStressForForm("", initialChecker, { primary: null, secondary: [0] }),
+  { primary: null, secondary: [0] }
+);
+
 const stressFixture = ensureProject({
   title: "Stress fixtures",
   languages: [
@@ -2254,6 +2360,39 @@ equal(
   stressMarkedForm("muka", initialChecker, { primary: null, secondary: [1] }),
   "muˌka"
 );
+equal(
+  "export drops a secondary that collides with the default primary",
+  stressMarkedForm("muka", initialChecker, { primary: null, secondary: [0] }),
+  "muka"
+);
+equal(
+  "export keeps secondaries that do not collide with the default primary",
+  stressMarkedForm("takama", initialChecker, { primary: null, secondary: [0, 2] }),
+  "takaˌma"
+);
+const initialPhonemicChecker = createPhonotacticsChecker({
+  ...language,
+  phonotactics: { ...language.phonotactics, stress: "initial", stressScope: "phonemic" },
+});
+equal(
+  "the phonemic display ignores a colliding secondary",
+  phonemicFormForWord({ form: "muka", stress: { primary: null, secondary: [0] } }, initialPhonemicChecker),
+  "ˈmu.ka"
+);
+equal(
+  "multiple secondary indices survive export",
+  stressMarkedForm("takama", initialChecker, { primary: 0, secondary: [1, 2] }),
+  "ˈtaˌkaˌma"
+);
+equal(
+  "a secondary-index difference makes phonemic forms distinct",
+  samePhonemicForm(
+    { form: "takama", stress: { primary: 0, secondary: [1, 2] } },
+    { form: "takama", stress: { primary: 0, secondary: [1] } },
+    { scope: "phonemic" }
+  ),
+  false
+);
 
 const stressProject = ensureProject({
   title: "Stress display",
@@ -2325,6 +2464,36 @@ equal(
   "allophony can condition on stress",
   surfaceForForm("kasa", stressAllophonyProject, "only").text,
   "kasə"
+);
+
+const secondaryStressProject = ensureProject({
+  title: "Secondary stress rules",
+  languages: [
+    {
+      id: "only",
+      name: "Only",
+      parentId: null,
+      inventory,
+      phonotactics: { ...language.phonotactics, stress: "none" },
+      soundChanges: [{ id: "r1", notation: "a > ə / ˌ _", note: "", enabled: true }],
+      allophony: [],
+      vocabulary: [],
+    },
+  ],
+});
+equal(
+  "sound changes can condition on secondary stress",
+  deriveForm("taka", secondaryStressProject, "only", {
+    wordStress: { primary: null, secondary: [1] },
+  }).text,
+  "takə"
+);
+equal(
+  "secondary stress does not satisfy a primary-stress rule",
+  deriveForm("taka", secondaryStressProject, "only", {
+    wordStress: { primary: 1, secondary: [] },
+  }).text,
+  "taka"
 );
 
 /* ---- morpheme boundaries ------------------------------------------------ */

@@ -46,8 +46,8 @@ export function stressLabel(system) {
 }
 
 // A word-level override is stored as a 0-based syllable index. `null` means
-// "use the language system"; `secondary` is reserved for the secondary-stress
-// level but is preserved now so a legacy form does not lose its ˌ marks.
+// "use the language system"; `secondary` holds the other syllables that carry
+// ˌ. Legacy forms keep their ˌ marks by migrating them into this field.
 export function normalizeWordStress(value) {
   if (value == null) return null;
   const primaryRaw = typeof value === "number" ? value : value.primary;
@@ -61,6 +61,58 @@ export function normalizeWordStress(value) {
   ].sort((left, right) => left - right);
   if (primary === null && !secondary.length) return null;
   return { primary, secondary };
+}
+
+// Secondary indices are stored as the user clicked them, but the syllable that
+// actually carries primary stress may come from the language default when the
+// word has no explicit primary. Keep only marks that still name a real syllable
+// and do not collide with that effective primary. The caller supplies the
+// resolved primary and syllable count; both default to "unknown".
+export function pruneSecondaryStress(wordStress, primaryIndex = null, syllableCount = Infinity) {
+  const stored = normalizeWordStress(wordStress);
+  if (!stored) return null;
+  const count =
+    Number.isInteger(syllableCount) && syllableCount >= 0 ? syllableCount : Infinity;
+  const primary = Number.isInteger(primaryIndex) && primaryIndex >= 0 ? primaryIndex : null;
+  return normalizeWordStress({
+    primary: stored.primary,
+    secondary: stored.secondary.filter(
+      (index) => index < count && (primary === null || index !== primary)
+    ),
+  });
+}
+
+// Toggle secondary stress on one syllable. Secondary stress cannot share the
+// primary syllable, so clicking that syllable is a no-op. `effectivePrimary`
+// and `syllableCount` let the picker reject the language's default primary and
+// prune stale stored marks when the form changed. The result is normalized
+// (unique, sorted, no overlapping index) and may be null when the last mark is
+// removed; callers store it directly or delete the field. Kept DOM-free so the
+// vocabulary picker and the tests use the same rule.
+export function toggleSecondaryStress(
+  wordStress,
+  index,
+  effectivePrimary = null,
+  syllableCount = Infinity
+) {
+  const stored = pruneSecondaryStress(wordStress, effectivePrimary, syllableCount);
+  const count =
+    Number.isInteger(syllableCount) && syllableCount >= 0 ? syllableCount : Infinity;
+  const primary =
+    Number.isInteger(effectivePrimary) && effectivePrimary >= 0
+      ? effectivePrimary
+      : stored?.primary ?? null;
+  if (!Number.isInteger(index) || index < 0 || index >= count || stored?.primary === index) {
+    return stored;
+  }
+  if (primary !== null && index === primary) return stored;
+  const secondary = new Set(stored?.secondary || []);
+  if (secondary.has(index)) secondary.delete(index);
+  else secondary.add(index);
+  return normalizeWordStress({
+    primary: stored?.primary ?? null,
+    secondary: [...secondary],
+  });
 }
 
 // One-time migration from marks typed into a legacy word form. It counts vowel

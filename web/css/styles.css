@@ -4773,6 +4773,47 @@ th:hover > .axis-menu,
   font-size: 10px;
 }
 
+.word-stress label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.word-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.stress-toggle {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stress-toggle:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.stress-toggle.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.stress-toggle:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .surface-preview {
   display: inline-block;
   color: var(--accent);

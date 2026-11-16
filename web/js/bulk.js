@@ -1,7 +1,11 @@
 import { normalizeGloss } from "./gloss.js";
 import { uid } from "./model.js";
 import { stripLevelMarks, stripStressMarks } from "./notation.js";
-import { createPhonotacticsChecker, stressMarkedForm } from "./phonotacticsCheck.js";
+import {
+  createPhonotacticsChecker,
+  pruneWordStressForForm,
+  stressMarkedForm,
+} from "./phonotacticsCheck.js";
 import { normalizeWordStress, stressMarksFromForm } from "./prosody.js";
 
 // Bulk word import/export: the paste-and-go side door for spreadsheets and
@@ -300,6 +304,7 @@ export function applyWordList(language, rows, mode) {
   // previews and reports as the update target.
   const byGloss = new Map(language.vocabulary.map((word) => [normalizeGloss(word.gloss), word]));
   const summary = { added: 0, updated: 0, skipped: 0, drafts: 0 };
+  let checker = null;
   let usesStress = false;
   for (const row of rows) {
     const verdict = rowStatus(row, language, mode);
@@ -307,14 +312,32 @@ export function applyWordList(language, rows, mode) {
       if (verdict.status === "skip") summary.skipped += 1;
       continue;
     }
-    const stress = normalizeWordStress(row.stress);
-    if (stress) usesStress = true;
     const existing = byGloss.get(normalizeGloss(row.gloss));
+    const rawStress = normalizeWordStress(row.stress);
+    // Reject marks that the form cannot display, so an import never creates a
+    // stress field the picker and phonemic view silently ignore. A stress-only
+    // update has no form of its own, so prune against the stored form instead.
+    // Languages without stress rows never need to compile a checker.
+    const effectiveForm = row.form || existing?.form || "";
+    if ((rawStress || (row.form && existing?.stress)) && !checker) {
+      checker = createPhonotacticsChecker(language);
+    }
+    const stress = rawStress ? pruneWordStressForForm(effectiveForm, checker, rawStress) : null;
+    if (stress) usesStress = true;
     if (existing) {
+      if (rawStress) {
+        if (stress) existing.stress = stress;
+        else delete existing.stress;
+      } else if (row.form && existing.stress) {
+        // Prune a previously hidden mark against the old form first, then
+        // against the new one, so a form change cannot revive a stale mark
+        // once the default primary moves away from it.
+        const before = pruneWordStressForForm(existing.form, checker, existing.stress);
+        const after = before ? pruneWordStressForForm(row.form, checker, before) : null;
+        if (after) existing.stress = after;
+        else delete existing.stress;
+      }
       if (row.form) existing.form = row.form;
-      // An update that does not mention stress leaves the stored distinction
-      // alone. A bulk edit of forms and notes must not silently erase it.
-      if (stress) existing.stress = stress;
       if (row.note) existing.note = row.note;
       existing.gloss = row.gloss;
       summary.updated += 1;
@@ -359,11 +382,14 @@ export function toTsv(words, language = null) {
   return lines.join("\n");
 }
 
-export function toJson(words) {
+export function toJson(words, language = null) {
+  const checker = language ? createPhonotacticsChecker(language) : null;
   return JSON.stringify(
     words.map((word) => {
       const entry = { gloss: word.gloss, form: word.form, note: word.note };
-      const stress = normalizeWordStress(word.stress);
+      const stress = checker
+        ? pruneWordStressForForm(word.form, checker, word.stress)
+        : normalizeWordStress(word.stress);
       if (stress) entry.stress = stress;
       return entry;
     }),
