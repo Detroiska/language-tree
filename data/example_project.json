@@ -2,7 +2,7 @@
   "version": 1,
   "title": "Classical Nahuatl — a demo language family",
   "createdAt": "2026-11-06T19:58:49.868Z",
-  "updatedAt": "2026-11-08T19:09:47.052Z",
+  "updatedAt": "2026-11-16T12:29:33.944072Z",
   "languages": [
     {
       "id": "lang_cn",
@@ -11143,7 +11143,8 @@
         "forbidden": "",
         "notes": "Two-consonant onsets and single-consonant codas; penultimate stress.",
         "classes": [],
-        "stress": "penult"
+        "stress": "penult",
+        "stressScope": "phonemic"
       },
       "soundChanges": [
         {
@@ -12011,13 +12012,23 @@
           "id": "word_hawk",
           "gloss": "hawk",
           "form": "lali",
-          "note": ""
+          "note": "",
+          "stress": {
+            "primary": 0,
+            "secondary": [
+              1
+            ]
+          }
         },
         {
           "id": "word_house",
           "gloss": "house",
           "form": "kali",
-          "note": ""
+          "note": "",
+          "stress": {
+            "primary": 0,
+            "secondary": []
+          }
         },
         {
           "id": "word_home",
@@ -12425,7 +12436,11 @@
           "id": "word_good",
           "gloss": "good",
           "form": "kali",
-          "note": ""
+          "note": "",
+          "stress": {
+            "primary": 1,
+            "secondary": []
+          }
         },
         {
           "id": "word_big",
