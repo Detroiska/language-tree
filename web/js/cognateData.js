@@ -2,6 +2,7 @@ import { indexWordsByGloss, normalizeGloss } from "./gloss.js";
 import { getLineage, languagesInTreeOrder } from "./model.js";
 import { formatPhonemic, joinSegments, samePhonemicForm } from "./notation.js";
 import {
+  contextForLanguage,
   createChainCompiler,
   deriveStages,
   exceptionRulesFromSteps,
@@ -136,19 +137,26 @@ export function deriveCognateCell(
     };
   }
   const parsed = row.chain.context.tokenizeWithStress(sourceWord.form);
+  const sourceLanguage = row.chain.lineage[row.chain.sourceIndex];
+  const sourceContext =
+    sourceWord.stress && sourceLanguage
+      ? contextForLanguage(project, sourceLanguage.id)
+      : row.chain.context;
   const result = deriveStages(parsed.tokens, row.chain.stages, row.chain.context, {
     gloss: sourceWord.gloss,
     junctures: parsed.junctures,
     optionalRuleIds,
     diagnostics,
     wordStress: sourceWord.stress,
+    sourceContext,
   });
   const derived = joinSegments(result.tokens, result.junctures);
   return {
     derived,
+    stress: result.stress,
     surface:
       surface && !result.errors.length
-        ? surfaceOf(derived, project, row.language.id, sourceWord.gloss, recorded?.stress)
+        ? surfaceOf(derived, project, row.language.id, sourceWord.gloss, result.stress)
         : "",
     steps: result.steps,
     exceptions: exceptionRulesFromSteps(result.steps),
@@ -183,7 +191,7 @@ export function statusForCognate(sourceWord, row, cell) {
     };
   }
   if (
-    samePhonemicForm(cell.recorded, { form: cell.derived }, {
+    samePhonemicForm(cell.recorded, { form: cell.derived, stress: cell.stress }, {
       scope: row.language.phonotactics?.stressScope,
     })
   ) {

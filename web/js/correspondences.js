@@ -177,6 +177,7 @@ export function buildCorrespondences(project, sourceId, { mode = "recorded" } = 
           junctures: parsed.junctures,
           diagnostics: false,
           wordStress: word.stress,
+          sourceContext: word.stress ? compiler.contextFor(source.id) : undefined,
         });
         if (derived.errors.length) {
           coverage.get(daughter.id).errors.add(derived.errors[0]);

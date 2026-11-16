@@ -66,9 +66,9 @@ function stressValue(value) {
 // Stress-aware identity for phonemic forms. The arguments may be stored word
 // objects (form + stress field) or bare strings. In phonetic scope, or when
 // either side has no recorded stress, this is exactly sameForm; only two
-// explicit phonemic stress records can disagree about stress. Sound-change
-// output can therefore keep comparing segments until a later level carries
-// stress across generations.
+// explicit phonemic stress records can disagree about stress. Derived forms
+// now carry remapped stress as well, so callers must pass that field with the
+// derived form when they want a stress-sensitive comparison.
 export function samePhonemicForm(left, right, { scope = "phonetic" } = {}) {
   const leftForm = typeof left === "string" ? left : left?.form;
   const rightForm = typeof right === "string" ? right : right?.form;

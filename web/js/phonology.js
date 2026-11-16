@@ -20,6 +20,8 @@ import {
   normalizeWordStress,
   prosodyFallback,
   prosodyFromSyllables,
+  remapStressToSyllables,
+  syllableOrigins,
 } from "./prosody.js";
 import {
   applyFeatureTerms,
@@ -2158,13 +2160,33 @@ function dropEdgeJunctures(junctures, length) {
   return junctures;
 }
 
-export function applyRule(tokens, compiled, context, junctures = null, wordStress = null) {
+// Give each output segment the syllable origin of the input segment it came
+// from. Echo outputs name that input explicitly; one-to-one rewrites keep the
+// matching position; insertions and untraceable rewrites carry no origin.
+function originsForReplacement(tokens, match, compiled, replacement, origins) {
+  if (!origins) return null;
+  const width = match.end - match.start;
+  if (!width) return replacement.map(() => null);
+  if (compiled?.echoOutput && Array.isArray(compiled.echoes)) {
+    return compiled.echoes.map((echo) =>
+      echo.echo ? origins[match.start + echo.inputIndex] ?? null : null
+    );
+  }
+  if (compiled?.featureOutput) return replacement.map(() => origins[match.start] ?? null);
+  if (replacement.length === width) {
+    return replacement.map((_, offset) => origins[match.start + offset] ?? null);
+  }
+  return replacement.map(() => origins[match.start] ?? null);
+}
+
+export function applyRule(tokens, compiled, context, junctures = null, wordStress = null, origins = null) {
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const matches = findRuleMatches(tokens, compiled, context, cuts, wordStress);
   if (!matches.length) {
     return {
       tokens: [...tokens],
       junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
+      origins: origins ? [...origins] : null,
       changed: false,
     };
   }
@@ -2177,15 +2199,29 @@ export function applyRule(tokens, compiled, context, junctures = null, wordStres
       return {
         tokens: [...tokens],
         junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
+        origins: origins ? [...origins] : null,
         changed: false,
         error: resolved.error,
       };
     }
-    changes.push({ ...match, replacement: resolved.replacement });
+    changes.push({
+      ...match,
+      replacement: resolved.replacement,
+      originLabels: originsForReplacement(tokens, match, compiled, resolved.replacement, origins),
+    });
     output.push(...tokens.slice(cursor, match.start), ...resolved.replacement);
     cursor = match.end;
   }
   output.push(...tokens.slice(cursor));
+  const outputOrigins = [];
+  if (origins) {
+    let originCursor = 0;
+    for (const change of changes) {
+      outputOrigins.push(...origins.slice(originCursor, change.start), ...(change.originLabels || []));
+      originCursor = change.end;
+    }
+    outputOrigins.push(...origins.slice(originCursor));
+  }
   const outputJunctures = dropEdgeJunctures(shiftJunctures(cuts, changes), output.length);
   // A feature delta can match a segment and leave its bundle unchanged, and a
   // literal rule can rewrite a sound to itself. Neither is a surface change, so
@@ -2194,6 +2230,7 @@ export function applyRule(tokens, compiled, context, junctures = null, wordStres
   return {
     tokens: output,
     junctures: outputJunctures,
+    origins: origins ? outputOrigins : null,
     changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
   };
 }
@@ -2279,7 +2316,8 @@ function applyParallel(
   junctures = null,
   optionalRuleIds = new Set(),
   diagnostics = true,
-  wordStress = null
+  wordStress = null,
+  origins = null
 ) {
   const cuts = junctures instanceof Set ? junctures : new Set(junctures || []);
   const entries = [];
@@ -2314,6 +2352,7 @@ function applyParallel(
       const b = change.entry.group;
       return {
         ok: false,
+        origins: origins ? [...origins] : null,
         error: `Rules ${a.label} (“${a.rule.notation}”) and ${b.label} (“${b.rule.notation}”) both change overlapping parts of the ancestral form “${joinSegments(tokens, cuts)}”. Make one of them sequential or make the rules mutually exclusive.`,
         // Structured conflict for the tester's one-click fix: turning the
         // later-overlapping rule into a sequential child of the earlier one
@@ -2335,27 +2374,43 @@ function applyParallel(
       ok: true,
       tokens: [...tokens],
       junctures: dropEdgeJunctures(new Set(cuts), tokens.length),
+      origins: origins ? [...origins] : null,
       changed: false,
       entries,
     };
   }
   for (const change of changes) {
     const resolved = replacementForMatch(tokens, change, change.entry.group.compiled.rule, context);
-    if (!resolved.ok) return { ok: false, error: resolved.error, entries };
+    if (!resolved.ok) return { ok: false, origins: origins ? [...origins] : null, error: resolved.error, entries };
     change.replacement = resolved.replacement;
+    change.originLabels = originsForReplacement(
+      tokens,
+      change,
+      change.entry.group.compiled.rule,
+      resolved.replacement,
+      origins
+    );
   }
   const output = [];
+  const outputOrigins = [];
   let cursor = 0;
+  let originCursor = 0;
   for (const change of changes) {
     output.push(...tokens.slice(cursor, change.start), ...change.replacement);
+    if (origins) {
+      outputOrigins.push(...origins.slice(originCursor, change.start), ...(change.originLabels || []));
+      originCursor = change.end;
+    }
     cursor = change.end;
   }
   output.push(...tokens.slice(cursor));
+  if (origins) outputOrigins.push(...origins.slice(originCursor));
   const outputJunctures = dropEdgeJunctures(shiftJunctures(cuts, changes), output.length);
   return {
     ok: true,
     tokens: output,
     junctures: outputJunctures,
+    origins: origins ? outputOrigins : null,
     changed: !sameTokens(tokens, output) || !sameJunctures(cuts, outputJunctures),
     entries,
   };
@@ -2371,9 +2426,20 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
   const diagnostics = options.diagnostics !== false;
   const optionalRuleIds = forcedRuleIds(options.optionalRuleIds);
   // The source word's lexical stress travels with the derivation so rules in
-  // phonemic scope can condition on it. Stress is not yet projected through
-  // the output at each stage; a later level will carry it across generations.
+  // phonemic scope can condition on it. Segment origins tracked below also let
+  // the final form carry that stress onto the daughter's own syllables.
   const wordStress = options.wordStress || null;
+  // Label the input tokens with the source language's syllables only when a
+  // word actually carries stress. Most derivations have none, and a matrix can
+  // derive thousands of cells, so skip the extra prosody work in that case.
+  let currentOrigins = null;
+  if (wordStress) {
+    const sourceContext = options.sourceContext || context;
+    const sourceProsody = sourceContext.prosodyFor(inputTokens, currentJunctures, null);
+    currentOrigins = options.origins
+      ? [...options.origins]
+      : syllableOrigins(sourceProsody.syllables, inputTokens.length);
+  }
 
   for (const stage of stages) {
     const languageName = stage.language?.name || "";
@@ -2422,7 +2488,8 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
       currentJunctures,
       optionalRuleIds,
       diagnostics,
-      wordStress
+      wordStress,
+      currentOrigins
     );
     if (!parallel.ok) {
       steps.push({
@@ -2466,6 +2533,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
       });
       current = parallel.tokens;
       currentJunctures = parallel.junctures;
+      currentOrigins = parallel.origins || currentOrigins;
     }
 
     // Sequential children run after the whole ancestral pass, in display
@@ -2534,7 +2602,14 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
           });
           continue;
         }
-        const result = applyRule(current, child.compiled.rule, stageContext, currentJunctures, wordStress);
+        const result = applyRule(
+          current,
+          child.compiled.rule,
+          stageContext,
+          currentJunctures,
+          wordStress,
+          currentOrigins
+        );
         if (result.error) {
           steps.push({
             kind: "error",
@@ -2577,6 +2652,7 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
         });
         current = result.tokens;
         currentJunctures = result.junctures;
+        currentOrigins = result.origins || currentOrigins;
       }
     }
     if (stageFailed) {
@@ -2585,9 +2661,21 @@ export function deriveStages(inputTokens, stages, context, options = {}) {
     }
   }
 
+  let stress = null;
+  if (wordStress && currentOrigins) {
+    const derivedProsody = context.prosodyFor(current, currentJunctures, null);
+    stress = remapStressToSyllables(
+      derivedProsody.syllables,
+      currentOrigins,
+      wordStress,
+      context.stressSystem
+    );
+  }
   return {
     tokens: current,
     junctures: currentJunctures,
+    origins: currentOrigins,
+    stress,
     steps,
     errors,
     fatal,
@@ -2609,17 +2697,26 @@ export function deriveForm(form, project, languageId, options = {}) {
   });
   const parsed = context.tokenizeWithStress(form);
   const tokens = parsed.tokens;
+  // The word belongs to the language before the first stage: the target's
+  // parent for a direct inheritance check, or the root of the chain otherwise.
+  // Its syllabifier defines the syllable indices stored in `wordStress`.
+  const sourceLanguage = directOnly ? lineage.at(-2) || languages[0] : languages[0];
+  const sourceContext = wordStress && sourceLanguage
+    ? contextForLanguage(project, sourceLanguage.id)
+    : context;
   const derived = deriveStages(tokens, stages, context, {
     gloss,
     junctures: parsed.junctures,
     optionalRuleIds,
     wordStress,
+    sourceContext,
   });
   return {
     input: tokens,
     inputJunctures: parsed.junctures,
     output: derived.tokens,
     junctures: derived.junctures,
+    stress: derived.stress,
     steps: derived.steps,
     errors: derived.errors,
     error: derived.errors[0] || "",

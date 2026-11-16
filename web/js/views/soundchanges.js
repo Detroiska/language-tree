@@ -23,7 +23,11 @@ import {
   surfaceForForm,
 } from "../phonology.js";
 import { formatPhonemic, formatPhonetic, joinSegments, samePhonemicForm } from "../notation.js";
-import { createPhonotacticsChecker, phonemicFormForWord } from "../phonotacticsCheck.js";
+import {
+  createPhonotacticsChecker,
+  phonemicFormForWord,
+  pruneWordStressForForm,
+} from "../phonotacticsCheck.js";
 import { derivationStepsMarkup, optionalRulesPickerMarkup } from "../derivation.js";
 import { diffPairMarkup } from "../diff.js";
 import { reconstructForm, reconstructionAlternatives } from "../reconstruction.js";
@@ -62,7 +66,7 @@ function compileDirect(ctx) {
   return { context, groups: compileRuleStages(ctx.language.soundChanges, context) };
 }
 
-function directDerivation(ctx, form, gloss = "", optionalRuleIds = [], wordStress = null) {
+function directDerivation(ctx, form, gloss = "", optionalRuleIds = [], wordStress = null, sourceContext = null) {
   const { context, groups } = compileDirect(ctx);
   const parsed = context.tokenizeWithStress(form);
   const tokens = parsed.tokens;
@@ -71,22 +75,25 @@ function directDerivation(ctx, form, gloss = "", optionalRuleIds = [], wordStres
     junctures: parsed.junctures,
     optionalRuleIds,
     wordStress,
+    sourceContext: sourceContext || context,
   });
   const phonemic = joinSegments(result.tokens, result.junctures);
+  const derivedWord = { form: phonemic, stress: result.stress };
   const surface = result.errors.length
     ? null
-    : surfaceForForm(phonemic, ctx.project, ctx.language.id, { gloss });
+    : surfaceForForm(phonemic, ctx.project, ctx.language.id, { gloss, wordStress: result.stress });
   const checker = createPhonotacticsChecker(ctx.language);
   return {
     inputTokens: tokens,
     outputTokens: result.tokens,
+    stress: result.stress,
     steps: result.steps,
     text: phonemic,
     // The tester's /…/ row follows the language's scope: a phonemic language
-    // shows its predicted stress and syllable dots.
+    // shows the stress carried from the source word (or the default).
     display:
       checker.stressScope === "phonemic"
-        ? phonemicFormForWord({ form: phonemic }, checker) || phonemic
+        ? phonemicFormForWord(derivedWord, checker) || phonemic
         : phonemic,
     surface: surface?.errors.length ? null : surface?.display || "",
     surfaceError: surface?.errors[0] || "",
@@ -625,19 +632,20 @@ function checkRows(ctx, context = null, optionalRuleIds = [], { status = "all", 
     const derived = deriveInheritedWord(word, ctx.project, ctx.language.id, {
       optionalRuleIds,
     });
+    const derivedWord = { form: derived.text, stress: derived.stress };
     const recorded = byGloss.get(word.gloss.trim().toLowerCase()) || null;
     const status = derived.error
       ? "error"
       : !recorded?.form.trim()
         ? "missing"
-        : samePhonemicForm(recorded, { form: derived.text }, { scope: checker.stressScope })
+        : samePhonemicForm(recorded, derivedWord, { scope: checker.stressScope })
           ? "match"
           : "differs";
     const surface = derived.error
       ? null
       : surfaceForForm(derived.text, ctx.project, ctx.language.id, {
           gloss: word.gloss,
-          wordStress: recorded?.stress,
+          wordStress: derived.stress,
         });
     return {
       word,
@@ -645,9 +653,7 @@ function checkRows(ctx, context = null, optionalRuleIds = [], { status = "all", 
       // derived and recorded forms show this language's.
       parentDisplay: phonemicFormForWord(word, parentChecker),
       derived: derived.error ? "" : derived.text,
-      derivedDisplay: derived.error
-        ? ""
-        : phonemicFormForWord({ form: derived.text }, checker),
+      derivedDisplay: derived.error ? "" : phonemicFormForWord(derivedWord, checker),
       surface: surface?.errors.length ? "" : surface?.display || "",
       recorded,
       recordedDisplay: recorded ? phonemicFormForWord(recorded, checker) : "",
@@ -901,7 +907,15 @@ export function renderChanges(container, ctx, activeTool = "rules") {
           (word) => word.gloss.trim().toLowerCase() === testGloss.trim().toLowerCase()
         )
       : null;
-    const result = directDerivation(ctx, testInput.value, testGloss, [...testOptional], parentWord?.stress || null);
+    const sourceContext = parent ? contextForLanguage(ctx.project, parent.id) : null;
+    const result = directDerivation(
+      ctx,
+      testInput.value,
+      testGloss,
+      [...testOptional],
+      parentWord?.stress || null,
+      sourceContext
+    );
     testerMemory.set(language.id, { form: testInput.value, gloss: testGloss });
     const output = testPanel.querySelector("[data-test-output]");
     const surface = testPanel.querySelector("[data-test-surface]");
@@ -1298,18 +1312,27 @@ export function renderChanges(container, ctx, activeTool = "rules") {
         return;
       }
       const derived = derivation.text;
+      const checker = createPhonotacticsChecker(language);
+      const stress =
+        derivation.stress && checker.stressScope === "phonemic"
+          ? pruneWordStressForForm(derived, checker, derivation.stress)
+          : null;
       const normalizedGloss = word.gloss.trim().toLowerCase();
       let existing = language.vocabulary.find((entry) => entry.gloss.trim().toLowerCase() === normalizedGloss);
       if (existing) {
         existing.form = derived;
+        if (stress) existing.stress = stress;
+        else delete existing.stress;
         if (!existing.note) existing.note = `Derived from ${parentLanguage.name}.`;
       } else {
-        language.vocabulary.push({
+        const recorded = {
           id: uid("word"),
           gloss: word.gloss,
           form: derived,
           note: `Derived from ${parentLanguage.name}.`,
-        });
+        };
+        if (stress) recorded.stress = stress;
+        language.vocabulary.push(recorded);
       }
       ctx.touch({ label: "Record word" });
       ctx.refresh();

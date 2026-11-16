@@ -88,6 +88,7 @@ function expectedFor(ctx, word, parent) {
   return {
     parentWord,
     derived: derived.text,
+    stress: derived.stress,
     error: derived.error,
     exceptions: exceptionRulesFromSteps(derived.steps),
   };
@@ -101,17 +102,19 @@ function exceptionNote(exceptions) {
   }`;
 }
 
-function checkCellMarkup(word, expected, scope = "phonetic") {
+function checkCellMarkup(word, expected, checker) {
   if (!expected) return `<span class="muted">—</span>`;
   if (expected.error) {
     return `<span class="status-chip status-differs" title="${esc(expected.error)}">${icon("warning")}Rule error</span>`;
   }
   if (!word.form.trim()) return `<span class="status-chip status-missing">${icon("info")}No form</span>`;
   const exceptionSuffix = exceptionNote(expected.exceptions);
-  if (samePhonemicForm(word, { form: expected.derived }, { scope })) {
-    return `<span class="status-chip status-match" title="Matches the derived phonemic form ${esc(formatPhonemic(expected.derived))}${esc(exceptionSuffix)}">${icon("check")}Matches</span>`;
+  const derived = { form: expected.derived, stress: expected.stress };
+  const expectedDisplay = formatPhonemic(phonemicFormForWord(derived, checker)) || "∅";
+  if (samePhonemicForm(word, derived, { scope: checker.stressScope })) {
+    return `<span class="status-chip status-match" title="Matches the derived phonemic form ${esc(expectedDisplay)}${esc(exceptionSuffix)}">${icon("check")}Matches</span>`;
   }
-  return `<span class="status-chip status-differs" title="Expected ${esc(formatPhonemic(expected.derived))}${esc(exceptionSuffix)}">${icon("warning")}Expected ${esc(formatPhonemic(expected.derived)) || "∅"}</span>`;
+  return `<span class="status-chip status-differs" title="Expected ${esc(expectedDisplay)}${esc(exceptionSuffix)}">${icon("warning")}Expected ${esc(expectedDisplay)}</span>`;
 }
 
 function surfaceMarkup(word, ctx) {
@@ -220,7 +223,7 @@ function stressSelectMarkup(word, result, checker) {
 function updateCheckCell(row, ctx, word, parent, checker) {
   const cell = row.querySelector("[data-word-check]");
   if (!cell) return;
-  cell.innerHTML = checkCellMarkup(word, expectedFor(ctx, word, parent), checker.stressScope);
+  cell.innerHTML = checkCellMarkup(word, expectedFor(ctx, word, parent), checker);
 }
 
 function updateRowCheck(row, ctx, word, parent, checker) {
@@ -471,7 +474,7 @@ export function renderVocabulary(container, ctx) {
       checks += 1;
       if (
         word.form.trim() &&
-        samePhonemicForm(word, { form: expected.derived }, { scope: checker.stressScope })
+        samePhonemicForm(word, { form: expected.derived, stress: expected.stress }, { scope: checker.stressScope })
       ) {
         matches += 1;
       }
@@ -496,7 +499,7 @@ export function renderVocabulary(container, ctx) {
             <div class="word-issue-wrap" data-word-issue>${phonotacticIssueMarkup(result)}</div>
           </td>
           <td class="word-phonotactics" data-word-phonotactics>${phonotacticCellMarkup(result)}</td>
-          ${hasParent ? `<td class="word-check" data-word-check>${checkCellMarkup(word, expectedFor(ctx, word, parent), checker.stressScope)}</td>` : ""}
+          ${hasParent ? `<td class="word-check" data-word-check>${checkCellMarkup(word, expectedFor(ctx, word, parent), checker)}</td>` : ""}
           <td class="word-note"><input class="table-input" data-word-field="note" value="${esc(word.note)}" placeholder="optional note" autocomplete="off" aria-label="Word note"></td>
           <td class="row-actions">
             <button class="icon-button icon-button-small" type="button" data-trace-word title="Trace in the cognate explorer" aria-label="Trace in the cognate explorer">${icon("language")}</button>
@@ -587,7 +590,7 @@ export function renderVocabulary(container, ctx) {
       if (expected?.error) return "error";
       if (
         expected &&
-        !samePhonemicForm(word, { form: expected.derived }, { scope: checker.stressScope })
+        !samePhonemicForm(word, { form: expected.derived, stress: expected.stress }, { scope: checker.stressScope })
       ) {
         return "differs";
       }
