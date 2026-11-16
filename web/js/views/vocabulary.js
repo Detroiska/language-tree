@@ -1,4 +1,5 @@
 import { normalizeGloss } from "../gloss.js";
+import { wordMetaText } from "../lexicon.js";
 import { allophonyRules, ancestorsOf, uid } from "../model.js";
 import { applyWordList, parseWordList, rowStatus, toTsv, toJson } from "../bulk.js";
 import {
@@ -72,7 +73,99 @@ function parentFor(ctx) {
 
 // Filter state lives at module level so it survives the full re-render that
 // follows every edit (add word, delete word, undo, …).
-const lexiconFilter = { text: "", status: "all" };
+const lexiconFilter = { text: "", status: "all", pos: "", wordStatus: "" };
+// Which word's expandable metadata panel is open, also kept across re-renders.
+let openWordId = null;
+
+// Suggestions are conveniences, not closed vocabularies: any spelling is
+// stored, and normalization keeps unknown values intact.
+const POS_SUGGESTIONS = [
+  "noun", "verb", "adjective", "adverb", "pronoun", "determiner", "preposition",
+  "conjunction", "interjection", "numeral", "particle", "affix", "phrase",
+];
+const STATUS_SUGGESTIONS = [
+  "attested", "reconstructed", "coinage", "loan", "obsolete", "archaic",
+  "slang", "dialectal",
+];
+const TAG_SUGGESTIONS = [
+  "nature", "animals", "plants", "body", "kinship", "food", "motion",
+  "emotion", "abstract", "colors", "numbers", "technology", "culture",
+];
+
+function metaBadges(word) {
+  const badges = [];
+  const pos = String(word.pos ?? "").trim();
+  const status = String(word.status ?? "").trim();
+  if (pos) badges.push(`<span class="word-meta-badge word-pos-badge" title="Part of speech: ${esc(pos)}">${esc(pos)}</span>`);
+  if (status) {
+    badges.push(`<span class="word-meta-badge word-status-badge" title="Status: ${esc(status)}">${esc(status)}</span>`);
+  }
+  return badges.length ? `<span class="word-meta-badges">${badges.join("")}</span>` : "";
+}
+
+function detailListMarkup(word, field, label, addLabel, listId = "") {
+  const items = Array.isArray(word[field]) ? word[field] : [];
+  return `
+    <div class="word-detail-list" data-detail-list-wrap="${field}">
+      <div class="word-detail-list-title">${label}</div>
+      <div class="word-detail-list-items">
+        ${items
+          .map(
+            (item) => `
+          <div class="word-detail-list-item">
+            <input class="table-input" data-detail-list="${field}" value="${esc(item)}" aria-label="${label}" autocomplete="off" spellcheck="false"${listId ? ` list="${listId}"` : ""}>
+            <button type="button" class="icon-button icon-button-small danger-hover" data-detail-list-remove="${field}" aria-label="Remove ${label.toLowerCase()}">${icon("trash")}</button>
+          </div>`
+          )
+          .join("")}
+      </div>
+      <button type="button" class="button button-quiet button-small" data-detail-list-add="${field}">${icon("plus")}${addLabel}</button>
+    </div>`;
+}
+
+function detailRowMarkup(word, open, columnCount) {
+  if (!open) return "";
+  return `
+    <tr class="word-detail-row" data-word-detail-row="${esc(word.id)}">
+      <td colspan="${columnCount}">
+        <div class="word-detail">
+          <div class="word-detail-grid">
+            <label class="word-detail-field">
+              <span>Part of speech</span>
+              <input class="table-input" data-detail-field="pos" value="${esc(word.pos ?? "")}" list="word-pos-options" placeholder="e.g. noun" autocomplete="off" spellcheck="false" aria-label="Part of speech">
+            </label>
+            <label class="word-detail-field">
+              <span>Status</span>
+              <input class="table-input" data-detail-field="status" value="${esc(word.status ?? "")}" list="word-status-options" placeholder="e.g. attested" autocomplete="off" spellcheck="false" aria-label="Status">
+            </label>
+          </div>
+          <div class="word-detail-lists">
+            ${detailListMarkup(word, "senses", "Senses", "Add sense")}
+            ${detailListMarkup(word, "tags", "Tags / domains", "Add tag", "word-tag-options")}
+          </div>
+          <div class="word-detail-grid">
+            <label class="word-detail-field">
+              <span>Source</span>
+              <input class="table-input" data-detail-field="source" value="${esc(word.source ?? "")}" placeholder="Where the word came from" autocomplete="off" spellcheck="false" aria-label="Source">
+            </label>
+            <label class="word-detail-field">
+              <span>Etymology</span>
+              <textarea class="table-input word-detail-textarea" data-detail-field="etymology" rows="2" spellcheck="false" aria-label="Etymology">${esc(word.etymology ?? "")}</textarea>
+            </label>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+}
+
+function filterOptions(words, field) {
+  const values = new Set();
+  for (const word of words) {
+    const value = String(word[field] ?? "").trim();
+    if (value) values.add(value);
+  }
+  return [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
 
 function expectedFor(ctx, word, parent) {
   if (!parent) return null;
@@ -481,12 +574,14 @@ export function renderVocabulary(container, ctx) {
     }
   }
 
+  const columnCount = 5 + (hasParent ? 1 : 0);
   const rows = words
     .map((word) => {
       const result = checker.validate(word.form, word.stress);
+      const opened = openWordId === word.id;
       return `
         <tr data-word-id="${esc(word.id)}">
-          <td class="word-gloss"><input class="table-input gloss-input" data-word-field="gloss" value="${esc(word.gloss)}" placeholder="meaning" autocomplete="off" aria-label="Gloss"></td>
+          <td class="word-gloss"><input class="table-input gloss-input" data-word-field="gloss" value="${esc(word.gloss)}" placeholder="meaning" autocomplete="off" aria-label="Gloss">${metaBadges(word)}</td>
           <td class="word-form">
             <span class="level-input-wrap">
               <span class="level-mark" aria-hidden="true">/</span>
@@ -502,15 +597,19 @@ export function renderVocabulary(container, ctx) {
           ${hasParent ? `<td class="word-check" data-word-check>${checkCellMarkup(word, expectedFor(ctx, word, parent), checker)}</td>` : ""}
           <td class="word-note"><input class="table-input" data-word-field="note" value="${esc(word.note)}" placeholder="optional note" autocomplete="off" aria-label="Word note"></td>
           <td class="row-actions">
+            <button class="icon-button icon-button-small${opened ? " is-active" : ""}" type="button" data-detail-toggle aria-expanded="${opened}" title="Edit word details" aria-label="Edit word details">${icon("chevronDown")}</button>
             <button class="icon-button icon-button-small" type="button" data-trace-word title="Trace in the cognate explorer" aria-label="Trace in the cognate explorer">${icon("language")}</button>
             <button class="icon-button icon-button-small" type="button" data-copy-xsampa title="Copy X-SAMPA form" aria-label="Copy X-SAMPA form">${icon("copy")}</button>
             <button class="icon-button icon-button-small danger-hover" type="button" data-delete-word title="Delete word" aria-label="Delete word">${icon("trash")}</button>
           </td>
-        </tr>`;
+        </tr>${detailRowMarkup(word, opened, columnCount)}`;
     })
     .join("");
 
   container.innerHTML = `
+    <datalist id="word-pos-options">${POS_SUGGESTIONS.map((value) => `<option value="${esc(value)}"></option>`).join("")}</datalist>
+    <datalist id="word-status-options">${STATUS_SUGGESTIONS.map((value) => `<option value="${esc(value)}"></option>`).join("")}</datalist>
+    <datalist id="word-tag-options">${TAG_SUGGESTIONS.map((value) => `<option value="${esc(value)}"></option>`).join("")}</datalist>
     <div class="workspace-stack">
       <section class="section-intro">
         <div>
@@ -547,6 +646,18 @@ export function renderVocabulary(container, ctx) {
                   <option value="drafts">Drafts (no form)</option>
                   <option value="invalid">Phonotactics: invalid</option>
                   ${hasParent ? `<option value="differs">Inherited: differs</option>` : ""}
+                </select>
+                <select class="select lexicon-filter-select" data-word-pos-filter aria-label="Filter words by part of speech">
+                  <option value="">All parts of speech</option>
+                  ${filterOptions(words, "pos")
+                    .map((value) => `<option value="${esc(value)}"${lexiconFilter.pos === value ? " selected" : ""}>${esc(value)}</option>`)
+                    .join("")}
+                </select>
+                <select class="select lexicon-filter-select" data-word-status-meta-filter aria-label="Filter words by status">
+                  <option value="">All statuses</option>
+                  ${filterOptions(words, "status")
+                    .map((value) => `<option value="${esc(value)}"${lexiconFilter.wordStatus === value ? " selected" : ""}>${esc(value)}</option>`)
+                    .join("")}
                 </select>
                 <span class="lexicon-filter-count" data-filter-count></span>
               </div>
@@ -601,12 +712,15 @@ export function renderVocabulary(container, ctx) {
 
   const applyFilters = () => {
     const query = normalizeSearchText(lexiconFilter.text.trim());
-    const filtering = Boolean(query) || lexiconFilter.status !== "all";
+    const filtering =
+      Boolean(query) || lexiconFilter.status !== "all" || Boolean(lexiconFilter.pos) || Boolean(lexiconFilter.wordStatus);
     let visible = 0;
     container.querySelectorAll("[data-word-id]").forEach((row) => {
       const word = language.vocabulary.find((entry) => entry.id === row.dataset.wordId);
       if (!word) return;
-      const haystack = [word.gloss, word.form, word.note].map((value) => normalizeSearchText(value)).join(" ");
+      const haystack = normalizeSearchText(
+        [word.gloss, word.form, word.note, wordMetaText(word)].join(" ")
+      );
       const matchesText = !query || haystack.includes(query);
       const status = wordStatus(word);
       const statusFilter = lexiconFilter.status;
@@ -616,12 +730,17 @@ export function renderVocabulary(container, ctx) {
         (statusFilter === "drafts" && status === "draft") ||
         (statusFilter === "invalid" && status === "invalid") ||
         (statusFilter === "differs" && status === "differs");
-      const show = matchesText && matchesStatus;
+      const matchesPos = !lexiconFilter.pos || String(word.pos ?? "").trim() === lexiconFilter.pos;
+      const matchesWordStatus =
+        !lexiconFilter.wordStatus || String(word.status ?? "").trim() === lexiconFilter.wordStatus;
+      const show = matchesText && matchesStatus && matchesPos && matchesWordStatus;
       // Keep the row being edited visible: hiding it on the first keystroke
       // would drop focus mid-edit. Blur re-runs the filters and lets the row
       // disappear once the pointer or focus has left it.
       const editing = row.contains(document.activeElement);
       row.hidden = !show && !editing;
+      const detail = container.querySelector(`[data-word-detail-row="${CSS.escape(row.dataset.wordId)}"]`);
+      if (detail) detail.hidden = row.hidden;
       if (!row.hidden) visible += 1;
     });
     const count = container.querySelector("[data-filter-count]");
@@ -635,6 +754,9 @@ export function renderVocabulary(container, ctx) {
     // row is guaranteed visible (its empty fields match no text or status).
     lexiconFilter.text = "";
     lexiconFilter.status = "all";
+    lexiconFilter.pos = "";
+    lexiconFilter.wordStatus = "";
+    openWordId = null;
     const word = { id: uid("word"), gloss: "", form: "", note: "" };
     language.vocabulary.push(word);
     ctx.touch({ label: "Add word" });
@@ -666,6 +788,16 @@ export function renderVocabulary(container, ctx) {
     });
     statusSelect.addEventListener("change", () => {
       lexiconFilter.status = statusSelect.value;
+      applyFilters();
+    });
+    const posSelect = container.querySelector("[data-word-pos-filter]");
+    const metaStatusSelect = container.querySelector("[data-word-status-meta-filter]");
+    posSelect?.addEventListener("change", () => {
+      lexiconFilter.pos = posSelect.value;
+      applyFilters();
+    });
+    metaStatusSelect?.addEventListener("change", () => {
+      lexiconFilter.wordStatus = metaStatusSelect.value;
       applyFilters();
     });
     applyFilters();
@@ -817,6 +949,15 @@ export function renderVocabulary(container, ctx) {
         });
       }
     });
+    row.querySelector("[data-detail-toggle]")?.addEventListener("click", () => {
+      openWordId = openWordId === word.id ? null : word.id;
+      ctx.refresh();
+      window.setTimeout(() => {
+        document
+          .querySelector(`[data-word-id="${CSS.escape(word.id)}"] [data-detail-toggle]`)
+          ?.focus();
+      }, 0);
+    });
     row.querySelector("[data-trace-word]")?.addEventListener("click", () => {
       if (!word.gloss.trim() || !word.form.trim()) {
         toast("Give the word a gloss and an IPA form before tracing it.", { type: "info" });
@@ -840,6 +981,7 @@ export function renderVocabulary(container, ctx) {
       const index = language.vocabulary.indexOf(word);
       if (index < 0) return;
       const [removed] = language.vocabulary.splice(index, 1);
+      if (openWordId === word.id) openWordId = null;
       ctx.touch({ label: "Delete word" });
       ctx.refresh();
       toast("Word deleted.", {
@@ -858,6 +1000,95 @@ export function renderVocabulary(container, ctx) {
           },
         },
       });
+    });
+  });
+
+  // Detail panels use delegation on their own row, which is recreated on every
+  // render. Adding/removing list items edits the DOM in place so the focused
+  // input is never torn down mid-edit.
+  container.querySelectorAll("[data-word-detail-row]").forEach((detailRow) => {
+    const word = language.vocabulary.find((entry) => entry.id === detailRow.dataset.wordDetailRow);
+    if (!word) return;
+    const listInputs = (field) => [...detailRow.querySelectorAll(`[data-detail-list="${field}"]`)];
+    const labelFor = (field) => (field === "tags" ? "tag" : "sense");
+
+    detailRow.addEventListener("input", (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLElement)) return;
+      const field = input.dataset.detailField;
+      if (field) {
+        word[field] = input.value;
+        ctx.touch({ label: "Edit word details", coalesceKey: `wordmeta:${word.id}:${field}` });
+        return;
+      }
+      const list = input.dataset.detailList;
+      if (!list || !Array.isArray(word[list])) return;
+      const index = listInputs(list).indexOf(input);
+      if (index < 0) return;
+      word[list][index] = input.value;
+      ctx.touch({ label: "Edit word details", coalesceKey: `wordmeta:${word.id}:${list}` });
+    });
+
+    // Blur does not bubble, so capture it on the row. Trimming here keeps the
+    // stored JSON identical to normalization on the next load.
+    detailRow.addEventListener(
+      "blur",
+      (event) => {
+        const input = event.target;
+        if (!(input instanceof HTMLElement)) return;
+        const trimmed = input.value.trim();
+        if (trimmed === input.value) return;
+        const field = input.dataset.detailField;
+        if (field) {
+          input.value = trimmed;
+          word[field] = trimmed;
+          ctx.touch({ label: "Edit word details", coalesceKey: `wordmeta:${word.id}:${field}` });
+          return;
+        }
+        const list = input.dataset.detailList;
+        if (!list || !Array.isArray(word[list])) return;
+        const index = listInputs(list).indexOf(input);
+        if (index < 0) return;
+        input.value = trimmed;
+        word[list][index] = trimmed;
+        ctx.touch({ label: "Edit word details", coalesceKey: `wordmeta:${word.id}:${list}` });
+      },
+      true
+    );
+
+    detailRow.addEventListener("click", (event) => {
+      const add = event.target.closest?.("[data-detail-list-add]");
+      if (add && detailRow.contains(add)) {
+        const field = add.dataset.detailListAdd;
+        if (!Array.isArray(word[field])) word[field] = [];
+        word[field].push("");
+        const item = document.createElement("div");
+        item.className = "word-detail-list-item";
+        const label = field === "tags" ? "Tags / domains" : "Senses";
+        item.innerHTML = `
+          <input class="table-input" data-detail-list="${field}" value="" aria-label="${label}" autocomplete="off" spellcheck="false"${field === "tags" ? ' list="word-tag-options"' : ""}>
+          <button type="button" class="icon-button icon-button-small danger-hover" data-detail-list-remove="${field}" aria-label="Remove ${labelFor(field)}">${icon("trash")}</button>`;
+        add.parentElement.querySelector(".word-detail-list-items").appendChild(item);
+        ctx.touch({ label: "Add word detail", coalesceKey: `wordmeta:${word.id}:${field}` });
+        item.querySelector("input")?.focus();
+        return;
+      }
+      const remove = event.target.closest?.("[data-detail-list-remove]");
+      if (remove && detailRow.contains(remove)) {
+        const field = remove.dataset.detailListRemove;
+        const item = remove.closest(".word-detail-list-item");
+        const inputs = listInputs(field);
+        const input = item.querySelector(`[data-detail-list="${field}"]`);
+        const index = inputs.indexOf(input);
+        if (index < 0 || !Array.isArray(word[field])) return;
+        word[field].splice(index, 1);
+        const next =
+          item.nextElementSibling?.querySelector(`[data-detail-list="${field}"]`) ||
+          item.previousElementSibling?.querySelector(`[data-detail-list="${field}"]`);
+        item.remove();
+        ctx.touch({ label: "Remove word detail", coalesceKey: `wordmeta:${word.id}:${field}` });
+        next?.focus();
+      }
     });
   });
 }
