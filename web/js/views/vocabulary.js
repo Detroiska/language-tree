@@ -128,7 +128,7 @@ function detailRowMarkup(word, open, columnCount) {
   return `
     <tr class="word-detail-row" data-word-detail-row="${esc(word.id)}">
       <td colspan="${columnCount}">
-        <div class="word-detail">
+        <div class="word-detail" id="word-detail-${esc(word.id)}">
           <div class="word-detail-grid">
             <label class="word-detail-field">
               <span>Part of speech</span>
@@ -557,6 +557,12 @@ export function renderVocabulary(container, ctx) {
   const parent = parentFor(ctx);
   const hasParent = Boolean(parent);
   const words = language.vocabulary;
+  // A remembered POS/status filter may not exist in another language's
+  // lexicon; dropping it avoids silently hiding every word after a switch.
+  if (lexiconFilter.pos && !filterOptions(words, "pos").includes(lexiconFilter.pos)) lexiconFilter.pos = "";
+  if (lexiconFilter.wordStatus && !filterOptions(words, "status").includes(lexiconFilter.wordStatus)) {
+    lexiconFilter.wordStatus = "";
+  }
   const checker = createPhonotacticsChecker(language);
   let checks = 0;
   let matches = 0;
@@ -597,7 +603,7 @@ export function renderVocabulary(container, ctx) {
           ${hasParent ? `<td class="word-check" data-word-check>${checkCellMarkup(word, expectedFor(ctx, word, parent), checker)}</td>` : ""}
           <td class="word-note"><input class="table-input" data-word-field="note" value="${esc(word.note)}" placeholder="optional note" autocomplete="off" aria-label="Word note"></td>
           <td class="row-actions">
-            <button class="icon-button icon-button-small${opened ? " is-active" : ""}" type="button" data-detail-toggle aria-expanded="${opened}" title="Edit word details" aria-label="Edit word details">${icon("chevronDown")}</button>
+            <button class="icon-button icon-button-small${opened ? " is-active" : ""}" type="button" data-detail-toggle aria-expanded="${opened}" aria-controls="word-detail-${esc(word.id)}" title="Edit word details" aria-label="Edit word details">${icon("chevronDown")}</button>
             <button class="icon-button icon-button-small" type="button" data-trace-word title="Trace in the cognate explorer" aria-label="Trace in the cognate explorer">${icon("language")}</button>
             <button class="icon-button icon-button-small" type="button" data-copy-xsampa title="Copy X-SAMPA form" aria-label="Copy X-SAMPA form">${icon("copy")}</button>
             <button class="icon-button icon-button-small danger-hover" type="button" data-delete-word title="Delete word" aria-label="Delete word">${icon("trash")}</button>
