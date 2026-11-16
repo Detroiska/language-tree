@@ -1880,6 +1880,19 @@ equal(
   0
 );
 equal(
+  "a heavy antepenult is stressed when that position is selected",
+  stressIndexOf([wLight(0), wHeavy(1), wLight(2), wLight(3)], "weight", {
+    primary: "antepenult",
+    fallback: "initial",
+  }),
+  1
+);
+equal(
+  "weight stress can fall back to the penult",
+  stressIndexOf([wLight(0), wLight(1), wLight(2)], "weight", { primary: "penult", fallback: "penult" }),
+  1
+);
+equal(
   "weight stress can fall back to the final syllable",
   stressIndexOf([wLight(0), wLight(1), wLight(2)], "weight", { primary: "penult", fallback: "final" }),
   2

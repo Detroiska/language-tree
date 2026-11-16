@@ -17,6 +17,16 @@ import { CHECK_PAGE_SIZE, focusPager, pagerMarkup, paginate } from "../paging.js
 import { languageHref } from "../routes.js";
 import { setupToolTabs, toolPanelAttrs, toolTabsMarkup } from "../toolTabs.js";
 
+// Check-tool state lives outside the render so structural re-renders (for
+// example when the stress system changes) do not discard a typed test form.
+const checkMemory = new Map();
+function rememberCheck(languageId) {
+  if (!checkMemory.has(languageId)) {
+    checkMemory.set(languageId, { text: "", status: "all", page: 1 });
+  }
+  return checkMemory.get(languageId);
+}
+
 const CLASS_PRESETS = [
   { name: "N", label: "N · nasals", sounds: "m n ɲ ŋ" },
   { name: "G", label: "G · glides", sounds: "j w" },
@@ -340,6 +350,7 @@ function wordCheckMarkup(language, checker, results, { status = "all", page = 1 
 export function renderPhonotactics(container, ctx, activeTool = "template") {
   const { language } = ctx;
   const phonotactics = language.phonotactics;
+  const checkState = rememberCheck(language.id);
   let checker = createPhonotacticsChecker(language);
   const chartClasses = suggestClassRefs(checker.context.classIndex);
 
@@ -390,7 +401,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
               </header>
               <div class="phonotactics-test-body">
                 <label class="field-label" for="phonotactics-test-form">Form <span class="field-optional">IPA</span></label>
-                <input class="input ipa-input" id="phonotactics-test-form" data-phonotactics-test placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
+                <input class="input ipa-input" id="phonotactics-test-form" data-phonotactics-test value="${esc(checkState.text)}" placeholder="e.g. kasa" autocomplete="off" spellcheck="false">
                 <div data-phonotactics-test-result></div>
               </div>
             </section>
@@ -617,8 +628,8 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   const testResultElement = container.querySelector("[data-phonotactics-test-result]");
   const markStressButton = container.querySelector("[data-mark-stress]");
 
-  let wordCheckStatus = "all";
-  let wordCheckPage = 1;
+  let wordCheckStatus = checkState.status;
+  let wordCheckPage = checkState.page;
 
   const refresh = () => {
     checker = createPhonotacticsChecker(language);
@@ -631,6 +642,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
     });
     // A template or filter change can shrink the list under the current page.
     wordCheckPage = wordCheck.paging.page;
+    checkState.page = wordCheckPage;
     wordCheckElement.innerHTML = wordCheck.html;
     templateStatusElement.innerHTML = templateStatusMarkup(checker.compiled);
     templateFeedbackElement.innerHTML = templateFeedbackMarkup(checker.compiled);
@@ -642,6 +654,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
 
   const updateTest = () => {
     if (!testInput || !testResultElement) return;
+    checkState.text = testInput.value;
     testResultElement.innerHTML = testResultMarkup(checker.validate(testInput.value), checker.stress);
   };
 
@@ -830,6 +843,8 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
   container.querySelector("[data-phonotactics-word-status]")?.addEventListener("change", (event) => {
     wordCheckStatus = event.target.value;
     wordCheckPage = 1;
+    checkState.status = wordCheckStatus;
+    checkState.page = wordCheckPage;
     refresh();
   });
 
@@ -838,6 +853,7 @@ export function renderPhonotactics(container, ctx, activeTool = "template") {
     if (pageButton) {
       const action = pageButton.dataset.pagerAction;
       wordCheckPage = Number(pageButton.dataset.pagerPage);
+      checkState.page = wordCheckPage;
       refresh();
       focusPager(wordCheckElement, action);
       return;
