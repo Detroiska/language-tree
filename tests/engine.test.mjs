@@ -2051,6 +2051,24 @@ equal("legacy marks keep a single primary", stressMarksFromForm("ˈkaˈsa"), {
   secondary: [],
 });
 equal("a form without marks has no stress field", stressMarksFromForm("kasa"), null);
+// Marks at the end of a form or before a vowel inside a vowel run were
+// silently dropped: record() only ran when a new (unmarked) nucleus began.
+equal("a trailing primary mark migrates to the last syllable", stressMarksFromForm("kaˈ"), {
+  primary: 0,
+  secondary: [],
+});
+equal("a trailing secondary mark migrates", stressMarksFromForm("kaˌ"), {
+  primary: null,
+  secondary: [0],
+});
+equal("a mark before a vowel in a hiatus run migrates", stressMarksFromForm("kaiˈa"), {
+  primary: 2,
+  secondary: [],
+});
+equal("a mark before the second vowel of a run migrates", stressMarksFromForm("kaˈia"), {
+  primary: 1,
+  secondary: [],
+});
 
 const twoSyllables = [
   { start: 0, end: 2 },
