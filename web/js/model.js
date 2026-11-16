@@ -1,5 +1,6 @@
 import { stripLevelMarks, stripStressMarks } from "./notation.js";
 import { normalizeFeatureOverrides } from "./features.js";
+import { normalizeWordMeta } from "./lexicon.js";
 import {
   normalizeStressScope,
   normalizeStressSystem,
@@ -701,8 +702,11 @@ export function ensureProject(raw) {
             const fieldStress = normalizeWordStress(entry.stress);
             const stress = fieldStress || inlineStress;
             if (stress) stressNotation = true;
+            // Normalize only fields already present so legacy documents (and
+            // the tracked demo) round-trip without gaining thousands of keys.
+            const meta = normalizeWordMeta(entry);
             const word = {
-              ...entry,
+              ...meta,
               id: normalizeId(entry.id, wordIds, "word"),
               gloss: typeof entry.gloss === "string" ? entry.gloss : "",
               // A form pasted as /kasa/ or [kʰasa] is still one lexical form.

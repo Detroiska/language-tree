@@ -1681,6 +1681,68 @@ equal(
   { keep: true }
 );
 
+/* ---- lexicon metadata ---------------------------------------------------- */
+
+const metaProject = ensureProject({
+  title: "Lexicon metadata",
+  languages: [
+    {
+      id: "meta",
+      name: "Meta",
+      vocabulary: [
+        {
+          id: "full",
+          gloss: "house",
+          form: "kasa",
+          pos: "  noun  ",
+          senses: ["dwelling", "household", "  dwelling  ", "", 7],
+          tags: ["  dwelling ", "architecture", "DWELLING"],
+          status: " attested ",
+          source: " Wiktionary ",
+          etymology: "  from *kas-  ",
+          futureWordMeta: { keep: true },
+        },
+        { id: "bare", gloss: "bare", form: "ba" },
+        {
+          id: "malformed",
+          gloss: "malformed",
+          form: "ma",
+          pos: 42,
+          senses: "not an array",
+          tags: null,
+        },
+      ],
+    },
+  ],
+});
+const metaWords = metaProject.languages[0].vocabulary;
+equal("a legacy word gains no metadata fields on load", Object.hasOwn(metaWords[1], "pos"), false);
+equal(
+  "a legacy word keeps only its original keys",
+  Object.keys(metaWords[1]).sort(),
+  ["form", "gloss", "id", "note"]
+);
+equal(
+  "metadata strings are trimmed",
+  [metaWords[0].pos, metaWords[0].status, metaWords[0].source, metaWords[0].etymology],
+  ["noun", "attested", "Wiktionary", "from *kas-"]
+);
+equal(
+  "senses drop blanks, non-strings and case-insensitive duplicates",
+  metaWords[0].senses,
+  ["dwelling", "household"]
+);
+equal("tags are de-duplicated case-insensitively", metaWords[0].tags, ["dwelling", "architecture"]);
+equal("unknown metadata-bearing keys survive normalization", metaWords[0].futureWordMeta, { keep: true });
+equal("malformed scalar metadata is coerced to a string", metaWords[2].pos, "42");
+equal("malformed list metadata becomes an empty array", [metaWords[2].senses, metaWords[2].tags], [[], []]);
+const metaAgain = ensureProject(JSON.parse(JSON.stringify(metaProject)));
+equal(
+  "metadata normalization is idempotent",
+  metaAgain.languages[0].vocabulary[0].senses,
+  ["dwelling", "household"]
+);
+
 /* ---- id normalization ---------------------------------------------------- */
 
 const hostileId = 'x" onmouseover="alert(1) t="';
