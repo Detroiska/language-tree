@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-python server.py %*
+python server.py --port 8766 %*
