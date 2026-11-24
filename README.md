@@ -24,7 +24,7 @@ python server.py
 python3 server.py
 ```
 
-The app opens at <http://127.0.0.1:8765/>. Use `--no-browser` to suppress the browser launch, or `--port 9000` to choose another port.
+The app opens at <http://127.0.0.1:8765/> (`start.bat` on Windows defaults to <http://127.0.0.1:8766/>). Use `--no-browser` to suppress the browser launch, or `--port 9000` to choose another port.
 
 The repository ships with a demo family, `data/example_project.json`: a documented Classical Nahuatl root whose 221-word lexicon comes from the Wiktionary Classical Nahuatl lemmas, plus 22 speculative descendants in two branches (a Proto-Balto-Slavic-style branch and a Proto-Arabic-style branch) over three derived generations, ending in Lithuanian, Polish, Palestinian, Mahri and more. Russian Nahuatl carries a few lexical stress examples: `kali` “house” and `kali` “good” differ only by primary stress, and `lali` “hawk” adds secondary stress. Every `.json` file directly under `data/` is a project: use the project switcher in the top bar to list them, open one, or create a new one from a title and file name. A new project starts as a blank document, and the server remembers the active choice in the gitignored `data/.active-project`. Other project files, such as `data/personal_project.json`, are gitignored too, so personal families stay local; only `example_project.json` is tracked. You can also add a project by dropping its `.json` file into `data/` and picking it in the switcher.
 
