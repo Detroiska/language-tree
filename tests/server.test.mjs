@@ -1071,6 +1071,45 @@ try {
     "Hygiene base"
   );
 
+  // Retention must ignore zero-byte leftovers from interrupted writes. Seed one
+  // valid snapshot with more empty snapshot-named files than the cap, save once,
+  // and verify the leftovers do not evict the readable snapshot.
+  const residueFile = "residue.json";
+  const residueProject = { ...project, title: "Residue base" };
+  const residueText = `${JSON.stringify(residueProject, null, 2)}\n`;
+  writeFileSync(join(server.root, "data", residueFile), residueText);
+  const residueDir = join(server.root, "data", ".backups", residueFile);
+  mkdirSync(residueDir, { recursive: true });
+  const residueValid = "20260101T000000000000Z.json";
+  writeFileSync(join(residueDir, residueValid), residueText);
+  const residueOld = new Date(Date.now() - 11 * 60 * 1000);
+  utimesSync(join(residueDir, residueValid), residueOld, residueOld);
+  for (let index = 0; index < 20; index += 1) {
+    writeFileSync(join(residueDir, `20260102T000000${String(index).padStart(2, "0")}0000Z.json`), "");
+  }
+  const residueSave = await call(server, `/api/project?file=${residueFile}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...residueProject, title: "Residue saved" }),
+  });
+  equal("a project with many empty leftovers still saves", residueSave.status, 200);
+  equal(
+    "zero-byte leftovers do not evict the valid snapshot",
+    readdirSync(residueDir).includes(residueValid),
+    true
+  );
+  const residueListing = await call(server, `/api/snapshots?file=${residueFile}`);
+  equal(
+    "zero-byte leftovers do not consume the retention cap",
+    residueListing.json?.snapshots?.length,
+    2
+  );
+  equal(
+    "the older valid snapshot is still readable",
+    (await call(server, `/api/snapshots?file=${residueFile}&name=${residueValid}`)).json?.title,
+    "Residue base"
+  );
+
   // A restore must not proceed if the pre-restore backup fails: the live file
   // would otherwise be the only copy. Root can read a mode-000 file, so this
   // check only runs as a normal POSIX user; Windows ACLs do not map onto chmod.

@@ -303,16 +303,23 @@ def read_snapshot(name: str, snapshot: str) -> dict:
 
 def prune_snapshots(directory: Path) -> None:
     """Keep the newest SNAPSHOT_KEEP snapshots; ignore files we do not own."""
-    entries = sorted(
-        (
-            entry
-            for entry in directory.iterdir()
-            if SNAPSHOT_NAME_PATTERN.fullmatch(entry.name)
-            and not entry.is_symlink()
-            and entry.is_file()
-        ),
-        key=lambda entry: entry.name,
-    )
+    entries = []
+    for entry in directory.iterdir():
+        if not SNAPSHOT_NAME_PATTERN.fullmatch(entry.name):
+            continue
+        if entry.is_symlink() or not entry.is_file():
+            continue
+        try:
+            stat = entry.stat()
+        except OSError:
+            continue
+        # A zero-byte file from an interrupted write is not a snapshot and must
+        # not count toward the cap: enough leftovers would otherwise evict every
+        # readable snapshot. This matches the listing and interval policy.
+        if stat.st_size == 0:
+            continue
+        entries.append(entry)
+    entries.sort(key=lambda entry: entry.name)
     for entry in entries[:-SNAPSHOT_KEEP]:
         try:
             entry.unlink()
