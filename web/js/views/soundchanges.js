@@ -502,17 +502,28 @@ function libraryGroupsMarkup(language) {
             ? `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" disabled title="${esc(insertedTitle)}">Inserted</button>`
             : `<button class="button button-quiet button-small" type="button" data-insert-laws="${esc(group.id)}" title="${esc(insertedTitle)}">${icon("plus")}Insert ${missingCount} ${missingCount === 1 ? "rule" : "rules"}</button>`;
         return `
-          <p class="field-label">${esc(group.name)}<span class="field-optional">${esc(group.tag)}</span></p>
-          <p class="rule-exception-hint">${esc(group.description)}</p>
-          ${insertButton}
-          <ul class="help-list">
-            ${group.rules
-              .map((rule) => `<li><code>${esc(rule.notation)}</code><span>${esc(rule.note)}</span></li>`)
-              .join("")}
-          </ul>`;
+          <section class="library-group" aria-labelledby="library-group-${esc(group.id)}">
+            <header class="library-group-head">
+              <div class="library-group-copy">
+                <h3 class="library-group-title" id="library-group-${esc(group.id)}">${esc(group.name)}<span class="library-group-tag">${esc(group.tag)}</span></h3>
+                <p class="library-group-description">${esc(group.description)}</p>
+              </div>
+              ${insertButton}
+            </header>
+            <ul class="library-rule-list">
+              ${group.rules
+                .map(
+                  (rule) =>
+                    `<li class="library-rule"><code class="library-notation">${esc(rule.notation)}</code>${
+                      rule.detail ? `<span class="library-detail">${esc(rule.detail)}</span>` : ""
+                    }</li>`
+                )
+                .join("")}
+            </ul>
+          </section>`;
       })
       .join("")}
-    <p class="help-foot">Groups insert as disabled rules into this language’s sound changes. They are illustrative, not universal — review each rule against your inventory’s sounds and chart labels before enabling.</p>`;
+    <p class="library-foot">Groups insert as disabled rules into this language’s sound changes. They are illustrative, not universal — review each rule against your inventory’s sounds and chart labels before enabling.</p>`;
 }
 
 function openRuleLibrary(language, ctx) {

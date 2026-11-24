@@ -6109,7 +6109,11 @@ for (const group of soundChangeLibrary) {
     `${group.name} ships with a description and complete rules`,
     typeof group.description === "string" &&
       group.description.length > 0 &&
-      group.rules.every((rule) => rule.notation && rule.note)
+      group.rules.every(
+        (rule) =>
+          rule.notation &&
+          (rule.detail === undefined || (typeof rule.detail === "string" && rule.detail.length > 0))
+      )
   );
   const drafts = newLibraryRules(group);
   equal(`${group.name} inserts one draft per rule`, drafts.length, group.rules.length);
@@ -6117,8 +6121,9 @@ for (const group of soundChangeLibrary) {
   truthy(`${group.name} draft ids are unique`, new Set(draftIds).size === draftIds.length);
   // Imported groups must behave like anything the tab assembles by hand but
   // stay inert: disabled drafts that never apply before they are reviewed.
+  // The note is the group label alone unless the library has a real caveat.
   truthy(
-    `${group.name} drafts import disabled with illustrative notes`,
+    `${group.name} drafts import disabled and labeled with their source`,
     drafts.every(
       (draft, i) =>
         draft.enabled === false &&
@@ -6126,8 +6131,10 @@ for (const group of soundChangeLibrary) {
         draft.rate === DEFAULT_RULE_RATE &&
         draft.parentId === null &&
         draft.notation === group.rules[i].notation &&
-        draft.note.includes(group.name) &&
-        draft.note.includes("(illustrative)")
+        draft.note ===
+          (group.rules[i].detail
+            ? `${group.name} (illustrative): ${group.rules[i].detail}`
+            : `${group.name} (illustrative)`)
     )
   );
 }
